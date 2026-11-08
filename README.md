@@ -9,9 +9,20 @@ A fast, native music player written in Rust. It streams free, full-length music 
 - A queue with shuffle, repeat and "play next"
 - Songs start playing while they download, and you can jump anywhere in them
 
+## Download
+
+Pulse is a single file: **`pulse.exe`**. There's no installer and nothing else to download.
+Double-click it and it opens. It works on any 64-bit Windows 10 or 11 PC, even without a
+graphics card driver.
+
+- The first time you open it, Windows may show **"Windows protected your PC"**. That appears
+  for any new app that isn't signed with a paid certificate. Click **More info → Run anyway**.
+- Your likes, playlists and settings are saved in `%APPDATA%\pulse-player`.
+- To remove Pulse, delete `pulse.exe` (and that folder, if you want your data gone too).
+
 ---
 
-## Running it on Windows (first time)
+## Building it yourself (developers only)
 
 ### 1. Install Rust
 

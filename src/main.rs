@@ -9,7 +9,8 @@ mod ui;
 mod widgets;
 
 fn main() -> eframe::Result {
-    let options = eframe::NativeOptions {
+    #[allow(unused_mut)]
+    let mut options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("Pulse")
             .with_app_id("pulse-player")
@@ -18,7 +19,24 @@ fn main() -> eframe::Result {
             .with_icon(app_icon()),
         ..Default::default()
     };
+    #[cfg(windows)]
+    use_directx(&mut options);
     eframe::run_native("Pulse", options, Box::new(|cc| Ok(Box::new(app::App::new(cc)))))
+}
+
+/// Windows only: draw with DirectX 12 instead of OpenGL, so Pulse opens on any
+/// Windows 10/11 PC, even one without a proper graphics driver (wgpu then uses
+/// Windows' built-in software renderer).
+#[cfg(windows)]
+fn use_directx(options: &mut eframe::NativeOptions) {
+    use eframe::egui_wgpu::{WgpuSetup, WgpuSetupCreateNew, wgpu};
+    options.renderer = eframe::Renderer::Wgpu;
+    let mut setup = WgpuSetupCreateNew::without_display_handle();
+    // A music player doesn't need the gaming GPU: prefer the battery-friendly one.
+    setup.power_preference = wgpu::PowerPreference::LowPower;
+    // The shader compiler built into Windows, so no extra DLL has to ship with the .exe.
+    setup.instance_descriptor.backend_options.dx12.shader_compiler = wgpu::Dx12Compiler::Fxc;
+    options.wgpu_options.wgpu_setup = WgpuSetup::CreateNew(setup);
 }
 
 /// Draws the window icon in code: a violet rounded square with sound bars.
