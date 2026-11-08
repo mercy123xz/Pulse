@@ -323,6 +323,11 @@ pub struct App {
     /// The song last given to the audio engine as "next" (None = not told yet).
     told_next: Option<Option<String>>,
 
+    // themes
+    pub themes: Vec<crate::themes::Theme>,
+    theme_watch: Option<(notify::RecommendedWatcher, Receiver<()>)>,
+    theme_changed_at: Option<f64>,
+
     // local files
     pub local_files: Vec<Track>,
     pub local_scanning: bool,
@@ -346,7 +351,7 @@ impl App {
         egui_extras::install_image_loaders(&cc.egui_ctx);
 
         let saved: Saved = cc.storage.and_then(|s| eframe::get_value(s, STORAGE_KEY)).unwrap_or_default();
-        crate::theme::apply(&cc.egui_ctx, saved.light_mode, saved.settings.high_contrast);
+        let themes = crate::themes::list();
         crate::i18n::set_language(saved.settings.language);
         let (tx, rx) = channel();
         let audio = AudioEngine::new();
@@ -391,6 +396,9 @@ impl App {
             credits_rx: None,
             cache_size: None,
             told_next: None,
+            themes,
+            theme_watch: crate::themes::watch(&cc.egui_ctx),
+            theme_changed_at: None,
             local_files: vec![],
             local_scanning: false,
             local_rx: None,
@@ -401,6 +409,11 @@ impl App {
             genre_rx: None,
             genre_pending: HashSet::new(),
         };
+        // Pulse 0.2 had only a light/dark switch: carry it over to the Default theme.
+        if app.saved.light_mode && app.saved.settings.theme == "Default" && app.saved.settings.scheme.is_empty() {
+            app.saved.settings.scheme = "Light".into();
+        }
+        app.apply_theme(&cc.egui_ctx);
         // Forget downloads whose files were deleted outside Pulse.
         app.saved.downloads.retain(|_, path| path.is_file());
         app.audio.set_effects(crate::audio::Effects::from_settings(&app.saved.settings));
@@ -517,6 +530,7 @@ impl App {
     /// moves on to the next song when one ends.
     pub fn tick(&mut self, ctx: &egui::Context) {
         self.receive_credits();
+        self.reload_themes_if_changed(ctx);
         self.run_downloads(ctx);
         if let Some(rx) = &self.local_rx
             && let Ok(list) = rx.try_recv()
@@ -813,8 +827,59 @@ impl App {
     }
 
     pub fn toggle_theme(&mut self, ctx: &egui::Context) {
-        self.saved.light_mode = !self.saved.light_mode;
-        crate::theme::apply(ctx, self.saved.light_mode, self.saved.settings.high_contrast);
+        // Switch to the theme's other scheme: dark ↔ light.
+        let Some(t) = self.current_theme() else { return };
+        let cur = t.scheme_index(&self.saved.settings.scheme);
+        let want_light = !crate::themes::is_light(&t.schemes[cur].palette);
+        if let Some(s) = t.schemes.iter().find(|s| crate::themes::is_light(&s.palette) == want_light) {
+            self.saved.settings.scheme = s.name.clone();
+            self.saved.light_mode = want_light;
+        }
+        self.apply_theme(ctx);
+    }
+
+    pub fn current_theme(&self) -> Option<&crate::themes::Theme> {
+        let name = &self.saved.settings.theme;
+        self.themes.iter().find(|t| t.name.eq_ignore_ascii_case(name)).or_else(|| self.themes.first())
+    }
+
+    /// True if the current theme has both a dark and a light scheme.
+    pub fn theme_has_light_and_dark(&self) -> bool {
+        self.current_theme().is_some_and(|t| {
+            let light = t.schemes.iter().filter(|s| crate::themes::is_light(&s.palette)).count();
+            light > 0 && light < t.schemes.len()
+        })
+    }
+
+    /// Applies the chosen theme, scheme and high-contrast setting.
+    pub fn apply_theme(&mut self, ctx: &egui::Context) {
+        let Some(t) = self.current_theme() else { return };
+        let active = t.active(t.scheme_index(&self.saved.settings.scheme), self.saved.settings.high_contrast);
+        self.saved.light_mode = crate::themes::is_light(&active.palette);
+        crate::theme::set_active(ctx, active);
+    }
+
+    /// Reloads themes after a theme file changed (a moment after the last change).
+    fn reload_themes_if_changed(&mut self, ctx: &egui::Context) {
+        let now = ctx.input(|i| i.time);
+        if let Some((_, rx)) = &self.theme_watch {
+            let mut changed = false;
+            while rx.try_recv().is_ok() {
+                changed = true;
+            }
+            if changed {
+                self.theme_changed_at = Some(now);
+            }
+        }
+        if let Some(at) = self.theme_changed_at {
+            if now - at > 0.25 {
+                self.theme_changed_at = None;
+                self.themes = crate::themes::list();
+                self.apply_theme(ctx);
+            } else {
+                ctx.request_repaint_after(Duration::from_millis(100));
+            }
+        }
     }
 
     // ---------------------------------------------------------------- settings
@@ -823,8 +888,8 @@ impl App {
     pub fn apply_settings(&mut self, before: &crate::settings::Settings, ctx: &egui::Context) {
         let s = self.saved.settings.clone();
         crate::i18n::set_language(s.language);
-        if s.high_contrast != before.high_contrast {
-            crate::theme::apply(ctx, self.saved.light_mode, s.high_contrast);
+        if s.high_contrast != before.high_contrast || s.theme != before.theme || s.scheme != before.scheme {
+            self.apply_theme(ctx);
         }
         if s.hardware_acceleration != before.hardware_acceleration {
             crate::settings::set_hardware_acceleration(s.hardware_acceleration);
@@ -893,10 +958,8 @@ impl App {
         // A new name each time, so the old picture isn't shown from memory.
         let dest = dir.join(format!("playlist-{}-{}.{ext}", i, now_unix()));
         std::fs::copy(picture, &dest).map_err(|e| format!("Couldn't copy the picture ({e})"))?;
-        if let Some(p) = self.saved.playlists.get_mut(i) {
-            if let Some(old) = p.cover.replace(dest) {
-                let _ = std::fs::remove_file(old);
-            }
+        if let Some(old) = self.saved.playlists.get_mut(i).and_then(|p| p.cover.replace(dest)) {
+            let _ = std::fs::remove_file(old);
         }
         Ok(())
     }

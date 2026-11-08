@@ -25,6 +25,8 @@ rand = "0.9"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 sha2 = "0.10"
 lofty = "0.22"
+toml = "0.9"
+notify = "8"
 
 # On Windows, draw with DirectX 12 (through wgpu) instead of OpenGL. DirectX 12 is built
 # into every Windows 10/11 PC, and it falls back to software drawing when a PC has no

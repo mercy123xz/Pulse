@@ -1,0 +1,6 @@
+name = "Blossom"
+author = "Pulse"
+description = "Soft rose colors, round corners and a big cover in the sidebar."
+
+[layout]
+now_playing_art = "sidebar-large"

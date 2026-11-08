@@ -144,7 +144,11 @@ pub fn play_button(ui: &mut Ui, size: f32, playing: bool) -> Response {
     // Hover is shown by the grow animation only: white on the lighter accent is too faint.
     let t = ui.ctx().animate_bool(resp.id, resp.hovered());
     let r = size / 2.0 * (1.0 + 0.05 * t);
-    ui.painter().circle_filled(rect.center(), r, pal().accent);
+    let style = &parts().play_button;
+    ui.painter().circle_filled(rect.center(), r, style.fill.unwrap_or(pal().accent));
+    if let Some(b) = style.border {
+        ui.painter().circle_stroke(rect.center(), r, b);
+    }
     let glyph = if playing { icon::PAUSE } else { icon::PLAY };
     let nudge = if playing { 0.0 } else { size * 0.04 };
     ui.painter().text(
@@ -152,7 +156,7 @@ pub fn play_button(ui: &mut Ui, size: f32, playing: bool) -> Response {
         Align2::CENTER_CENTER,
         glyph,
         filled_icon(size * 0.42),
-        Color32::WHITE,
+        style.color.unwrap_or(Color32::WHITE),
     );
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
@@ -277,12 +281,19 @@ pub fn card(ui: &mut Ui, w: f32, info: &CardInfo) -> CardClick {
     let (rect, resp) = ui.allocate_exact_size(vec2(w, h), Sense::click());
     a11y(ui, &resp, WidgetType::Button, || format!("{}, {}", info.title, info.subtitle));
     let hovered = resp.hovered();
+    let style = &parts().card;
+    let radius = style.radius.map(CornerRadius::same).unwrap_or(r_lg());
     if hovered {
-        ui.painter().rect_filled(rect, R_LG, pal().surface_hover);
+        ui.painter().rect_filled(rect, radius, pal().surface_hover);
+    } else if let Some(fill) = style.fill {
+        ui.painter().rect_filled(rect, radius, fill);
     }
-    let pad = 10.0;
+    if let Some(b) = style.border {
+        ui.painter().rect_stroke(rect, radius, b, egui::StrokeKind::Inside);
+    }
+    let pad = style.padding.unwrap_or(10.0);
     let art_rect = Rect::from_min_size(rect.min + vec2(pad, pad), Vec2::splat(w - pad * 2.0));
-    let radius = if info.round { CornerRadius::same(((w - pad * 2.0) / 2.0).min(255.0) as u8) } else { R_MD };
+    let radius = if info.round { CornerRadius::same(((w - pad * 2.0) / 2.0).min(255.0) as u8) } else { r_md() };
     artwork(ui, art_rect, info.art, radius);
 
     let text_w = w - pad * 2.0;
@@ -299,8 +310,9 @@ pub fn card(ui: &mut Ui, w: f32, info: &CardInfo) -> CardClick {
         a11y(ui, &b, WidgetType::Button, || format!("Play {}", info.title));
         let grow = if b.hovered() { 1.06 } else { 1.0 };
         ui.painter().circle_filled(c + vec2(0.0, 3.0), 22.0, Color32::from_black_alpha((90.0 * t) as u8));
-        ui.painter().circle_filled(c, 21.0 * grow, pal().accent.gamma_multiply(t));
-        ui.painter().text(c + vec2(1.5, 0.0), Align2::CENTER_CENTER, icon::PLAY, filled_icon(17.0), Color32::WHITE.gamma_multiply(t));
+        let pb = &parts().play_button;
+        ui.painter().circle_filled(c, 21.0 * grow, pb.fill.unwrap_or(pal().accent).gamma_multiply(t));
+        ui.painter().text(c + vec2(1.5, 0.0), Align2::CENTER_CENTER, icon::PLAY, filled_icon(17.0), pb.color.unwrap_or(Color32::WHITE).gamma_multiply(t));
         if b.clicked() {
             out = CardClick::Play;
         }
@@ -570,10 +582,15 @@ fn track_row(ui: &mut Ui, id: egui::Id, i: usize, t: &Track, cx: &TableCtx, ev: 
     }
     let is_current = cx.now_playing == Some(t.id.as_str());
     let hovered = resp.hovered() || resp.context_menu_opened() || resp.has_focus();
+    let style = &parts().track_row;
+    let radius = style.radius.map(CornerRadius::same).unwrap_or(r_md());
     if hovered {
-        ui.painter().rect_filled(rect, R_MD, pal().surface_hover);
+        ui.painter().rect_filled(rect, radius, style.fill.unwrap_or(pal().surface_hover));
     } else if is_current {
-        ui.painter().rect_filled(rect, R_MD, pal().accent.gamma_multiply(0.08));
+        ui.painter().rect_filled(rect, radius, pal().accent.gamma_multiply(0.08));
+    }
+    if let Some(b) = style.border {
+        ui.painter().hline(rect.x_range(), rect.bottom() - 0.5, b);
     }
     let c = columns(rect, cx.added.is_some());
 

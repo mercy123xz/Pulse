@@ -1,0 +1,6 @@
+name = "Dreary Mono"
+author = "Pulse"
+description = "Greyscale, square corners, capital-letter titles, controls on the left."
+
+[layout]
+player = "controls-left"

@@ -7,6 +7,7 @@ use crate::settings::{EQ_BANDS, EQ_MAX_DB, EQ_PRESETS, Language, Quality, fmt_by
 use crate::theme::*;
 use crate::widgets::*;
 use egui::{Align, Align2, Color32, CornerRadius, Layout, Rect, RichText, Sense, Stroke, Ui, Vec2, pos2, vec2};
+use egui_phosphor::regular as icon;
 
 pub fn settings_page(app: &mut App, ui: &mut Ui) {
     let ctx = ui.ctx().clone();
@@ -29,6 +30,9 @@ pub fn settings_page(app: &mut App, ui: &mut Ui) {
                 }
             });
     });
+
+    // ------------------------------------------------------------ Themes
+    themes_section(app, ui);
 
     // ------------------------------------------------------------ Autoplay
     section(ui, tr("Autoplay"));
@@ -132,6 +136,119 @@ pub fn settings_page(app: &mut App, ui: &mut Ui) {
     }
 }
 
+/// Theme picker: a preview card per theme, the color scheme, and theme-folder tools.
+fn themes_section(app: &mut App, ui: &mut Ui) {
+    section(ui, tr("Themes"));
+    let current = app.current_theme().map(|t| t.name.clone()).unwrap_or_default();
+    let mut pick = None;
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = vec2(12.0, 12.0);
+        for t in &app.themes {
+            let selected = t.name == current;
+            let (rect, resp) = ui.allocate_exact_size(vec2(176.0, 136.0), Sense::click());
+            resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::RadioButton, true, selected, &t.name));
+            focus_ring(ui, &resp);
+            let scheme = if selected { t.scheme_index(&app.saved.settings.scheme) } else { 0 };
+            swatch(ui, Rect::from_min_size(rect.min, vec2(176.0, 100.0)), &t.schemes[scheme].palette);
+            let border = if selected { Stroke::new(2.5, pal().accent_soft) } else if resp.hovered() { Stroke::new(1.0, pal().text_muted) } else { Stroke::new(1.0, pal().border) };
+            ui.painter().rect_stroke(Rect::from_min_size(rect.min, vec2(176.0, 100.0)), r_md(), border, egui::StrokeKind::Outside);
+            let name = if t.builtin { t.name.clone() } else { format!("{}  ·  {}", t.name, tr("custom")) };
+            paint_line(ui, pos2(rect.left() + 2.0, rect.top() + 108.0), &name, med(13.0), pal().text, 172.0);
+            let n = t.schemes.len();
+            let sub = if n == 1 { "1 scheme".to_string() } else { format!("{n} schemes") };
+            paint_line(ui, pos2(rect.left() + 2.0, rect.top() + 124.0), &sub, regular(11.5), pal().text_muted, 172.0);
+            if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() && !selected {
+                pick = Some(t.name.clone());
+            }
+        }
+    });
+    if let Some(name) = pick {
+        app.saved.settings.theme = name;
+        app.saved.settings.scheme.clear();
+    }
+    ui.add_space(10.0);
+
+    let Some(t) = app.current_theme().cloned() else { return };
+    if !t.description.is_empty() || !t.author.is_empty() {
+        let by = if t.author.is_empty() { String::new() } else { format!("{} {}. ", tr("By"), t.author) };
+        ui.label(RichText::new(format!("{by}{}", t.description)).font(regular(12.5)).color(pal().text_muted));
+        ui.add_space(6.0);
+    }
+    let s = &mut app.saved.settings;
+    row(ui, tr("Color scheme"), tr("Each theme can have several color schemes."), |ui| {
+        let cur = t.scheme_index(&s.scheme);
+        egui::ComboBox::from_id_salt("scheme").selected_text(&t.schemes[cur].name).width(170.0).show_ui(ui, |ui| {
+            for (i, sc) in t.schemes.iter().enumerate() {
+                if ui.selectable_label(i == cur, &sc.name).clicked() {
+                    s.scheme = sc.name.clone();
+                }
+            }
+        });
+    });
+    let dir = crate::themes::themes_dir();
+    row(ui, tr("Theme files"), &format!("{} {}", tr("Add your own themes here. Pulse reloads a theme as soon as you save it:"), dir.display()), |ui| {
+        if ui.button(tr("Open themes folder")).clicked() {
+            let _ = std::fs::create_dir_all(&dir);
+            open_folder(ui.ctx(), &dir);
+        }
+        if t.builtin && ui.button(tr("Make a copy")).on_hover_text(tr("Copies this theme into the themes folder so you can edit it.")).clicked() {
+            match crate::themes::copy_builtin(&t.name) {
+                Ok(copy) => open_folder(ui.ctx(), &copy),
+                Err(e) => {
+                    ui.ctx().copy_text(e);
+                }
+            }
+        }
+    });
+    if let Some(folder) = &t.folder {
+        ui.label(RichText::new(folder.display().to_string()).font(regular(11.5)).color(pal().text_faint));
+    }
+    if !t.warnings.is_empty() {
+        egui::CollapsingHeader::new(RichText::new(format!("{} {} ({})", icon::WARNING, tr("Theme notes"), t.warnings.len())).color(pal().text_muted))
+            .id_salt("theme_warnings")
+            .show(ui, |ui| {
+                for w in &t.warnings {
+                    ui.label(RichText::new(format!("• {w}")).font(regular(12.0)).color(pal().text_muted));
+                }
+            });
+    }
+}
+
+/// A tiny picture of a theme: sidebar, page, a card, a song row and the accent.
+fn swatch(ui: &Ui, r: Rect, p: &crate::theme::Palette) {
+    let painter = ui.painter();
+    painter.rect_filled(r, r_md(), p.bg);
+    let side = Rect::from_min_size(r.min, vec2(44.0, r.height()));
+    painter.rect_filled(side, CornerRadius { nw: r_md().nw, sw: r_md().sw, ne: 0, se: 0 }, p.sidebar);
+    for k in 0..3 {
+        let y = r.top() + 16.0 + k as f32 * 12.0;
+        let col = if k == 0 { p.accent_soft } else { p.text_muted };
+        painter.rect_filled(Rect::from_min_size(pos2(side.left() + 8.0, y), vec2(26.0, 5.0)), CornerRadius::same(2), col);
+    }
+    let player = Rect::from_min_max(pos2(r.left(), r.bottom() - 18.0), r.max);
+    painter.rect_filled(player, CornerRadius { nw: 0, ne: 0, sw: r_md().sw, se: r_md().se }, p.player);
+    painter.circle_filled(player.center(), 5.0, p.text);
+    let card = Rect::from_min_size(pos2(side.right() + 10.0, r.top() + 10.0), vec2(48.0, 52.0));
+    painter.rect_filled(card, CornerRadius::same(4), p.surface);
+    painter.rect_filled(Rect::from_min_size(card.min + vec2(5.0, 5.0), vec2(38.0, 28.0)), CornerRadius::same(3), p.accent.gamma_multiply(0.7));
+    painter.rect_filled(Rect::from_min_size(card.min + vec2(5.0, 38.0), vec2(30.0, 4.0)), CornerRadius::same(2), p.text);
+    let row = Rect::from_min_size(pos2(card.right() + 8.0, r.top() + 14.0), vec2(r.right() - card.right() - 16.0, 14.0));
+    painter.rect_filled(row, CornerRadius::same(3), p.surface_hover);
+    painter.rect_filled(Rect::from_min_size(row.min + vec2(4.0, 4.5), vec2(row.width() * 0.6, 5.0)), CornerRadius::same(2), p.text);
+    painter.rect_filled(Rect::from_min_size(pos2(row.left() + 4.0, row.bottom() + 8.0), vec2(row.width() * 0.45, 5.0)), CornerRadius::same(2), p.text_muted);
+    painter.circle_filled(pos2(r.right() - 16.0, card.bottom() - 6.0), 9.0, p.accent);
+}
+
+fn open_folder(ctx: &egui::Context, dir: &std::path::Path) {
+    #[cfg(windows)]
+    {
+        let _ = ctx;
+        let _ = std::process::Command::new("explorer").arg(dir).spawn();
+    }
+    #[cfg(not(windows))]
+    ctx.open_url(egui::OpenUrl::new_tab(format!("file://{}", dir.display())));
+}
+
 fn section(ui: &mut Ui, title: &str) {
     ui.add_space(22.0);
     ui.label(RichText::new(title).font(heavy(17.0)).color(pal().text));
@@ -179,7 +296,7 @@ pub fn switch(ui: &mut Ui, on: &mut bool, label: &str) -> egui::Response {
 
 /// The equalizer: preset picker and a curve with one draggable point per band.
 fn equalizer_editor(ui: &mut Ui, s: &mut crate::settings::Settings) {
-    let frame = egui::Frame::new().fill(pal().surface).corner_radius(R_LG).inner_margin(18.0);
+    let frame = egui::Frame::new().fill(pal().surface).corner_radius(r_lg()).inner_margin(18.0);
     frame.show(ui, |ui| {
         ui.horizontal(|ui| {
             ui.label(RichText::new(tr("Presets")).font(med(13.0)).color(pal().text_muted));
