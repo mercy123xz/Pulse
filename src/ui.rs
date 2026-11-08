@@ -14,41 +14,67 @@ use egui_phosphor::regular as icon;
 pub fn draw(app: &mut App, ui: &mut Ui) {
     let ctx = ui.ctx().clone();
     shortcuts(app, &ctx);
+    let lay = *layout();
+    let pt = parts();
 
-    egui::Panel::bottom("player")
+    let player_fill = pt.player_bar.fill.unwrap_or(pal().player);
+    let player = egui::Panel::bottom("player")
         .exact_size(88.0)
-        .frame(Frame::new().fill(pal().sidebar).stroke(Stroke::new(1.0, pal().border)).inner_margin(Margin::symmetric(16, 0)))
+        .frame(Frame::new().fill(player_fill).inner_margin(Margin::symmetric(pt.player_bar.padding.unwrap_or(16.0) as i8, 0)))
         .show_separator_line(false)
         .show(ui, |ui| player_bar(app, ui));
+    let top_line = pt.player_bar.border.unwrap_or(Stroke::new(1.0, pal().border));
+    ui.painter().hline(player.response.rect.x_range(), player.response.rect.top(), top_line);
 
-    egui::Panel::left("sidebar")
-        .exact_size(240.0)
+    let compact = lay.sidebar == crate::theme::SidebarStyle::Icons;
+    let sidebar_fill = pt.sidebar.fill.unwrap_or(pal().sidebar);
+    let pad = pt.sidebar.padding.unwrap_or(12.0) as i8;
+    let side = egui::Panel::left("sidebar")
+        .exact_size(if compact { 76.0 } else { 240.0 })
         .resizable(false)
-        .frame(Frame::new().fill(pal().sidebar).inner_margin(Margin { left: 12, right: 12, top: 18, bottom: 12 }))
+        .frame(Frame::new().fill(sidebar_fill).inner_margin(Margin { left: pad, right: pad, top: 18, bottom: 12 }))
         .show_separator_line(false)
         .show(ui, |ui| sidebar(app, ui));
+    if let Some(b) = pt.sidebar.border {
+        ui.painter().vline(side.response.rect.right(), side.response.rect.y_range(), b);
+    }
 
-    egui::Panel::top("topbar")
-        .exact_size(60.0)
-        .frame(Frame::new().fill(pal().bg).inner_margin(Margin::symmetric(24, 0)))
-        .show_separator_line(false)
-        .show(ui, |ui| top_bar(app, ui));
-
-    egui::CentralPanel::default()
-        .frame(Frame::new().fill(pal().bg))
-        .show(ui, |ui| {
-            egui::ScrollArea::vertical()
-                .id_salt(("page", format!("{:?}", app.route)))
-                .auto_shrink(false)
-                .show(ui, |ui| {
-                    Frame::new().inner_margin(Margin { left: 28, right: 28, top: 4, bottom: 32 }).show(ui, |ui| {
-                        page(app, ui);
-                    });
+    let header_fill = pt.header.fill.unwrap_or(pal().bg);
+    if lay.inset {
+        // The main area floats as a rounded panel; the window behind it uses the sidebar color.
+        egui::CentralPanel::default().frame(Frame::new().fill(sidebar_fill).inner_margin(Margin { left: 0, right: 8, top: 8, bottom: 8 })).show(ui, |ui| {
+            Frame::new().fill(pal().bg).corner_radius(r_lg()).show(ui, |ui| {
+                ui.set_min_size(ui.available_size());
+                Frame::new().fill(pt.header.fill.unwrap_or(Color32::TRANSPARENT)).corner_radius(r_lg()).inner_margin(Margin::symmetric(24, 0)).show(ui, |ui| {
+                    ui.set_height(60.0);
+                    ui.set_width(ui.available_width());
+                    top_bar(app, ui);
                 });
+                main_scroll(app, ui);
+            });
         });
+    } else {
+        egui::Panel::top("topbar")
+            .exact_size(60.0)
+            .frame(Frame::new().fill(header_fill).inner_margin(Margin::symmetric(24, 0)))
+            .show_separator_line(false)
+            .show(ui, |ui| top_bar(app, ui));
+        egui::CentralPanel::default().frame(Frame::new().fill(pal().bg)).show(ui, |ui| main_scroll(app, ui));
+    }
 
     dialogs(app, &ctx);
     toast(app, &ctx);
+}
+
+fn main_scroll(app: &mut App, ui: &mut Ui) {
+    egui::ScrollArea::vertical()
+        .id_salt(("page", format!("{:?}", app.route)))
+        .auto_shrink(false)
+        .show(ui, |ui| {
+            Frame::new().inner_margin(Margin { left: 28, right: 28, top: 4, bottom: 32 }).show(ui, |ui| {
+                page(app, ui);
+            });
+        });
 }
 
 fn shortcuts(app: &mut App, ctx: &egui::Context) {
@@ -106,13 +132,16 @@ fn sidebar(app: &mut App, ui: &mut Ui) {
     let ctx = ui.ctx().clone();
 
     // Logo
+    let compact = compact_sidebar();
     ui.horizontal(|ui| {
-        ui.add_space(6.0);
+        ui.add_space(if compact { (ui.available_width() - 30.0) / 2.0 } else { 6.0 });
         let (r, _) = ui.allocate_exact_size(Vec2::splat(30.0), Sense::hover());
         vgradient_rounded(ui, r, pal().accent_soft, pal().accent);
         ui.painter().text(r.center(), Align2::CENTER_CENTER, icon::WAVEFORM, filled_icon(18.0), Color32::WHITE);
-        ui.add_space(4.0);
-        ui.label(RichText::new("Pulse").font(heavy(19.0)));
+        if !compact {
+            ui.add_space(4.0);
+            ui.label(RichText::new("Pulse").font(heavy(19.0)));
+        }
     });
     ui.add_space(18.0);
 
@@ -148,7 +177,9 @@ fn sidebar(app: &mut App, ui: &mut Ui) {
         }
     }
     // Download progress
-    if let Some((t, p)) = &app.downloading {
+    if let Some((t, p)) = &app.downloading
+        && !compact
+    {
         let p = *p.lock().unwrap();
         let left = app.download_queue.len();
         ui.add_space(4.0);
@@ -161,17 +192,27 @@ fn sidebar(app: &mut App, ui: &mut Ui) {
     }
 
     ui.add_space(14.0);
-    ui.horizontal(|ui| {
+    if compact {
         nav_heading(ui, "Playlists");
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            if icon_button(ui, icon::PLUS, 14.0, pal().text_muted, tr("Create playlist")).clicked() {
-                app.new_playlist = Some((String::new(), None));
-            }
+        if nav_item(ui, icon::PLUS, "Create playlist", false, None).clicked() {
+            app.new_playlist = Some((String::new(), None));
+        }
+    } else {
+        ui.horizontal(|ui| {
+            nav_heading(ui, "Playlists");
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if icon_button(ui, icon::PLUS, 14.0, pal().text_muted, tr("Create playlist")).clicked() {
+                    app.new_playlist = Some((String::new(), None));
+                }
+            });
         });
-    });
+    }
+    // Blossom-style themes: a big cover of the current song at the bottom of the sidebar.
+    let big_art = !compact && layout().now_playing_art == crate::theme::NowPlayingArt::SidebarLarge && app.current.is_some();
+    let art_h = if big_art { ui.available_width() + 12.0 } else { 0.0 };
 
-    egui::ScrollArea::vertical().id_salt("sidebar_playlists").auto_shrink([false, true]).show(ui, |ui| {
-        if app.saved.playlists.is_empty() {
+    egui::ScrollArea::vertical().id_salt("sidebar_playlists").auto_shrink([false, true]).max_height((ui.available_height() - art_h).max(40.0)).show(ui, |ui| {
+        if app.saved.playlists.is_empty() && !compact {
             ui.add_space(4.0);
             ui.horizontal(|ui| {
                 ui.add_space(10.0);
@@ -195,6 +236,17 @@ fn sidebar(app: &mut App, ui: &mut Ui) {
             });
         }
     });
+    if big_art && let Some(t) = app.current.clone() {
+        ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
+            let w = ui.available_width();
+            let (r, resp) = ui.allocate_exact_size(Vec2::splat(w), Sense::click());
+            artwork(ui, r, t.art_big(), r_lg());
+            a11y(ui, &resp, egui::WidgetType::Button, || format!("{}: {} by {}", tr("Now playing"), t.title, t.artist.name));
+            if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                app.navigate(Route::Queue, &ctx);
+            }
+        });
+    }
 }
 
 fn vgradient_rounded(ui: &Ui, r: Rect, top: Color32, bottom: Color32) {
@@ -204,7 +256,17 @@ fn vgradient_rounded(ui: &Ui, r: Rect, top: Color32, bottom: Color32) {
     ui.painter().rect_filled(top_half, CornerRadius { nw: 8, ne: 8, sw: 0, se: 0 }, top.gamma_multiply(0.35));
 }
 
+/// True when the theme wants an icon-only sidebar.
+fn compact_sidebar() -> bool {
+    layout().sidebar == crate::theme::SidebarStyle::Icons
+}
+
 fn nav_heading(ui: &mut Ui, text: &str) {
+    if compact_sidebar() {
+        ui.add_space(4.0);
+        ui.separator();
+        return;
+    }
     let text = tr(text);
     ui.horizontal(|ui| {
         ui.add_space(10.0);
@@ -215,6 +277,17 @@ fn nav_heading(ui: &mut Ui, text: &str) {
 
 fn nav_item(ui: &mut Ui, glyph: &str, label: &str, selected: bool, badge: Option<usize>) -> egui::Response {
     let label = tr(label);
+    if compact_sidebar() {
+        // Icon only, with the name as a tooltip.
+        let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 44.0), Sense::click());
+        resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, label));
+        focus_ring(ui, &resp);
+        let fill = if selected { pal().surface_active } else if resp.hovered() { pal().surface_hover } else { Color32::TRANSPARENT };
+        ui.painter().rect_filled(rect, r_md(), fill);
+        let (font, col) = if selected { (filled_icon(20.0), pal().accent_soft) } else { (regular(20.0), pal().text_muted) };
+        ui.painter().text(rect.center(), Align2::CENTER_CENTER, glyph, font, col);
+        return resp.on_hover_text(label).on_hover_cursor(egui::CursorIcon::PointingHand);
+    }
     let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 36.0), Sense::click());
     resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, label));
     focus_ring(ui, &resp);
@@ -225,7 +298,7 @@ fn nav_item(ui: &mut Ui, glyph: &str, label: &str, selected: bool, badge: Option
     } else {
         Color32::TRANSPARENT
     };
-    ui.painter().rect_filled(rect, R_MD, fill);
+    ui.painter().rect_filled(rect, r_md(), fill);
     if selected {
         let bar = Rect::from_min_size(pos2(rect.left(), rect.center().y - 9.0), vec2(3.0, 18.0));
         ui.painter().rect_filled(bar, CornerRadius::same(2), pal().accent_soft);
@@ -320,9 +393,11 @@ fn top_bar(app: &mut App, ui: &mut Ui) {
             if icon_button(ui, icon::GEAR_SIX, 18.0, gear_col, tr("Settings")).clicked() {
                 app.navigate(Route::Settings, &ctx);
             }
-            let (glyph, tip) = if app.saved.light_mode { (icon::MOON, "Switch to dark mode") } else { (icon::SUN, "Switch to light mode") };
-            if icon_button(ui, glyph, 17.0, pal().text_muted, tr(tip)).clicked() {
-                app.toggle_theme(&ctx);
+            if app.theme_has_light_and_dark() {
+                let (glyph, tip) = if app.saved.light_mode { (icon::MOON, "Switch to dark mode") } else { (icon::SUN, "Switch to light mode") };
+                if icon_button(ui, glyph, 17.0, pal().text_muted, tr(tip)).clicked() {
+                    app.toggle_theme(&ctx);
+                }
             }
             ui.add_space(6.0);
             let r = ui.add(egui::Label::new(RichText::new(tr("Music info by Deezer")).font(med(11.5)).color(pal().text_faint)).sense(Sense::click()));
@@ -448,7 +523,7 @@ fn home(app: &mut App, ui: &mut Ui) {
     // Greeting banner
     ui.add_space(8.0);
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 150.0), Sense::hover());
-    let r = R_LG;
+    let r = r_lg();
     ui.painter().rect_filled(rect, r, Color32::from_rgb(28, 20, 52));
     vgradient(ui, rect.shrink(1.0), pal().accent.gamma_multiply(0.30), Color32::TRANSPARENT);
     ui.painter().text(rect.left_top() + vec2(28.0, 30.0), Align2::LEFT_TOP, "Any song. Any artist.", heavy(28.0), ON_DARK);
@@ -663,20 +738,40 @@ struct HeroClicks {
 
 fn hero(ui: &mut Ui, h: &Hero) -> HeroClicks {
     let mut clicks = HeroClicks::default();
+    let style = &parts().hero;
+    let hero_r = style.radius.map(CornerRadius::same).unwrap_or(r_lg());
+    // Full-bleed themes show an artist's photo across the whole header.
+    let full_bleed = layout().hero == crate::theme::HeroStyle::FullBleed && h.round && h.art.is_some();
+    if full_bleed {
+        return hero_full_bleed(ui, h, hero_r);
+    }
     ui.add_space(8.0);
     let height = 232.0;
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
+    // Text is light on the normal dark banner; with a theme's own fill it uses the theme's text colors.
+    let (on, on_muted) = match (style.color, style.fill) {
+        (Some(c), _) => (c, c.gamma_multiply(0.8)),
+        (None, Some(_)) => (pal().text, pal().text_muted),
+        (None, None) => (ON_DARK, ON_DARK_MUTED),
+    };
     if let Some(b) = h.banner {
-        artwork(ui, rect, Some(b), R_LG);
-        ui.painter().rect_filled(rect, R_LG, Color32::from_black_alpha(150));
+        artwork(ui, rect, Some(b), hero_r);
+        ui.painter().rect_filled(rect, hero_r, Color32::from_black_alpha(150));
+    } else if let Some(fill) = style.fill {
+        ui.painter().rect_filled(rect, hero_r, fill);
     } else {
-        ui.painter().rect_filled(rect, R_LG, Color32::from_rgb(24, 20, 40));
+        // Dark banner tinted with the theme's accent.
+        let base = Color32::from_rgb(14, 13, 20);
+        ui.painter().rect_filled(rect, hero_r, base.lerp_to_gamma(pal().accent, 0.12));
         vgradient(ui, rect.shrink(1.0), pal().accent.gamma_multiply(0.22), Color32::TRANSPARENT);
+    }
+    if let Some(b) = style.border {
+        ui.painter().rect_stroke(rect, hero_r, b, egui::StrokeKind::Inside);
     }
     let art_size = 184.0;
     let art_rect = Rect::from_min_size(pos2(rect.left() + 24.0, rect.center().y - art_size / 2.0), Vec2::splat(art_size));
     // shadow
-    let radius = if h.round { CornerRadius::same(92) } else { R_MD };
+    let radius = if h.round { CornerRadius::same(92) } else { r_md() };
     let shadow = egui::Shadow { offset: [0, 10], blur: 28, spread: 0, color: Color32::from_black_alpha(110) };
     ui.painter().add(shadow.as_shape(art_rect, radius));
     if h.art.is_some() {
@@ -700,20 +795,40 @@ fn hero(ui: &mut Ui, h: &Hero) -> HeroClicks {
     let tx = art_rect.right() + 28.0;
     let tw = rect.right() - tx - 24.0;
     let bottom = art_rect.bottom();
-    paint_line(ui, pos2(tx, bottom - 112.0), &h.kind.to_uppercase(), semi(11.5), ON_DARK_MUTED, tw);
-    let size = if h.title.chars().count() > 28 { 30.0 } else { 44.0 };
-    let tg = one_line(ui, h.title, heavy(size), ON_DARK, tw);
+    paint_line(ui, pos2(tx, bottom - 112.0), &h.kind.to_uppercase(), semi(11.5), on_muted, tw);
+    let title = if style.uppercase == Some(true) { h.title.to_uppercase() } else { h.title.to_string() };
+    let size = style.font_size.unwrap_or(if title.chars().count() > 28 { 30.0 } else { 44.0 });
+    let font = if style.bold == Some(false) { semi(size) } else { heavy(size) };
+    let tg = one_line(ui, &title, font, on, tw);
     let th = tg.size().y;
     let title_rect = Rect::from_min_size(pos2(tx, bottom - 30.0 - th), tg.size());
-    ui.painter().galley(title_rect.min, tg, ON_DARK);
+    ui.painter().galley(title_rect.min, tg, on);
     if h.editable {
         let r = ui.interact(title_rect, ui.id().with("hero_title"), Sense::click()).on_hover_cursor(egui::CursorIcon::Text);
         a11y(ui, &r, egui::WidgetType::Button, || format!("{}: {}", tr("Rename"), h.title));
         clicks.title = r.on_hover_text(tr("Rename")).clicked();
     }
-    paint_line(ui, pos2(tx, bottom - 20.0), h.subtitle, regular(13.5), ON_DARK_MUTED, tw);
+    paint_line(ui, pos2(tx, bottom - 20.0), h.subtitle, regular(13.5), on_muted, tw);
     ui.add_space(18.0);
     clicks
+}
+
+/// Header with a full-width photo (themes with `hero = "fullbleed"`, artist pages).
+fn hero_full_bleed(ui: &mut Ui, h: &Hero, radius: CornerRadius) -> HeroClicks {
+    ui.add_space(8.0);
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 320.0), Sense::hover());
+    artwork(ui, rect, h.art, radius);
+    // Darken towards the bottom so the name stays readable.
+    vgradient(ui, rect, Color32::from_black_alpha(20), Color32::from_black_alpha(200));
+    let style = &parts().hero;
+    let tw = rect.width() - 56.0;
+    let title = if style.uppercase == Some(true) { h.title.to_uppercase() } else { h.title.to_string() };
+    paint_line(ui, rect.left_bottom() + vec2(28.0, -118.0), &h.kind.to_uppercase(), semi(11.5), ON_DARK_MUTED, tw);
+    let tg = one_line(ui, &title, heavy(style.font_size.unwrap_or(64.0)), ON_DARK, tw);
+    ui.painter().galley(rect.left_bottom() + vec2(28.0, -46.0 - tg.size().y), tg, ON_DARK);
+    paint_line(ui, rect.left_bottom() + vec2(28.0, -36.0), h.subtitle, regular(14.0), ON_DARK_MUTED, tw);
+    ui.add_space(18.0);
+    HeroClicks::default()
 }
 
 fn remote_playlist(app: &mut App, ui: &mut Ui) {
@@ -825,9 +940,9 @@ fn latest_release_card(ui: &mut Ui, a: &AlbumInfo) -> bool {
     let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width().min(560.0), 128.0), Sense::click());
     a11y(ui, &resp, egui::WidgetType::Button, || format!("Latest release: {}", a.title));
     let fill = if resp.hovered() { pal().surface_active } else { pal().surface_hover };
-    ui.painter().rect_filled(rect, R_LG, fill);
+    ui.painter().rect_filled(rect, r_lg(), fill);
     let art = Rect::from_min_size(rect.min + vec2(12.0, 12.0), Vec2::splat(104.0));
-    artwork(ui, art, a.cover.as_deref(), R_MD);
+    artwork(ui, art, a.cover.as_deref(), r_md());
     let tx = art.right() + 18.0;
     let tw = rect.right() - tx - 16.0;
     let date = a.release_date.as_deref().map(pretty_date).unwrap_or_default();
@@ -1113,13 +1228,34 @@ fn player_bar(app: &mut App, ui: &mut Ui) {
     let full = ui.max_rect();
     let left_w = (full.width() * 0.28).clamp(220.0, 360.0);
     let right_w = left_w.min(260.0);
-    let center_w = (full.width() - left_w - right_w - 32.0).clamp(280.0, 640.0);
+    let controls_left = layout().player == crate::theme::PlayerStyle::ControlsLeft;
+    let center_w = if controls_left {
+        (full.width() * 0.34).clamp(300.0, 520.0)
+    } else {
+        (full.width() - left_w - right_w - 32.0).clamp(280.0, 640.0)
+    };
+    // Where the song info and the controls go: song left + controls centred (normal),
+    // or controls left + song next to them.
+    let (left, center) = if controls_left {
+        let c = Rect::from_min_size(full.min, vec2(center_w, full.height()));
+        let l = Rect::from_min_size(pos2(c.right() + 28.0, full.top()), vec2(left_w, full.height()));
+        (l, c)
+    } else {
+        (Rect::from_min_size(full.min, vec2(left_w, full.height())), Rect::from_center_size(full.center(), vec2(center_w, full.height())))
+    };
+    // The small cover hides when the theme shows a big one in the sidebar.
+    let small_art = !(layout().now_playing_art == crate::theme::NowPlayingArt::SidebarLarge && !compact_sidebar());
 
-    // ---- left: now playing
-    let left = Rect::from_min_size(full.min, vec2(left_w, full.height()));
+    // ---- now playing
     if let Some(t) = app.current.clone() {
-        let art = Rect::from_min_size(pos2(left.left(), left.center().y - 28.0), Vec2::splat(56.0));
-        artwork(ui, art, t.art_big(), CornerRadius::same(6));
+        let art = if small_art {
+            Rect::from_min_size(pos2(left.left(), left.center().y - 28.0), Vec2::splat(56.0))
+        } else {
+            Rect::from_min_size(pos2(left.left() - 14.0, left.center().y), Vec2::ZERO)
+        };
+        if small_art {
+            artwork(ui, art, t.art_big(), CornerRadius::same(6));
+        }
         let art_resp = ui.interact(art, egui::Id::new("np_art"), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
         a11y(ui, &art_resp, egui::WidgetType::Button, || format!("Now playing: {} by {}. Open queue", t.title, t.artist.name));
         if art_resp.clicked() {
@@ -1180,8 +1316,7 @@ fn player_bar(app: &mut App, ui: &mut Ui) {
         ui.painter().text(left.left_center(), Align2::LEFT_CENTER, "Pick something to play", regular(13.0), pal().text_faint);
     }
 
-    // ---- center: controls + progress
-    let center = Rect::from_center_size(full.center(), vec2(center_w, full.height()));
+    // ---- controls + progress
     let mut cui = ui.new_child(egui::UiBuilder::new().max_rect(center).layout(Layout::top_down(Align::Center)));
     cui.add_space(10.0);
     cui.horizontal(|ui| {
@@ -1310,7 +1445,7 @@ fn dialogs(app: &mut App, ctx: &egui::Context) {
         let name = app.saved.playlists.get(idx).map(|p| p.name.clone()).unwrap_or_default();
         let (mut keep, mut delete) = (true, false);
         egui::Modal::new(egui::Id::new("confirm_delete"))
-            .frame(Frame::new().fill(pal().surface).corner_radius(R_LG).inner_margin(24).stroke(Stroke::new(1.0, pal().border)))
+            .frame(Frame::new().fill(pal().surface).corner_radius(r_lg()).inner_margin(24).stroke(Stroke::new(1.0, pal().border)))
             .show(ctx, |ui| {
                 ui.set_width(360.0);
                 ui.label(RichText::new("Delete playlist?").font(heavy(20.0)));
@@ -1345,7 +1480,7 @@ fn dialogs(app: &mut App, ctx: &egui::Context) {
         let mut keep = true;
         let mut create = false;
         egui::Modal::new(egui::Id::new("new_playlist"))
-            .frame(Frame::new().fill(pal().surface).corner_radius(R_LG).inner_margin(24).stroke(Stroke::new(1.0, pal().border)))
+            .frame(Frame::new().fill(pal().surface).corner_radius(r_lg()).inner_margin(24).stroke(Stroke::new(1.0, pal().border)))
             .show(ctx, |ui| {
                 ui.set_width(360.0);
                 ui.label(RichText::new("New playlist").font(heavy(20.0)));
@@ -1384,7 +1519,7 @@ fn dialogs(app: &mut App, ctx: &egui::Context) {
         let mut keep = true;
         let mut done = false;
         egui::Modal::new(egui::Id::new("rename_playlist"))
-            .frame(Frame::new().fill(pal().surface).corner_radius(R_LG).inner_margin(24).stroke(Stroke::new(1.0, pal().border)))
+            .frame(Frame::new().fill(pal().surface).corner_radius(r_lg()).inner_margin(24).stroke(Stroke::new(1.0, pal().border)))
             .show(ctx, |ui| {
                 ui.set_width(360.0);
                 ui.label(RichText::new("Rename playlist").font(heavy(20.0)));

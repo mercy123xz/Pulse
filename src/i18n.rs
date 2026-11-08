@@ -171,6 +171,14 @@ const STRINGS: &[(&str, [&str; 4])] = &[
     ("Themes", ["Temas", "Temas", "Thèmes", "Designs"]),
     ("Theme", ["Tema", "Tema", "Thème", "Design"]),
     ("Color scheme", ["Esquema de colores", "Esquema de cores", "Jeu de couleurs", "Farbschema"]),
+    ("custom", ["personalizado", "personalizado", "perso", "eigenes"]),
+    ("By", ["Por", "Por", "Par", "Von"]),
+    ("Each theme can have several color schemes.", ["Cada tema puede tener varios esquemas de colores.", "Cada tema pode ter vários esquemas de cores.", "Chaque thème peut avoir plusieurs jeux de couleurs.", "Jedes Design kann mehrere Farbschemata haben."]),
+    ("Theme files", ["Archivos de temas", "Arquivos de temas", "Fichiers de thèmes", "Design-Dateien"]),
+    ("Add your own themes here. Pulse reloads a theme as soon as you save it:", ["Agrega tus propios temas aquí. Pulse recarga un tema en cuanto lo guardas:", "Adicione seus próprios temas aqui. O Pulse recarrega o tema assim que você salva:", "Ajoutez vos propres thèmes ici. Pulse recharge un thème dès que vous l'enregistrez :", "Lege hier eigene Designs ab. Pulse lädt ein Design neu, sobald du speicherst:"]),
+    ("Make a copy", ["Hacer una copia", "Fazer uma cópia", "Faire une copie", "Kopie erstellen"]),
+    ("Copies this theme into the themes folder so you can edit it.", ["Copia este tema a la carpeta de temas para que puedas editarlo.", "Copia este tema para a pasta de temas para você editar.", "Copie ce thème dans le dossier des thèmes pour le modifier.", "Kopiert dieses Design in den Design-Ordner, damit du es bearbeiten kannst."]),
+    ("Theme notes", ["Notas del tema", "Notas do tema", "Remarques sur le thème", "Hinweise zum Design"]),
     ("Open themes folder", ["Abrir carpeta de temas", "Abrir pasta de temas", "Ouvrir le dossier des thèmes", "Design-Ordner öffnen"]),
 ];
 

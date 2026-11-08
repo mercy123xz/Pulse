@@ -130,6 +130,10 @@ pub struct Settings {
     pub offline_dir: Option<PathBuf>,
     pub high_contrast: bool,
     pub hardware_acceleration: bool,
+    /// Theme name and its color scheme.
+    pub theme: String,
+    /// Empty = the theme's first scheme.
+    pub scheme: String,
 }
 
 impl Default for Settings {
@@ -150,6 +154,8 @@ impl Default for Settings {
             offline_dir: None,
             high_contrast: false,
             hardware_acceleration: true,
+            theme: "Default".into(),
+            scheme: String::new(),
         }
     }
 }

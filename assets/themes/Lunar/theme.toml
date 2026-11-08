@@ -1,0 +1,8 @@
+name = "Lunar"
+author = "Pulse"
+description = "Deep night colors, an icon sidebar, full-width artist photos and a floating main panel."
+
+[layout]
+sidebar = "icons"
+hero = "fullbleed"
+inset = true

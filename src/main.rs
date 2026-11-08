@@ -11,6 +11,7 @@ mod local;
 mod net;
 mod settings;
 mod theme;
+mod themes;
 mod ui;
 mod widgets;
 mod youtube;
