@@ -1,12 +1,14 @@
 // Hide the black console window on Windows for release builds.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-mod api;
 mod app;
 mod audio;
+mod deezer;
+mod net;
 mod theme;
 mod ui;
 mod widgets;
+mod youtube;
 
 fn main() -> eframe::Result {
     #[allow(unused_mut)]

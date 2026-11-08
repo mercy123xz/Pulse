@@ -1,6 +1,6 @@
 //! Reusable, custom-drawn UI pieces (buttons, artwork, sliders, track rows...).
 
-use crate::api::Track;
+use crate::deezer::Track;
 use crate::theme::{self, *};
 use egui::{
     Align2, Color32, CornerRadius, FontId, Key, Modifiers, Pos2, Rect, Response, Sense, Stroke, Ui, Vec2, WidgetInfo, WidgetType, pos2,
@@ -339,7 +339,8 @@ pub enum TrackEvent {
     NewPlaylistWith(Track),
     RemoveFromPlaylist(usize),
     RemoveFromQueue(usize),
-    OpenArtist(String),
+    OpenArtist(Track),
+    OpenAlbum(String),
 }
 
 pub struct TableCtx<'a> {
@@ -360,8 +361,7 @@ const ROW_H: f32 = 56.0;
 struct Cols {
     num: Rect,
     title: Rect,
-    genre: Option<Rect>,
-    plays: Option<Rect>,
+    album: Option<Rect>,
     like: Rect,
     time: Rect,
 }
@@ -373,14 +373,12 @@ fn columns(row: Rect) -> Cols {
     let num = col(x0, x0 + 44.0);
     let time = col(row.right() - 64.0, row.right() - 12.0);
     let like = col(time.left() - 40.0, time.left());
-    let wide = w > 820.0;
-    let mid = w > 640.0;
-    let plays = mid.then(|| col(like.left() - 90.0, like.left() - 10.0));
-    let genre_right = plays.map(|p| p.left()).unwrap_or(like.left()) - 16.0;
-    let genre_w = if wide { (w * 0.2).min(220.0) } else { 0.0 };
-    let genre = wide.then(|| col(genre_right - genre_w, genre_right));
-    let title_right = genre.map(|g| g.left()).or(plays.map(|p| p.left())).unwrap_or(like.left()) - 16.0;
-    Cols { num, title: col(num.right() + 4.0, title_right), genre, plays, like, time }
+    let wide = w > 720.0;
+    let album_right = like.left() - 16.0;
+    let album_w = (w * 0.3).min(320.0);
+    let album = wide.then(|| col(album_right - album_w, album_right));
+    let title_right = album.map(|a| a.left()).unwrap_or(like.left()) - 16.0;
+    Cols { num, title: col(num.right() + 4.0, title_right), album, like, time }
 }
 
 pub fn track_table_header(ui: &mut Ui) {
@@ -390,11 +388,8 @@ pub fn track_table_header(ui: &mut Ui) {
     let p = ui.painter();
     p.text(c.num.center(), Align2::CENTER_CENTER, "#", f.clone(), pal().text_faint);
     p.text(c.title.left_center(), Align2::LEFT_CENTER, "TITLE", f.clone(), pal().text_faint);
-    if let Some(g) = c.genre {
-        p.text(g.left_center(), Align2::LEFT_CENTER, "GENRE", f.clone(), pal().text_faint);
-    }
-    if let Some(pl) = c.plays {
-        p.text(pl.right_center(), Align2::RIGHT_CENTER, "PLAYS", f.clone(), pal().text_faint);
+    if let Some(a) = c.album {
+        p.text(a.left_center(), Align2::LEFT_CENTER, "ALBUM", f.clone(), pal().text_faint);
     }
     p.text(c.time.right_center(), Align2::RIGHT_CENTER, icon::CLOCK_COUNTER_CLOCKWISE, regular(14.0), pal().text_faint);
     p.hline(rect.x_range(), rect.bottom(), Stroke::new(1.0, pal().border));
@@ -416,7 +411,7 @@ fn track_row(ui: &mut Ui, id: egui::Id, i: usize, t: &Track, cx: &TableCtx, ev: 
     // Register the row even when it's scrolled out of view, so Tab can reach it
     // (focusing it then scrolls it into view, see `focus_ring`).
     let resp = ui.interact(rect, id, Sense::click());
-    a11y(ui, &resp, WidgetType::Button, || format!("{} by {}, {}", t.title, t.user.name, fmt_duration(t.duration)));
+    a11y(ui, &resp, WidgetType::Button, || format!("{} by {}, {}", t.title, t.artist.name, fmt_duration(t.duration)));
     if !ui.is_rect_visible(rect) {
         return;
     }
@@ -447,31 +442,35 @@ fn track_row(ui: &mut Ui, id: egui::Id, i: usize, t: &Track, cx: &TableCtx, ev: 
     let tw = c.title.right() - tx;
     let title_col = if is_current { pal().accent_soft } else { pal().text };
     paint_line(ui, pos2(tx, rect.center().y - 17.0), &t.title, med(13.5), title_col, tw);
+    let mut artist_x = tx;
+    if t.explicit {
+        // "E" badge for explicit lyrics, like other music apps.
+        let badge = Rect::from_min_size(pos2(tx, rect.center().y + 4.0), vec2(14.0, 14.0));
+        ui.painter().rect_filled(badge, CornerRadius::same(3), pal().text_muted);
+        ui.painter().text(badge.center(), Align2::CENTER_CENTER, "E", semi(9.5), pal().bg);
+        artist_x += 19.0;
+    }
     let artist = link_text(
         ui,
         id.with("artist"),
-        pos2(tx, rect.center().y + 3.0),
-        &t.user.name,
+        pos2(artist_x, rect.center().y + 3.0),
+        &t.artist.name,
         regular(12.5),
         pal().text_muted,
-        tw,
+        tw - (artist_x - tx),
     );
-    if t.user.is_verified {
-        ui.painter().text(
-            pos2(artist.rect.right() + 4.0, artist.rect.center().y),
-            Align2::LEFT_CENTER,
-            egui_phosphor::regular::SEAL_CHECK,
-            filled_icon(12.0),
-            pal().accent_soft,
-        );
-    }
 
-    if let Some(g) = c.genre {
-        let genre = t.genre.as_deref().unwrap_or("—");
-        paint_line(ui, pos2(g.left(), g.center().y - 8.0), genre, regular(12.5), pal().text_muted, g.width());
-    }
-    if let Some(pl) = c.plays {
-        ui.painter().text(pl.right_center(), Align2::RIGHT_CENTER, fmt_count(t.play_count), regular(12.5), pal().text_muted);
+    let mut album_link = None;
+    if let (Some(a), Some(al)) = (c.album, t.album.as_ref()) {
+        album_link = Some(link_text(
+            ui,
+            id.with("album"),
+            pos2(a.left(), a.center().y - 8.0),
+            &al.title,
+            regular(12.5),
+            pal().text_muted,
+            a.width(),
+        ));
     }
 
     // Heart
@@ -492,7 +491,9 @@ fn track_row(ui: &mut Ui, id: egui::Id, i: usize, t: &Track, cx: &TableCtx, ev: 
     if heart.clicked() {
         ev.push(TrackEvent::ToggleLike(t.clone()));
     } else if artist.clicked() {
-        ev.push(TrackEvent::OpenArtist(t.user.id.clone()));
+        ev.push(TrackEvent::OpenArtist(t.clone()));
+    } else if album_link.as_ref().is_some_and(|r| r.clicked()) {
+        ev.push(TrackEvent::OpenAlbum(t.album.as_ref().map(|a| a.id.clone()).unwrap_or_default()));
     } else if resp.double_clicked() || resp.clicked() && (resp.has_focus() || pointer_in(ui, c.num)) {
         // Single click plays only on the number column; Enter plays when the row has keyboard focus.
         ev.push(TrackEvent::Play(i));
@@ -541,7 +542,12 @@ fn track_row(ui: &mut Ui, id: egui::Id, i: usize, t: &Track, cx: &TableCtx, ev: 
             }
         });
         if menu_item(ui, icon::USER, "Go to artist") {
-            ev.push(TrackEvent::OpenArtist(t.user.id.clone()));
+            ev.push(TrackEvent::OpenArtist(t.clone()));
+        }
+        if let Some(al) = t.album.as_ref().filter(|a| crate::deezer::is_deezer_id(&a.id))
+            && menu_item(ui, icon::VINYL_RECORD, "Go to album")
+        {
+            ev.push(TrackEvent::OpenAlbum(al.id.clone()));
         }
         if cx.removable {
             ui.separator();
