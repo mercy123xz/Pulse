@@ -419,6 +419,7 @@ fn table_ctx<'a>(app: &'a App, names: &'a [String]) -> TableCtx<'a> {
         removable: false,
         queue_mode: false,
         downloads: &app.saved.downloads,
+        added: None,
         index_offset: 0,
     }
 }
@@ -642,6 +643,8 @@ fn search(app: &mut App, ui: &mut Ui, q: &str) {
 
 /// Big header used by playlist / artist / library pages.
 struct Hero<'a> {
+    /// Your own playlist: the title and cover can be clicked to change them.
+    editable: bool,
     kind: &'a str,
     title: &'a str,
     subtitle: &'a str,
@@ -651,7 +654,15 @@ struct Hero<'a> {
     banner: Option<&'a str>,
 }
 
-fn hero(ui: &mut Ui, h: &Hero) {
+/// What was clicked in an editable hero.
+#[derive(Default)]
+struct HeroClicks {
+    title: bool,
+    art: Option<egui::Response>,
+}
+
+fn hero(ui: &mut Ui, h: &Hero) -> HeroClicks {
+    let mut clicks = HeroClicks::default();
     ui.add_space(8.0);
     let height = 232.0;
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
@@ -675,6 +686,17 @@ fn hero(ui: &mut Ui, h: &Hero) {
         vgradient(ui, art_rect, Color32::from_white_alpha(18), Color32::TRANSPARENT);
         ui.painter().text(art_rect.center(), Align2::CENTER_CENTER, h.glyph, filled_icon(72.0), Color32::WHITE);
     }
+    if h.editable {
+        let r = ui.interact(art_rect, ui.id().with("hero_art"), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
+        a11y(ui, &r, egui::WidgetType::Button, || tr("Change cover").to_owned());
+        if r.hovered() {
+            // Pencil overlay, like Spotify.
+            ui.painter().rect_filled(art_rect, radius, Color32::from_black_alpha(140));
+            ui.painter().text(art_rect.center() - vec2(0.0, 10.0), Align2::CENTER_CENTER, icon::PENCIL_SIMPLE, regular(40.0), Color32::WHITE);
+            ui.painter().text(art_rect.center() + vec2(0.0, 26.0), Align2::CENTER_CENTER, tr("Change cover"), med(13.0), Color32::WHITE);
+        }
+        clicks.art = Some(r);
+    }
     let tx = art_rect.right() + 28.0;
     let tw = rect.right() - tx - 24.0;
     let bottom = art_rect.bottom();
@@ -682,9 +704,16 @@ fn hero(ui: &mut Ui, h: &Hero) {
     let size = if h.title.chars().count() > 28 { 30.0 } else { 44.0 };
     let tg = one_line(ui, h.title, heavy(size), ON_DARK, tw);
     let th = tg.size().y;
-    ui.painter().galley(pos2(tx, bottom - 30.0 - th), tg, ON_DARK);
+    let title_rect = Rect::from_min_size(pos2(tx, bottom - 30.0 - th), tg.size());
+    ui.painter().galley(title_rect.min, tg, ON_DARK);
+    if h.editable {
+        let r = ui.interact(title_rect, ui.id().with("hero_title"), Sense::click()).on_hover_cursor(egui::CursorIcon::Text);
+        a11y(ui, &r, egui::WidgetType::Button, || format!("{}: {}", tr("Rename"), h.title));
+        clicks.title = r.on_hover_text(tr("Rename")).clicked();
+    }
     paint_line(ui, pos2(tx, bottom - 20.0), h.subtitle, regular(13.5), ON_DARK_MUTED, tw);
     ui.add_space(18.0);
+    clicks
 }
 
 fn remote_playlist(app: &mut App, ui: &mut Ui) {
@@ -694,7 +723,7 @@ fn remote_playlist(app: &mut App, ui: &mut Ui) {
         if !info.creator.is_empty() {
             sub = format!("{} · {sub}", info.creator);
         }
-        hero(ui, &Hero { kind: "Playlist", title: &info.title, subtitle: &sub, art: info.picture.as_deref(), glyph: icon::PLAYLIST, round: false, banner: None });
+        hero(ui, &Hero { editable: false, kind: "Playlist", title: &info.title, subtitle: &sub, art: info.picture.as_deref(), glyph: icon::PLAYLIST, round: false, banner: None });
         let ctx = ui.ctx().clone();
         autoplay_page(app, &ctx, tracks);
         action_row(app, ui, tracks);
@@ -710,7 +739,7 @@ fn album_page(app: &mut App, ui: &mut Ui) {
             sub.push_str(&format!(" · {y}"));
         }
         sub.push_str(&format!(" · {} songs, {}", tracks.len(), total_time(tracks)));
-        hero(ui, &Hero { kind: info.kind(), title: &info.title, subtitle: &sub, art: info.cover.as_deref(), glyph: icon::VINYL_RECORD, round: false, banner: None });
+        hero(ui, &Hero { editable: false, kind: info.kind(), title: &info.title, subtitle: &sub, art: info.cover.as_deref(), glyph: icon::VINYL_RECORD, round: false, banner: None });
         let ctx = ui.ctx().clone();
         autoplay_page(app, &ctx, tracks);
         ui.horizontal(|ui| {
@@ -751,7 +780,7 @@ fn artist(app: &mut App, ui: &mut Ui) {
     with_remote(app, ui, |app, ui, page| {
         let Page::Artist(p) = page else { return };
         let sub = format!("{} fans · {} releases", fmt_count(p.artist.fans), p.artist.albums);
-        hero(ui, &Hero { kind: "Artist", title: &p.artist.name, subtitle: &sub, art: p.artist.picture_xl.as_deref(), glyph: icon::USER, round: true, banner: None });
+        hero(ui, &Hero { editable: false, kind: "Artist", title: &p.artist.name, subtitle: &sub, art: p.artist.picture_xl.as_deref(), glyph: icon::USER, round: true, banner: None });
         action_row(app, ui, &p.top);
         let ctx = ui.ctx().clone();
 
@@ -825,46 +854,199 @@ fn pretty_date(d: &str) -> String {
 fn local_collection(app: &mut App, ui: &mut Ui, title: &str, sub: &str, glyph: &str, tracks: &[Track], playlist: Option<usize>) {
     let ctx = ui.ctx().clone();
     let kind = if playlist.is_some() { "Playlist" } else { "Library" };
-    hero(ui, &Hero { kind, title, subtitle: sub, art: None, glyph, round: false, banner: None });
+    // Cover: your own picture, else the first song's artwork.
+    let custom = playlist.and_then(|i| app.saved.playlists.get(i)).and_then(|p| p.cover.as_ref()).map(|c| format!("file://{}", c.display().to_string().replace('\\', "/")));
+    let art = custom.clone().or_else(|| if playlist.is_some() { tracks.first().and_then(|t| t.art_big()).map(str::to_owned) } else { None });
+    let clicks = hero(ui, &Hero { editable: playlist.is_some(), kind: tr(kind), title: tr(title), subtitle: sub, art: art.as_deref(), glyph, round: false, banner: None });
+    if let Some(i) = playlist {
+        if clicks.title {
+            app.rename_playlist = Some((i, title.to_string()));
+        }
+        if let Some(r) = &clicks.art {
+            if r.clicked() {
+                pick_cover(app, i, &ctx);
+            }
+            r.context_menu(|ui| {
+                if menu_item(ui, icon::IMAGE, "Change cover") {
+                    pick_cover(app, i, &ctx);
+                }
+                if custom.is_some() && menu_item(ui, icon::TRASH, "Remove cover") {
+                    app.remove_playlist_cover(i);
+                }
+            });
+        }
+    }
     if tracks.is_empty() {
         let body = match (&app.route, playlist) {
             (Route::Liked, _) => "Tap the heart on any song to save it here.",
+            (Route::LocalFiles, _) => "Put music files in your Music folder and they'll show up here.",
             (_, Some(_)) => "Right-click any song and choose “Add to playlist”.",
             _ => "Songs you play will show up here.",
         };
         empty_state(ui, glyph, "It's quiet in here", body, None);
-    } else {
-        ui.horizontal(|ui| {
-            action_row(app, ui, tracks);
-            if let Some(i) = playlist {
-                ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
-                    ui.menu_button(RichText::new(icon::DOTS_THREE).size(22.0).color(pal().text_muted), |ui| {
-                        if menu_item(ui, icon::PENCIL_SIMPLE, "Rename") {
-                            app.rename_playlist = Some((i, title.to_string()));
-                        }
-                        if menu_item(ui, icon::TRASH, "Delete playlist") {
-                            app.confirm_delete = Some(i);
-                        }
-                    });
-                });
+        if playlist.is_some() {
+            ui.vertical_centered(|ui| {
+                if ghost_button(ui, icon::TRASH, "Delete playlist").clicked()
+                    && let Route::Local(i) = app.route
+                {
+                    app.confirm_delete = Some(i);
+                }
+            });
+        }
+        return;
+    }
+
+    // When songs were added: playlists and Liked Songs keep track of it.
+    let added = match (&app.route, playlist) {
+        (_, Some(i)) => app.saved.playlists.get(i).map(|p| p.added.clone()),
+        (Route::Liked, _) => Some(app.saved.liked_added.clone()),
+        _ => None,
+    };
+    app.ensure_genres(tracks, &ctx);
+    list_toolbar(app, ui, tracks, playlist, title);
+    let chips = crate::app::genre_chips(tracks, &app.saved.album_genres);
+    if !chips.is_empty() {
+        ui.horizontal_wrapped(|ui| {
+            for g in &chips {
+                let on = app.list_view.genre.as_deref() == Some(g.as_str());
+                if pill(ui, g, on).clicked() {
+                    app.list_view.genre = if on { None } else { Some(g.clone()) };
+                }
             }
         });
-        let names = app.playlist_names();
-        let mut cx = table_ctx(app, &names);
-        cx.removable = playlist.is_some();
-        let mut ev = vec![];
-        track_table(ui, "local", tracks, &cx, &mut ev);
-        app.handle_events(ev, tracks, &ctx);
+        ui.add_space(8.0);
     }
-    if playlist.is_some() && tracks.is_empty() {
-        ui.vertical_centered(|ui| {
-            if ghost_button(ui, icon::TRASH, "Delete playlist").clicked()
-                && let Route::Local(i) = app.route
-            {
-                app.confirm_delete = Some(i);
+
+    let view = crate::app::apply_view(tracks, &app.list_view, added.as_ref(), &app.saved.album_genres);
+    if view.is_empty() {
+        ui.add_space(20.0);
+        ui.label(RichText::new(tr("No songs match.")).color(pal().text_muted));
+        return;
+    }
+    let names = app.playlist_names();
+    let mut cx = table_ctx(app, &names);
+    cx.removable = playlist.is_some();
+    cx.added = added.as_ref();
+    let mut ev = vec![];
+    track_table(ui, "local", &view, &cx, &mut ev);
+    // Rows are numbered by what's on screen; removing goes by the song itself.
+    let mut rest = vec![];
+    for e in ev {
+        match (e, playlist) {
+            (TrackEvent::RemoveFromPlaylist(row), Some(i)) => {
+                if let Some(t) = view.get(row) {
+                    app.remove_from_playlist(i, &t.id);
+                }
+            }
+            (other, _) => rest.push(other),
+        }
+    }
+    app.handle_events(rest, &view, &ctx);
+}
+
+/// Asks for a picture (Windows file dialog) and makes it the playlist cover.
+fn pick_cover(app: &mut App, i: usize, ctx: &egui::Context) {
+    #[cfg(windows)]
+    if let Some(file) = rfd::FileDialog::new().add_filter("Pictures", &["png", "jpg", "jpeg", "webp"]).pick_file()
+        && let Err(e) = app.set_playlist_cover(i, &file)
+    {
+        app.toast(&e, ctx);
+    }
+    #[cfg(not(windows))]
+    let _ = (app, i, ctx);
+}
+
+/// The bar above a song list: play, shuffle, download · search, sort, more.
+fn list_toolbar(app: &mut App, ui: &mut Ui, tracks: &[Track], playlist: Option<usize>, title: &str) {
+    let ctx = ui.ctx().clone();
+    let playing_this = app.is_playing() && app.current.as_ref().is_some_and(|c| tracks.iter().any(|t| t.id == c.id));
+    let view = crate::app::apply_view(tracks, &app.list_view, None, &app.saved.album_genres);
+    ui.horizontal(|ui| {
+        ui.set_min_height(56.0);
+        if play_button(ui, 52.0, playing_this).clicked() {
+            if playing_this {
+                app.toggle_play(&ctx);
+            } else {
+                app.play_list(&view, 0, &ctx);
+            }
+        }
+        ui.add_space(4.0);
+        let sh_col = if app.saved.shuffle { pal().accent_soft } else { pal().text_muted };
+        if icon_toggle(ui, icon::SHUFFLE, 26.0, sh_col, tr("Shuffle"), tr("Shuffle"), app.saved.shuffle).clicked() {
+            shuffle_play(app, &view, &ctx);
+        }
+        if app.saved.shuffle {
+            let r = ui.min_rect();
+            ui.painter().circle_filled(pos2(r.right() - 20.0, r.center().y + 18.0), 2.0, pal().accent_soft);
+        }
+        // Download: all songs here, or a check once they're all saved.
+        let online: Vec<Track> = tracks.iter().filter(|t| !crate::local::is_local(&t.id)).cloned().collect();
+        if !online.is_empty() {
+            let all = online.iter().all(|t| app.is_downloaded(&t.id));
+            let busy = !all && online.iter().any(|t| app.download_queue.iter().any(|q| q.id == t.id) || app.downloading.as_ref().is_some_and(|(d, _)| d.id == t.id));
+            if busy {
+                ui.add_space(6.0);
+                ui.spinner().on_hover_text(tr("Downloading…"));
+            } else if all {
+                if icon_button(ui, icon::ARROW_CIRCLE_DOWN, 26.0, pal().accent_soft, tr("Downloaded")).clicked() {
+                    // Already downloaded: nothing to do.
+                }
+            } else if icon_button(ui, icon::ARROW_CIRCLE_DOWN, 26.0, pal().text_muted, tr("Download")).clicked() {
+                app.download(&online, &ctx);
+            }
+        }
+        if let Some(i) = playlist {
+            ui.menu_button(RichText::new(icon::DOTS_THREE).size(22.0).color(pal().text_muted), |ui| {
+                if menu_item(ui, icon::PENCIL_SIMPLE, "Rename") {
+                    app.rename_playlist = Some((i, title.to_string()));
+                }
+                if menu_item(ui, icon::IMAGE, "Change cover") {
+                    pick_cover(app, i, &ctx);
+                }
+                if menu_item(ui, icon::TRASH, "Delete playlist") {
+                    app.confirm_delete = Some(i);
+                }
+            });
+        }
+
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            // Sort
+            let sort = app.list_view.sort;
+            ui.menu_button(RichText::new(format!("{}  {}", tr(sort.label()), icon::LIST)).font(med(13.0)).color(pal().text_muted), |ui| {
+                ui.label(RichText::new(tr("Sort by")).font(semi(11.0)).color(pal().text_faint));
+                for s in crate::app::SortBy::ALL {
+                    let check = if s == sort { icon::CHECK } else { " " };
+                    if menu_item(ui, check, s.label()) {
+                        app.list_view.sort = s;
+                    }
+                }
+            });
+            ui.add_space(8.0);
+            // Search: an icon that opens into a box.
+            if app.list_view.search_open || !app.list_view.search.is_empty() {
+                let id = ui.id().with("list_search");
+                let r = ui.add(
+                    egui::TextEdit::singleline(&mut app.list_view.search)
+                        .id(id)
+                        .hint_text(tr("Search in playlist"))
+                        .desired_width(200.0),
+                );
+                if app.list_view.search_open && !r.has_focus() && app.list_view.search.is_empty() && r.lost_focus() {
+                    app.list_view.search_open = false;
+                }
+                if app.list_view.search_open && app.list_view.search.is_empty() && !r.lost_focus() {
+                    r.request_focus();
+                }
+            }
+            if icon_button(ui, icon::MAGNIFYING_GLASS, 17.0, pal().text_muted, tr("Search in playlist")).clicked() {
+                app.list_view.search_open = !app.list_view.search_open;
+                if !app.list_view.search_open {
+                    app.list_view.search.clear();
+                }
             }
         });
-    }
+    });
+    ui.add_space(8.0);
 }
 
 fn queue_page(app: &mut App, ui: &mut Ui) {

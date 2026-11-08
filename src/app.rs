@@ -62,6 +62,102 @@ pub enum Repeat {
 pub struct LocalPlaylist {
     pub name: String,
     pub tracks: Vec<Track>,
+    /// Your own cover picture (a copy kept in Pulse's data folder).
+    #[serde(default)]
+    pub cover: Option<std::path::PathBuf>,
+    /// When each song was added: song id → Unix time in seconds.
+    #[serde(default)]
+    pub added: HashMap<String, u64>,
+}
+
+/// How a song list is filtered and sorted (the bar above playlists).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ListView {
+    pub search: String,
+    pub search_open: bool,
+    pub genre: Option<String>,
+    pub sort: SortBy,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum SortBy {
+    #[default]
+    Custom,
+    Title,
+    Artist,
+    Album,
+    RecentlyAdded,
+    Duration,
+}
+
+impl SortBy {
+    pub const ALL: [SortBy; 6] = [SortBy::Custom, SortBy::Title, SortBy::Artist, SortBy::Album, SortBy::RecentlyAdded, SortBy::Duration];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            SortBy::Custom => "Custom order",
+            SortBy::Title => "Title",
+            SortBy::Artist => "Artist",
+            SortBy::Album => "Album",
+            SortBy::RecentlyAdded => "Recently added",
+            SortBy::Duration => "Duration",
+        }
+    }
+}
+
+/// Seconds since 1970, for "Date added".
+pub fn now_unix() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+}
+
+/// The songs of a list after search, genre filter and sorting.
+pub fn apply_view(tracks: &[Track], view: &ListView, added: Option<&HashMap<String, u64>>, genres: &HashMap<String, Vec<String>>) -> Vec<Track> {
+    let q = view.search.trim().to_lowercase();
+    let mut out: Vec<Track> = tracks
+        .iter()
+        .filter(|t| {
+            q.is_empty()
+                || t.title.to_lowercase().contains(&q)
+                || t.artist.name.to_lowercase().contains(&q)
+                || t.album.as_ref().is_some_and(|a| a.title.to_lowercase().contains(&q))
+        })
+        .filter(|t| match &view.genre {
+            None => true,
+            Some(g) => track_genres(t, genres).iter().any(|x| x == g),
+        })
+        .cloned()
+        .collect();
+    let key = |s: &str| s.to_lowercase();
+    match view.sort {
+        SortBy::Custom => {}
+        SortBy::Title => out.sort_by_key(|t| key(&t.title)),
+        SortBy::Artist => out.sort_by_key(|t| (key(&t.artist.name), key(&t.title))),
+        SortBy::Album => out.sort_by_key(|t| (t.album.as_ref().map(|a| key(&a.title)), key(&t.title))),
+        SortBy::Duration => out.sort_by_key(|t| t.duration),
+        SortBy::RecentlyAdded => {
+            let when = |t: &Track| added.and_then(|a| a.get(&t.id)).copied().unwrap_or(0);
+            out.sort_by_key(|t| std::cmp::Reverse(when(t)));
+        }
+    }
+    out
+}
+
+/// A song's genres (from its album), if known.
+pub fn track_genres<'a>(t: &Track, genres: &'a HashMap<String, Vec<String>>) -> &'a [String] {
+    t.album.as_ref().and_then(|a| genres.get(&a.id)).map(Vec::as_slice).unwrap_or(&[])
+}
+
+/// The genres in a list, most common first (at most 15).
+pub fn genre_chips(tracks: &[Track], genres: &HashMap<String, Vec<String>>) -> Vec<String> {
+    let mut count: HashMap<&str, usize> = HashMap::new();
+    for t in tracks {
+        for g in track_genres(t, genres) {
+            *count.entry(g.as_str()).or_default() += 1;
+        }
+    }
+    let mut v: Vec<(&str, usize)> = count.into_iter().collect();
+    v.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(b.0)));
+    v.into_iter().take(15).map(|(g, _)| g.to_string()).collect()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -82,6 +178,10 @@ pub struct Saved {
     pub settings: crate::settings::Settings,
     /// Downloaded songs: song id → file.
     pub downloads: HashMap<String, std::path::PathBuf>,
+    /// When each liked song was liked (song id → Unix time).
+    pub liked_added: HashMap<String, u64>,
+    /// Genres of albums looked up so far (album id → genres), so it happens once.
+    pub album_genres: HashMap<String, Vec<String>>,
 }
 
 impl Default for Saved {
@@ -99,6 +199,8 @@ impl Default for Saved {
             youtube_ids: HashMap::new(),
             settings: crate::settings::Settings::default(),
             downloads: HashMap::new(),
+            liked_added: HashMap::new(),
+            album_genres: HashMap::new(),
         }
     }
 }
@@ -231,6 +333,11 @@ pub struct App {
     /// The song downloading now and how far along it is.
     pub downloading: Option<(Track, Arc<Mutex<f32>>)>,
     download_rx: Option<Receiver<DownloadResult>>,
+
+    /// Search / genre / sort of the list on screen (reset when the page changes).
+    pub list_view: ListView,
+    genre_rx: Option<Receiver<(String, Vec<String>)>>,
+    genre_pending: HashSet<String>,
 }
 
 impl App {
@@ -290,6 +397,9 @@ impl App {
             download_queue: Default::default(),
             downloading: None,
             download_rx: None,
+            list_view: ListView::default(),
+            genre_rx: None,
+            genre_pending: HashSet::new(),
         };
         // Forget downloads whose files were deleted outside Pulse.
         app.saved.downloads.retain(|_, path| path.is_file());
@@ -328,6 +438,7 @@ impl App {
             self.back.push(old);
         }
         self.forward.clear();
+        self.list_view = ListView::default();
         if self.route == Route::Settings {
             self.cache_size = None;
         }
@@ -732,6 +843,77 @@ impl App {
         }
     }
 
+    /// Looks up genres for the albums in `tracks` that aren't known yet (in the background).
+    pub fn ensure_genres(&mut self, tracks: &[Track], ctx: &egui::Context) {
+        if let Some(rx) = &self.genre_rx {
+            while let Ok((id, g)) = rx.try_recv() {
+                self.genre_pending.remove(&id);
+                self.saved.album_genres.insert(id, g);
+            }
+        }
+        if !self.genre_pending.is_empty() {
+            return; // one batch at a time
+        }
+        let missing: Vec<String> = tracks
+            .iter()
+            .filter_map(|t| t.album.as_ref())
+            .map(|a| a.id.clone())
+            .filter(|id| deezer::is_deezer_id(id) && !self.saved.album_genres.contains_key(id))
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .take(40)
+            .collect();
+        if missing.is_empty() {
+            return;
+        }
+        self.genre_pending.extend(missing.iter().cloned());
+        let (tx, rx) = channel();
+        self.genre_rx = Some(rx);
+        let ctx = ctx.clone();
+        std::thread::spawn(move || {
+            for id in missing {
+                // Albums without genres are remembered as empty, so they aren't asked for again.
+                let g = deezer::album_genres(&id).unwrap_or_default();
+                if tx.send((id, g)).is_err() {
+                    return;
+                }
+                ctx.request_repaint();
+                // Stay well under Deezer's limit of 50 requests per 5 seconds.
+                std::thread::sleep(Duration::from_millis(150));
+            }
+        });
+    }
+
+    /// Copies a picture into Pulse's data folder and makes it the playlist's cover.
+    #[cfg_attr(not(windows), allow(dead_code))] // the picture picker is Windows-only
+    pub fn set_playlist_cover(&mut self, i: usize, picture: &std::path::Path) -> Result<(), String> {
+        let dir = crate::settings::data_dir().join("covers");
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        let ext = picture.extension().and_then(|x| x.to_str()).unwrap_or("jpg").to_lowercase();
+        // A new name each time, so the old picture isn't shown from memory.
+        let dest = dir.join(format!("playlist-{}-{}.{ext}", i, now_unix()));
+        std::fs::copy(picture, &dest).map_err(|e| format!("Couldn't copy the picture ({e})"))?;
+        if let Some(p) = self.saved.playlists.get_mut(i) {
+            if let Some(old) = p.cover.replace(dest) {
+                let _ = std::fs::remove_file(old);
+            }
+        }
+        Ok(())
+    }
+
+    pub fn remove_playlist_cover(&mut self, i: usize) {
+        if let Some(old) = self.saved.playlists.get_mut(i).and_then(|p| p.cover.take()) {
+            let _ = std::fs::remove_file(old);
+        }
+    }
+
+    pub fn remove_from_playlist(&mut self, i: usize, id: &str) {
+        if let Some(p) = self.saved.playlists.get_mut(i) {
+            p.tracks.retain(|t| t.id != id);
+            p.added.remove(id);
+        }
+    }
+
     /// Reads the Music folder in the background.
     pub fn scan_local_files(&mut self, ctx: &egui::Context) {
         let Some(dir) = crate::settings::music_dir() else { return };
@@ -827,10 +1009,12 @@ impl App {
     pub fn toggle_like(&mut self, t: &Track, ctx: &egui::Context) {
         if self.liked_ids.remove(&t.id) {
             self.saved.liked.retain(|x| x.id != t.id);
+            self.saved.liked_added.remove(&t.id);
             self.toast("Removed from Liked Songs", ctx);
         } else {
             self.liked_ids.insert(t.id.clone());
             self.saved.liked.insert(0, t.clone());
+            self.saved.liked_added.insert(t.id.clone(), now_unix());
             self.toast("Saved to Liked Songs", ctx);
         }
     }
@@ -841,7 +1025,8 @@ impl App {
         } else {
             name.trim().to_string()
         };
-        self.saved.playlists.push(LocalPlaylist { name: name.clone(), tracks: first.into_iter().collect() });
+        let added = first.iter().map(|t| (t.id.clone(), now_unix())).collect();
+        self.saved.playlists.push(LocalPlaylist { name: name.clone(), tracks: first.into_iter().collect(), cover: None, added });
         self.toast(&format!("Created “{name}”"), ctx);
         self.navigate(Route::Local(self.saved.playlists.len() - 1), ctx);
     }
@@ -1083,6 +1268,7 @@ impl App {
                             let msg = format!("Already in “{}”", p.name);
                             self.toast(&msg, ctx);
                         } else {
+                            p.added.insert(t.id.clone(), now_unix());
                             p.tracks.push(t);
                             let msg = format!("Added to “{}”", p.name);
                             self.toast(&msg, ctx);
@@ -1143,6 +1329,38 @@ impl eframe::App for App {
 #[cfg(test)]
 mod share_tests {
     use super::*;
+
+    fn song(id: &str, title: &str, artist: &str, album: &str, secs: u32) -> Track {
+        Track {
+            id: id.into(),
+            title: title.into(),
+            duration: secs,
+            artist: deezer::ArtistRef { name: artist.into(), ..Default::default() },
+            album: Some(deezer::AlbumRef { id: album.into(), title: album.into() }),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn playlist_search_genre_and_sort() {
+        let list = vec![song("a", "Zebra", "Bee", "1", 200), song("b", "Apple", "Cat", "2", 100), song("c", "Mango", "Ant", "1", 300)];
+        let genres = HashMap::from([("1".to_string(), vec!["Rap".to_string()]), ("2".to_string(), vec!["Pop".to_string()])]);
+        let added = HashMap::from([("a".to_string(), 10), ("b".to_string(), 30), ("c".to_string(), 20)]);
+        let ids = |v: Vec<Track>| v.into_iter().map(|t| t.id).collect::<Vec<_>>();
+        let mut view = ListView::default();
+        assert_eq!(ids(apply_view(&list, &view, Some(&added), &genres)), ["a", "b", "c"]);
+        view.sort = SortBy::Title;
+        assert_eq!(ids(apply_view(&list, &view, Some(&added), &genres)), ["b", "c", "a"]);
+        view.sort = SortBy::RecentlyAdded;
+        assert_eq!(ids(apply_view(&list, &view, Some(&added), &genres)), ["b", "c", "a"]);
+        view.sort = SortBy::Artist;
+        assert_eq!(ids(apply_view(&list, &view, Some(&added), &genres)), ["c", "a", "b"]);
+        view.genre = Some("Rap".into());
+        assert_eq!(ids(apply_view(&list, &view, Some(&added), &genres)), ["c", "a"]);
+        view.search = "zeb".into();
+        assert_eq!(ids(apply_view(&list, &view, Some(&added), &genres)), ["a"]);
+        assert_eq!(genre_chips(&list, &genres), ["Rap", "Pop"]);
+    }
 
     #[test]
     fn share_links_point_to_the_right_place() {

@@ -505,6 +505,12 @@ struct DzAlbumLabel {
     genres: DzGenres,
 }
 
+/// An album's genres.
+pub fn album_genres(id: &str) -> Result<Vec<String>, String> {
+    let a: DzAlbumLabel = get(&format!("/album/{id}"), &[])?;
+    Ok(a.genres.data.into_iter().map(|g| g.name).filter(|g| !g.is_empty()).collect())
+}
+
 /// Song credits: artists and their roles, label, release date, genres.
 pub fn credits(track_id: u64) -> Result<Credits, String> {
     let t: DzTrackCredits = get(&format!("/track/{track_id}"), &[])?;
