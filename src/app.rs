@@ -1,13 +1,14 @@
 //! App state and logic: navigation, data loading, the play queue, likes and playlists.
 //! The drawing code lives in `ui.rs`.
 
-use crate::api::{self, Playlist, TimeRange, Track, User};
-use crate::audio::{AudioEngine, LoadState};
+use crate::audio::{AudioEngine, LoadState, Resolver, StreamSource};
+use crate::deezer::{self, AlbumInfo, ArtistPage, Chart, PlaylistInfo, SearchResults, Track};
 use crate::widgets::TrackEvent;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::{Receiver, Sender, channel};
-use std::time::Duration;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 // ---------------------------------------------------------------------------
 // Navigation
@@ -16,23 +17,25 @@ use std::time::Duration;
 #[derive(Debug, Clone, PartialEq)]
 pub enum Route {
     Home,
-    Trending,
+    Charts,
     Search(String),
     Liked,
     Recent,
     Queue,
     Playlist(String),
+    Album(String),
     Artist(String),
     Local(usize),
 }
 
 /// Data downloaded for a page.
 pub enum Page {
-    Home { top: Vec<Track>, underground: Vec<Track>, playlists: Vec<Playlist> },
+    Home(Chart),
     Tracks(Vec<Track>),
-    Search { tracks: Vec<Track>, users: Vec<User>, playlists: Vec<Playlist> },
-    Playlist { info: Playlist, tracks: Vec<Track> },
-    Artist { user: User, tracks: Vec<Track> },
+    Search(SearchResults),
+    Playlist { info: PlaylistInfo, tracks: Vec<Track> },
+    Album { info: AlbumInfo, tracks: Vec<Track> },
+    Artist(ArtistPage),
 }
 
 pub enum Remote {
@@ -70,6 +73,10 @@ pub struct Saved {
     pub shuffle: bool,
     pub last_track: Option<Track>,
     pub light_mode: bool,
+    /// When the queue runs out, keep playing similar songs (like Spotify).
+    pub autoplay: bool,
+    /// Which YouTube video plays each song (song id → video id), so repeat plays skip the search.
+    pub youtube_ids: HashMap<String, String>,
 }
 
 impl Default for Saved {
@@ -83,11 +90,16 @@ impl Default for Saved {
             shuffle: false,
             last_track: None,
             light_mode: false,
+            autoplay: true,
+            youtube_ids: HashMap::new(),
         }
     }
 }
 
 const STORAGE_KEY: &str = "pulse_state_v1";
+
+/// YouTube audio links stop working after about six hours; reuse them for less.
+const LINK_LIFETIME: Duration = Duration::from_secs(4 * 3600);
 
 // ---------------------------------------------------------------------------
 // The app
@@ -111,9 +123,8 @@ pub struct App {
     pub search_edited_at: Option<f64>,
     pub focus_search: bool,
 
-    // trending filters
-    pub trending_time: TimeRange,
-    pub trending_genre: Option<String>,
+    // charts filter: (Deezer genre id, name); 0 = all genres
+    pub chart_genre: (u32, String),
 
     // playback
     pub queue: Vec<Track>,
@@ -126,6 +137,22 @@ pub struct App {
     pub muted_volume: Option<f32>,
     failures_in_row: u32,
     last_title: String,
+
+    // YouTube
+    /// Shared with background threads; copied into `saved` when saving.
+    youtube_ids: Arc<Mutex<HashMap<String, String>>>,
+    /// Audio links found ahead of time for upcoming songs (song id → link, found at).
+    prefetched: Arc<Mutex<HashMap<String, (StreamSource, Instant)>>>,
+    prefetching: Option<String>,
+
+    // autoplay
+    autoplay_rx: Option<Receiver<Vec<Track>>>,
+    /// Song whose similar songs were last fetched (so it happens once per song).
+    autoplay_for: Option<String>,
+    /// Queue ran out while similar songs were still loading: play them when they arrive.
+    advance_when_autoplay_arrives: bool,
+    /// Songs added by autoplay (shown with a label in the queue).
+    pub autoplay_ids: HashSet<String>,
 
     // overlays
     pub toast: Option<(String, f64)>,
@@ -146,6 +173,7 @@ impl App {
         let audio = AudioEngine::new();
         audio.set_volume(saved.volume);
 
+        let youtube_ids = Arc::new(Mutex::new(saved.youtube_ids.clone()));
         let mut app = Self {
             audio,
             liked_ids: saved.liked.iter().map(|t| t.id.clone()).collect(),
@@ -162,14 +190,20 @@ impl App {
             search_text: String::new(),
             search_edited_at: None,
             focus_search: false,
-            trending_time: TimeRange::Week,
-            trending_genre: None,
+            chart_genre: (0, "All genres".into()),
             queue_pos: 0,
             unshuffled: None,
             seek_preview: None,
             muted_volume: None,
             failures_in_row: 0,
             last_title: String::new(),
+            youtube_ids,
+            prefetched: Arc::new(Mutex::new(HashMap::new())),
+            prefetching: None,
+            autoplay_rx: None,
+            autoplay_for: None,
+            advance_when_autoplay_arrives: false,
+            autoplay_ids: HashSet::new(),
             toast: None,
             new_playlist: None,
             rename_playlist: None,
@@ -184,6 +218,11 @@ impl App {
 
     pub fn save(&mut self, storage: &mut dyn eframe::Storage) {
         self.saved.last_track = self.current.clone();
+        let mut ids = self.youtube_ids.lock().unwrap().clone();
+        if ids.len() > 5000 {
+            ids.clear(); // keep the saved file small; ids are found again when needed
+        }
+        self.saved.youtube_ids = ids;
         eframe::set_value(storage, STORAGE_KEY, &self.saved);
     }
 
@@ -225,13 +264,10 @@ impl App {
     pub fn route_key(&self) -> Option<String> {
         Some(match &self.route {
             Route::Home => "home".into(),
-            Route::Trending => format!(
-                "trending:{}:{:?}",
-                self.trending_genre.as_deref().unwrap_or("all"),
-                self.trending_time
-            ),
+            Route::Charts => format!("charts:{}", self.chart_genre.0),
             Route::Search(q) => format!("search:{q}"),
             Route::Playlist(id) => format!("playlist:{id}"),
+            Route::Album(id) => format!("album:{id}"),
             Route::Artist(id) => format!("artist:{id}"),
             Route::Liked | Route::Recent | Route::Queue | Route::Local(_) => return None,
         })
@@ -245,32 +281,15 @@ impl App {
         }
         self.cache.insert(key.clone(), Remote::Loading);
         let job: Box<dyn FnOnce() -> Result<Page, String> + Send> = match self.route.clone() {
-            Route::Home => Box::new(|| {
-                let top = api::trending_tracks(None, TimeRange::Week, 20)?;
-                let playlists = api::trending_playlists(12).unwrap_or_default();
-                let underground = api::underground_tracks(10).unwrap_or_default();
-                Ok(Page::Home { top, underground, playlists })
-            }),
-            Route::Trending => {
-                let (genre, time) = (self.trending_genre.clone(), self.trending_time);
-                Box::new(move || api::trending_tracks(genre.as_deref(), time, 100).map(Page::Tracks))
+            Route::Home => Box::new(|| deezer::chart().map(Page::Home)),
+            Route::Charts => {
+                let genre = self.chart_genre.0;
+                Box::new(move || deezer::chart_tracks(genre).map(Page::Tracks))
             }
-            Route::Search(q) => Box::new(move || {
-                let tracks = api::search_tracks(&q)?;
-                let users = api::search_users(&q).unwrap_or_default();
-                let playlists = api::search_playlists(&q).unwrap_or_default();
-                Ok(Page::Search { tracks, users, playlists })
-            }),
-            Route::Playlist(id) => Box::new(move || {
-                let info = api::playlist(&id)?;
-                let tracks = api::playlist_tracks(&id)?;
-                Ok(Page::Playlist { info, tracks })
-            }),
-            Route::Artist(id) => Box::new(move || {
-                let user = api::user(&id)?;
-                let tracks = api::user_tracks(&id)?;
-                Ok(Page::Artist { user, tracks })
-            }),
+            Route::Search(q) => Box::new(move || deezer::search(&q).map(Page::Search)),
+            Route::Playlist(id) => Box::new(move || deezer::playlist(&id).map(|(info, tracks)| Page::Playlist { info, tracks })),
+            Route::Album(id) => Box::new(move || deezer::album(&id).map(|(info, tracks)| Page::Album { info, tracks })),
+            Route::Artist(id) => Box::new(move || deezer::artist_page(&id).map(Page::Artist)),
             _ => return,
         };
         let tx = self.tx.clone();
@@ -326,18 +345,25 @@ impl App {
                 self.failures_in_row = 0;
                 if self.audio.finished() {
                     self.on_track_end(ctx);
+                } else {
+                    self.prefetch_next();
+                    self.maybe_fetch_autoplay(ctx);
                 }
             }
             _ => {}
         }
+        if let Some(n) = self.audio.take_notice() {
+            self.toast(&n, ctx);
+        }
+        self.receive_autoplay(ctx);
 
-        if self.is_playing() || self.audio.load_state() == LoadState::Loading {
+        if self.is_playing() || self.audio.load_state().is_busy() {
             ctx.request_repaint_after(Duration::from_millis(250));
         }
 
         // Window title shows the current song.
         let title = match &self.current {
-            Some(t) if self.is_playing() => format!("{} · {} — Pulse", t.title, t.user.name),
+            Some(t) if self.is_playing() => format!("{} · {} — Pulse", t.title, t.artist.name),
             _ => "Pulse".to_string(),
         };
         if title != self.last_title {
@@ -393,7 +419,7 @@ impl App {
 
     fn start_current(&mut self, ctx: &egui::Context) {
         let Some(track) = self.queue.get(self.queue_pos).cloned() else { return };
-        self.audio.load(track.stream_url(), false, ctx.clone());
+        self.audio.load(self.resolver(&track), false, ctx.clone());
         self.audio.set_volume(self.saved.volume);
         self.needs_load = false;
         self.seek_preview = None;
@@ -450,9 +476,14 @@ impl App {
     }
 
     fn on_track_end(&mut self, ctx: &egui::Context) {
+        self.maybe_fetch_autoplay(ctx);
         match self.saved.repeat {
             Repeat::One => self.start_current(ctx),
             _ if self.queue_pos + 1 < self.queue.len() || self.saved.repeat == Repeat::All => self.next(ctx),
+            _ if self.saved.autoplay && self.autoplay_rx.is_some() => {
+                // Similar songs are still loading: continue as soon as they arrive.
+                self.advance_when_autoplay_arrives = true;
+            }
             _ => {
                 // End of the queue: stop, ready to replay from the start of this song.
                 self.audio.stop();
@@ -572,6 +603,129 @@ impl App {
         self.saved.playlists.iter().map(|p| p.name.clone()).collect()
     }
 
+    /// Opens the artist's page (or searches their name for songs saved by Pulse 0.1).
+    pub fn open_artist(&mut self, t: &Track, ctx: &egui::Context) {
+        if t.has_artist_page() {
+            self.navigate(Route::Artist(t.artist.id.clone()), ctx);
+        } else {
+            self.search_text = t.artist.name.clone();
+            self.navigate(Route::Search(t.artist.name.clone()), ctx);
+        }
+    }
+
+    pub fn toggle_autoplay(&mut self) {
+        self.saved.autoplay = !self.saved.autoplay;
+        if !self.saved.autoplay {
+            self.advance_when_autoplay_arrives = false;
+        }
+    }
+
+    // ---------------------------------------------------------------- YouTube
+
+    /// How to get the audio for `track`: a link found ahead of time, or find it on
+    /// YouTube now. Pulse only ever plays full songs, never 30-second previews.
+    fn resolver(&self, track: &Track) -> Resolver {
+        let track = track.clone();
+        let ids = self.youtube_ids.clone();
+        let prefetched = self.prefetched.clone();
+        Box::new(move |status| {
+            if let Some((src, at)) = prefetched.lock().unwrap().remove(&track.id)
+                && at.elapsed() < LINK_LIFETIME
+            {
+                return Ok(src);
+            }
+            let known = ids.lock().unwrap().get(&track.id).cloned();
+            match crate::youtube::resolve(&track, known, status) {
+                Ok((src, video)) => {
+                    ids.lock().unwrap().insert(track.id.clone(), video);
+                    Ok(src)
+                }
+                Err(e) => {
+                    // A saved video id may have gone away: forget it so the next try searches again.
+                    ids.lock().unwrap().remove(&track.id);
+                    Err(e)
+                }
+            }
+        })
+    }
+
+    /// Finds the next song's audio link in the background, so it starts instantly.
+    fn prefetch_next(&mut self) {
+        let Some(next) = self.queue.get(self.queue_pos + 1).cloned() else { return };
+        if self.prefetching.as_deref() == Some(next.id.as_str()) {
+            return;
+        }
+        self.prefetching = Some(next.id.clone());
+        if self.prefetched.lock().unwrap().contains_key(&next.id) {
+            return;
+        }
+        let ids = self.youtube_ids.clone();
+        let prefetched = self.prefetched.clone();
+        std::thread::spawn(move || {
+            let known = ids.lock().unwrap().get(&next.id).cloned();
+            if let Ok((src, video)) = crate::youtube::resolve(&next, known, &|_| {}) {
+                ids.lock().unwrap().insert(next.id.clone(), video);
+                let mut p = prefetched.lock().unwrap();
+                p.retain(|_, (_, at)| at.elapsed() < LINK_LIFETIME);
+                p.insert(next.id.clone(), (src, Instant::now()));
+            }
+        });
+    }
+
+    // ---------------------------------------------------------------- autoplay
+
+    /// On the last song of the queue: start loading similar songs to play next.
+    fn maybe_fetch_autoplay(&mut self, ctx: &egui::Context) {
+        if !self.saved.autoplay || self.saved.repeat != Repeat::Off || self.autoplay_rx.is_some() {
+            return;
+        }
+        if self.queue_pos + 1 < self.queue.len() {
+            return;
+        }
+        let Some(cur) = self.current.clone() else { return };
+        if self.autoplay_for.as_deref() == Some(cur.id.as_str()) {
+            return;
+        }
+        self.autoplay_for = Some(cur.id.clone());
+        let (tx, rx) = channel();
+        self.autoplay_rx = Some(rx);
+        let ctx = ctx.clone();
+        std::thread::spawn(move || {
+            let _ = tx.send(deezer::similar_to(&cur).unwrap_or_default());
+            ctx.request_repaint();
+        });
+    }
+
+    fn receive_autoplay(&mut self, ctx: &egui::Context) {
+        let Some(rx) = &self.autoplay_rx else { return };
+        let Ok(found) = rx.try_recv() else { return };
+        self.autoplay_rx = None;
+        // Skip songs that were just played or are already queued.
+        let recent: HashSet<&str> = self.saved.recent.iter().take(30).map(|t| t.id.as_str()).collect();
+        let queued: HashSet<String> = self.queue.iter().map(|t| t.id.clone()).collect();
+        let mut added = 0;
+        for t in found {
+            if added >= 15 || recent.contains(t.id.as_str()) || queued.contains(&t.id) {
+                continue;
+            }
+            self.autoplay_ids.insert(t.id.clone());
+            if let Some(u) = &mut self.unshuffled {
+                u.push(t.clone());
+            }
+            self.queue.push(t);
+            added += 1;
+        }
+        if self.advance_when_autoplay_arrives {
+            self.advance_when_autoplay_arrives = false;
+            if added > 0 {
+                self.next(ctx);
+            } else {
+                self.audio.stop();
+                self.needs_load = true;
+            }
+        }
+    }
+
     /// Applies what the user did in a track list. `list` is the list that was shown.
     pub fn handle_events(&mut self, events: Vec<TrackEvent>, list: &[Track], ctx: &egui::Context) {
         for ev in events {
@@ -641,7 +795,8 @@ impl App {
                         }
                     }
                 }
-                TrackEvent::OpenArtist(id) => self.navigate(Route::Artist(id), ctx),
+                TrackEvent::OpenArtist(t) => self.open_artist(&t, ctx),
+                TrackEvent::OpenAlbum(id) => self.navigate(Route::Album(id), ctx),
             }
         }
     }
