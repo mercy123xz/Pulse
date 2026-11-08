@@ -11,6 +11,7 @@ mod import;
 mod local;
 mod net;
 mod settings;
+mod share;
 mod theme;
 mod themes;
 mod ui;
