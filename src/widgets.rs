@@ -469,6 +469,8 @@ pub struct TableCtx<'a> {
     pub queue_mode: bool,
     /// Downloaded songs (shown with a small arrow).
     pub downloads: &'a HashMap<String, std::path::PathBuf>,
+    /// When songs were added (shows the "Date added" column).
+    pub added: Option<&'a HashMap<String, u64>>,
     /// Number shown for the first row (queue shows "next up" starting at 1).
     pub index_offset: usize,
 }
@@ -479,28 +481,59 @@ struct Cols {
     num: Rect,
     title: Rect,
     album: Option<Rect>,
+    date: Option<Rect>,
     like: Rect,
     time: Rect,
 }
 
-fn columns(row: Rect) -> Cols {
+fn columns(row: Rect, with_date: bool) -> Cols {
     let w = row.width();
     let x0 = row.left();
     let col = |a: f32, b: f32| Rect::from_x_y_ranges(a..=b, row.y_range());
     let num = col(x0, x0 + 44.0);
     let time = col(row.right() - 64.0, row.right() - 12.0);
     let like = col(time.left() - 40.0, time.left());
+    let date = (with_date && w > 900.0).then(|| col(like.left() - 150.0, like.left() - 12.0));
     let wide = w > 720.0;
-    let album_right = like.left() - 16.0;
-    let album_w = (w * 0.3).min(320.0);
+    let album_right = date.map(|d| d.left()).unwrap_or(like.left()) - 16.0;
+    let album_w = (w * if date.is_some() { 0.24 } else { 0.3 }).min(320.0);
     let album = wide.then(|| col(album_right - album_w, album_right));
     let title_right = album.map(|a| a.left()).unwrap_or(like.left()) - 16.0;
-    Cols { num, title: col(num.right() + 4.0, title_right), album, like, time }
+    Cols { num, title: col(num.right() + 4.0, title_right), album, date, like, time }
 }
 
-pub fn track_table_header(ui: &mut Ui) {
+/// "Date added" like Spotify: "3 days ago" for recent songs, else the date.
+pub fn fmt_added(when: u64, now: u64) -> String {
+    let age = now.saturating_sub(when);
+    let day = 86_400;
+    match age {
+        a if a < day => "Today".into(),
+        a if a < 2 * day => "Yesterday".into(),
+        a if a < 7 * day => format!("{} days ago", a / day),
+        a if a < 28 * day => {
+            let w = a / (7 * day);
+            if w == 1 { "1 week ago".into() } else { format!("{w} weeks ago") }
+        }
+        _ => {
+            // Days since 1970 → calendar date (Howard Hinnant's algorithm).
+            let z = (when / day) as i64 + 719_468;
+            let era = z.div_euclid(146_097);
+            let doe = z - era * 146_097;
+            let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+            let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+            let mp = (5 * doy + 2) / 153;
+            let d = doy - (153 * mp + 2) / 5 + 1;
+            let m = if mp < 10 { mp + 3 } else { mp - 9 };
+            let y = yoe + era * 400 + i64::from(m <= 2);
+            const MONTHS: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+            format!("{} {d}, {y}", MONTHS[(m - 1) as usize])
+        }
+    }
+}
+
+pub fn track_table_header(ui: &mut Ui, with_date: bool) {
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 32.0), Sense::hover());
-    let c = columns(rect);
+    let c = columns(rect, with_date);
     let f = med(11.5);
     let p = ui.painter();
     p.text(c.num.center(), Align2::CENTER_CENTER, "#", f.clone(), pal().text_faint);
@@ -508,13 +541,16 @@ pub fn track_table_header(ui: &mut Ui) {
     if let Some(a) = c.album {
         p.text(a.left_center(), Align2::LEFT_CENTER, tr("Album").to_uppercase(), f.clone(), pal().text_faint);
     }
+    if let Some(d) = c.date {
+        p.text(d.left_center(), Align2::LEFT_CENTER, tr("Date added").to_uppercase(), f.clone(), pal().text_faint);
+    }
     p.text(c.time.right_center(), Align2::RIGHT_CENTER, icon::CLOCK_COUNTER_CLOCKWISE, regular(14.0), pal().text_faint);
     p.hline(rect.x_range(), rect.bottom(), Stroke::new(1.0, pal().border));
     ui.add_space(6.0);
 }
 
 pub fn track_table(ui: &mut Ui, id_salt: &str, tracks: &[Track], cx: &TableCtx, events: &mut Vec<TrackEvent>) {
-    track_table_header(ui);
+    track_table_header(ui, cx.added.is_some());
     let base = ui.id().with(id_salt);
     ui.spacing_mut().item_spacing.y = 0.0;
     for (i, t) in tracks.iter().enumerate() {
@@ -539,7 +575,7 @@ fn track_row(ui: &mut Ui, id: egui::Id, i: usize, t: &Track, cx: &TableCtx, ev: 
     } else if is_current {
         ui.painter().rect_filled(rect, R_MD, pal().accent.gamma_multiply(0.08));
     }
-    let c = columns(rect);
+    let c = columns(rect, cx.added.is_some());
 
     // Number / play icon / "now playing" bars
     if hovered {
@@ -592,6 +628,11 @@ fn track_row(ui: &mut Ui, id: egui::Id, i: usize, t: &Track, cx: &TableCtx, ev: 
             pal().text_muted,
             a.width(),
         ));
+    }
+
+    if let (Some(d), Some(when)) = (c.date, cx.added.and_then(|a| a.get(&t.id))) {
+        let text = fmt_added(*when, crate::app::now_unix());
+        paint_line(ui, pos2(d.left(), d.center().y - 8.0), tr(&text), regular(12.5), pal().text_muted, d.width());
     }
 
     // Heart
@@ -685,7 +726,7 @@ pub fn skeleton_rows(ui: &mut Ui, n: usize) {
     let col = pal().surface_hover.gamma_multiply(a);
     for k in 0..n {
         let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), ROW_H), Sense::hover());
-        let c = columns(rect);
+        let c = columns(rect, false);
         let art = Rect::from_min_size(pos2(c.title.left(), rect.center().y - 20.0), Vec2::splat(40.0));
         ui.painter().rect_filled(art, CornerRadius::same(5), col);
         let w1 = 140.0 + ((k * 37) % 90) as f32;
@@ -732,4 +773,16 @@ pub fn section_title(ui: &mut Ui, title: &str, action: Option<&str>) -> bool {
     });
     ui.add_space(8.0);
     clicked
+}
+
+#[cfg(test)]
+mod added_tests {
+    #[test]
+    fn date_added_reads_like_spotify() {
+        let now = 1_794_200_000; // Nov 2026
+        assert_eq!(super::fmt_added(now - 60, now), "Today");
+        assert_eq!(super::fmt_added(now - 3 * 86_400, now), "3 days ago");
+        assert_eq!(super::fmt_added(now - 15 * 86_400, now), "2 weeks ago");
+        assert_eq!(super::fmt_added(1_700_000_000, now), "Nov 14, 2023");
+    }
 }
