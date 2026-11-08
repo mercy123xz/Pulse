@@ -4,9 +4,12 @@
 mod api;
 mod app;
 mod audio;
+mod deezer;
+mod providers;
 mod theme;
 mod ui;
 mod widgets;
+mod youtube;
 
 fn main() -> eframe::Result {
     #[allow(unused_mut)]
