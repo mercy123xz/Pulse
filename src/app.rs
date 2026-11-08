@@ -105,6 +105,13 @@ impl SortBy {
     }
 }
 
+/// A playlist import running in the background.
+pub struct ImportJob {
+    pub progress: Arc<Mutex<crate::import::Progress>>,
+    pub cancel: Arc<std::sync::atomic::AtomicBool>,
+    rx: Receiver<Result<crate::import::Imported, String>>,
+}
+
 /// Seconds since 1970, for "Date added".
 pub fn now_unix() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
@@ -182,6 +189,8 @@ pub struct Saved {
     pub liked_added: HashMap<String, u64>,
     /// Genres of albums looked up so far (album id → genres), so it happens once.
     pub album_genres: HashMap<String, Vec<String>>,
+    /// YouTube view counts: song id → (views, when looked up).
+    pub views: HashMap<String, (u64, u64)>,
 }
 
 impl Default for Saved {
@@ -201,6 +210,7 @@ impl Default for Saved {
             downloads: HashMap::new(),
             liked_added: HashMap::new(),
             album_genres: HashMap::new(),
+            views: HashMap::new(),
         }
     }
 }
@@ -341,6 +351,17 @@ pub struct App {
 
     /// Search / genre / sort of the list on screen (reset when the page changes).
     pub list_view: ListView,
+
+    /// The "Import a playlist" window: the link typed so far, and the running import.
+    pub import_open: bool,
+    pub import_url: String,
+    pub import_running: Option<ImportJob>,
+
+    // YouTube view counts
+    views_queue: std::collections::VecDeque<Track>,
+    views_pending: HashSet<String>,
+    views_tx: Sender<(String, Option<(String, u64)>)>,
+    views_rx: Receiver<(String, Option<(String, u64)>)>,
     genre_rx: Option<Receiver<(String, Vec<String>)>>,
     genre_pending: HashSet<String>,
 }
@@ -354,6 +375,7 @@ impl App {
         let themes = crate::themes::list();
         crate::i18n::set_language(saved.settings.language);
         let (tx, rx) = channel();
+        let (views_tx, views_rx) = channel();
         let audio = AudioEngine::new();
         audio.set_volume(saved.volume);
 
@@ -406,6 +428,13 @@ impl App {
             downloading: None,
             download_rx: None,
             list_view: ListView::default(),
+            import_open: false,
+            import_url: String::new(),
+            import_running: None,
+            views_queue: Default::default(),
+            views_pending: HashSet::new(),
+            views_tx,
+            views_rx,
             genre_rx: None,
             genre_pending: HashSet::new(),
         };
@@ -452,6 +481,10 @@ impl App {
         }
         self.forward.clear();
         self.list_view = ListView::default();
+        // Lookups for the page we left aren't needed any more.
+        for t in self.views_queue.drain(..) {
+            self.views_pending.remove(&t.id);
+        }
         if self.route == Route::Settings {
             self.cache_size = None;
         }
@@ -530,6 +563,8 @@ impl App {
     /// moves on to the next song when one ends.
     pub fn tick(&mut self, ctx: &egui::Context) {
         self.receive_credits();
+        self.receive_import(ctx);
+        self.run_views(ctx);
         self.reload_themes_if_changed(ctx);
         self.run_downloads(ctx);
         if let Some(rx) = &self.local_rx
@@ -974,6 +1009,123 @@ impl App {
         if let Some(p) = self.saved.playlists.get_mut(i) {
             p.tracks.retain(|t| t.id != id);
             p.added.remove(id);
+        }
+    }
+
+    /// Asks for YouTube view counts of songs that don't have a recent one.
+    pub fn ensure_views(&mut self, tracks: &[Track]) {
+        const WEEK: u64 = 7 * 86_400;
+        let now = now_unix();
+        for t in tracks.iter().take(60) {
+            if crate::local::is_local(&t.id) || self.views_pending.contains(&t.id) {
+                continue;
+            }
+            if self.saved.views.get(&t.id).is_some_and(|(_, at)| now.saturating_sub(*at) < WEEK) {
+                continue;
+            }
+            self.views_pending.insert(t.id.clone());
+            self.views_queue.push_back(t.clone());
+        }
+    }
+
+    /// Looks up view counts, three songs at a time (called every frame).
+    fn run_views(&mut self, ctx: &egui::Context) {
+        while let Ok((id, found)) = self.views_rx.try_recv() {
+            self.views_pending.remove(&id);
+            if let Some((video, n)) = found {
+                self.saved.views.insert(id.clone(), (n, now_unix()));
+                // Remember the video too, so playing the song skips the search.
+                self.youtube_ids.lock().unwrap().entry(id).or_insert(video);
+            }
+        }
+        let running = self.views_pending.len() - self.views_queue.len();
+        if running >= 3 || !crate::youtube::tools_ready() {
+            return;
+        }
+        for _ in running..3 {
+            let Some(t) = self.views_queue.pop_front() else { break };
+            let tx = self.views_tx.clone();
+            let ctx = ctx.clone();
+            std::thread::spawn(move || {
+                let r = crate::youtube::views(&t).ok().flatten();
+                let _ = tx.send((t.id, r));
+                ctx.request_repaint();
+            });
+        }
+    }
+
+    /// Starts importing the playlist at `import_url`.
+    pub fn start_import(&mut self, ctx: &egui::Context) {
+        let url = self.import_url.trim().to_string();
+        if let Err(e) = crate::import::detect(&url) {
+            self.toast(&e, ctx);
+            return;
+        }
+        let progress = Arc::new(Mutex::new(crate::import::Progress::default()));
+        let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (tx, rx) = channel();
+        let (p, c, ctx2) = (progress.clone(), cancel.clone(), ctx.clone());
+        std::thread::spawn(move || {
+            // Keep the window updating while the import runs.
+            let ticker = {
+                let ctx = ctx2.clone();
+                let c = c.clone();
+                std::thread::spawn(move || {
+                    while !c.load(std::sync::atomic::Ordering::Relaxed) {
+                        ctx.request_repaint();
+                        std::thread::sleep(Duration::from_millis(300));
+                    }
+                })
+            };
+            let r = crate::import::run(&url, &p, &c);
+            let _ = tx.send(r);
+            c.store(true, std::sync::atomic::Ordering::Relaxed);
+            let _ = ticker.join();
+            ctx2.request_repaint();
+        });
+        self.import_running = Some(ImportJob { progress, cancel, rx });
+    }
+
+    pub fn cancel_import(&mut self) {
+        if let Some(job) = self.import_running.take() {
+            job.cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+
+    /// Turns a finished import into a new playlist (called every frame).
+    fn receive_import(&mut self, ctx: &egui::Context) {
+        let Some(job) = &self.import_running else { return };
+        let Ok(result) = job.rx.try_recv() else { return };
+        self.import_running = None;
+        match result {
+            Ok(imp) => {
+                let mut name = imp.name.trim().to_string();
+                if name.is_empty() {
+                    name = "Imported playlist".into();
+                }
+                if self.saved.playlists.iter().any(|p| p.name == name) {
+                    name = format!("{name} (imported)");
+                }
+                let now = now_unix();
+                let mut ids = self.youtube_ids.lock().unwrap();
+                for (t, video) in &imp.tracks {
+                    if let Some(v) = video {
+                        ids.insert(t.id.clone(), v.clone());
+                    }
+                }
+                drop(ids);
+                let total = imp.tracks.len();
+                let tracks: Vec<Track> = imp.tracks.into_iter().map(|(t, _)| t).collect();
+                let added = tracks.iter().map(|t| (t.id.clone(), now)).collect();
+                self.saved.playlists.push(LocalPlaylist { name: name.clone(), tracks, cover: None, added });
+                let i = self.saved.playlists.len() - 1;
+                self.import_open = false;
+                self.import_url.clear();
+                self.navigate(Route::Local(i), ctx);
+                let extra = if imp.matched < total { format!(" ({} not found on Deezer, they'll still play)", total - imp.matched) } else { String::new() };
+                self.toast(&format!("Imported “{name}”: {total} songs{extra}"), ctx);
+            }
+            Err(e) => self.toast(&e, ctx),
         }
     }
 

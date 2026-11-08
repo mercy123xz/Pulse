@@ -422,6 +422,38 @@ pub fn chart_tracks(genre: u32) -> Result<Vec<Track>, String> {
     get::<List<DzTrack>>(&format!("/chart/{genre}/tracks"), &[("limit", "100")]).map(tracks)
 }
 
+/// Finds the Deezer song that is `title` by `artist` (for imported playlists).
+/// `duration` (seconds, 0 if unknown) helps pick the right version.
+pub fn find_track(artist: &str, title: &str, duration: u32) -> Result<Option<Track>, String> {
+    use crate::youtube::{core_title, norm};
+    let want_title = norm(&core_title(title));
+    let want_artist = norm(artist);
+    let pick = |list: Vec<DzTrack>| -> Option<Track> {
+        list.into_iter()
+            .map(|t| track(t, None))
+            .filter(|t| {
+                let got_title = norm(&core_title(&t.title));
+                let title_ok = !want_title.is_empty() && (got_title == want_title || got_title.contains(&want_title) || want_title.contains(&got_title));
+                let artist_ok = want_artist.is_empty() || {
+                    let a = norm(&t.artist.name);
+                    !a.is_empty() && (want_artist.contains(&a) || a.contains(&want_artist))
+                };
+                let length_ok = duration == 0 || t.duration == 0 || t.duration.abs_diff(duration) <= 8;
+                title_ok && artist_ok && length_ok
+            })
+            .min_by_key(|t| if duration == 0 { 0 } else { t.duration.abs_diff(duration) })
+    };
+    // Deezer's precise search first, then a plain one.
+    let precise = format!("artist:\"{}\" track:\"{}\"", artist.replace('"', ""), core_title(title).replace('"', ""));
+    let first: List<DzTrack> = get("/search/track", &[("q", &precise), ("limit", "10")])?;
+    if let Some(t) = pick(first.data) {
+        return Ok(Some(t));
+    }
+    let plain = format!("{artist} {}", core_title(title));
+    let second: List<DzTrack> = get("/search/track", &[("q", &plain), ("limit", "10")])?;
+    Ok(pick(second.data))
+}
+
 pub fn search(q: &str) -> Result<SearchResults, String> {
     let t: List<DzTrack> = get("/search/track", &[("q", q), ("limit", "40")])?;
     let artists: List<DzArtist> = get("/search/artist", &[("q", q), ("limit", "12")]).unwrap_or_default();

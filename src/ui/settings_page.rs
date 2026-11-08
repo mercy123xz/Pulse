@@ -53,6 +53,14 @@ pub fn settings_page(app: &mut App, ui: &mut Ui) {
     // ------------------------------------------------------------ Library
     section(ui, tr("Your Library"));
     let music = crate::settings::music_dir().map(|p| p.display().to_string()).unwrap_or_default();
+    let mut open_import = false;
+    row(ui, tr("Import a playlist"), tr("Bring in a playlist from YouTube, Spotify or SoundCloud."), |ui| {
+        open_import = ui.button(tr("Import")).clicked();
+    });
+    if open_import {
+        app.import_open = true;
+    }
+    let s = &mut app.saved.settings;
     row(ui, tr("Show Local Files"), &format!("{} {music}", tr("Songs from your Music folder:")), |ui| {
         switch(ui, &mut s.show_local_files, tr("Show Local Files"));
     });

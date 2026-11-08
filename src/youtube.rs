@@ -279,6 +279,7 @@ pub struct SearchEntry {
     pub duration: Option<f64>,
     pub channel: Option<String>,
     pub uploader: Option<String>,
+    pub view_count: Option<u64>,
 }
 
 #[derive(Deserialize, Default)]
@@ -290,12 +291,12 @@ struct SearchResult {
 
 /// Lowercases and keeps only letters and digits, so "Tengo Algo Para Ti!" and
 /// "tengo algo para ti" compare equal.
-fn norm(s: &str) -> String {
+pub fn norm(s: &str) -> String {
     s.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect()
 }
 
 /// The song title without "(feat. …)" / "(with …)" and similar extras.
-fn core_title(title: &str) -> String {
+pub fn core_title(title: &str) -> String {
     let lower = title.to_lowercase();
     let cut = ["(feat", "(ft.", "(with ", "[feat", " feat.", " ft. "].iter().filter_map(|m| lower.find(m)).min();
     match cut {
@@ -419,6 +420,40 @@ pub fn find_videos(tools: &Tools, track: &Track) -> Result<Vec<String>, String> 
         (true, Some(e)) if entries.is_empty() => Err(e),
         _ => Err("Couldn't find this song on YouTube.".to_string()),
     }
+}
+
+/// True once yt-dlp is installed (view counts don't start the first-time setup).
+pub fn tools_ready() -> bool {
+    let dir = tools_dir();
+    dir.join(YTDLP.save_as).is_file() && dir.join(DENO.save_as).is_file()
+}
+
+/// The YouTube video Pulse would play for `track`, and its view count.
+pub fn views(track: &Track) -> Result<Option<(String, u64)>, String> {
+    if !tools_ready() {
+        return Ok(None);
+    }
+    let tools = Tools { ytdlp: tools_dir().join(YTDLP.save_as), deno: tools_dir().join(DENO.save_as), dir: tools_dir() };
+    let [_, plain] = queries(track);
+    let entries = search(&tools, format!("ytsearch6:{plain}"), 6)?;
+    Ok(rank(track, &entries).into_iter().find_map(|e| e.view_count.map(|v| (e.id.clone(), v))))
+}
+
+/// The videos in a YouTube (or YouTube Music) playlist: its title and entries.
+pub fn playlist(url: &str, status: &dyn Fn(&str)) -> Result<(String, Vec<SearchEntry>), String> {
+    let tools = ensure_tools(status)?;
+    #[derive(Deserialize, Default)]
+    #[serde(default)]
+    struct Playlist {
+        title: Option<String>,
+        entries: Vec<Option<SearchEntry>>,
+    }
+    let mut args = base_args(&tools);
+    args.extend(["--flat-playlist".into(), "-J".into(), "--playlist-end".into(), "1000".into(), url.to_string()]);
+    let out = run(&tools.ytdlp, &args, Duration::from_secs(120))?;
+    let p: Playlist = serde_json::from_str(&out).map_err(|e| format!("Unexpected YouTube reply ({e})"))?;
+    let entries: Vec<SearchEntry> = p.entries.into_iter().flatten().filter(|e| !e.id.is_empty()).collect();
+    Ok((p.title.unwrap_or_else(|| "YouTube playlist".into()), entries))
 }
 
 // ---------------------------------------------------------------------------
@@ -549,7 +584,7 @@ mod tests {
     }
 
     fn entry(id: &str, title: &str, secs: f64, channel: &str) -> SearchEntry {
-        SearchEntry { id: id.into(), title: title.into(), duration: Some(secs), channel: Some(channel.into()), uploader: None }
+        SearchEntry { id: id.into(), title: title.into(), duration: Some(secs), channel: Some(channel.into()), uploader: None, view_count: None }
     }
 
     #[test]

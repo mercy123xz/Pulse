@@ -7,6 +7,7 @@ mod deezer;
 mod downloads;
 mod dsp;
 mod i18n;
+mod import;
 mod local;
 mod net;
 mod settings;
