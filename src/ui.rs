@@ -1,7 +1,7 @@
 //! Everything you see: sidebar, top bar, pages, the player bar and pop-ups.
 
-use crate::api::{TimeRange, Track};
 use crate::app::{App, Page, Remote, Repeat, Route};
+use crate::deezer::{AlbumInfo, ArtistInfo, PlaylistInfo, Track};
 use crate::audio::LoadState;
 use crate::theme::*;
 use crate::widgets::*;
@@ -117,8 +117,8 @@ fn sidebar(app: &mut App, ui: &mut Ui) {
     if nav_item(ui, icon::HOUSE, "Home", app.route == Route::Home, None).clicked() {
         app.navigate(Route::Home, &ctx);
     }
-    if nav_item(ui, icon::FIRE, "Trending", app.route == Route::Trending, None).clicked() {
-        app.navigate(Route::Trending, &ctx);
+    if nav_item(ui, icon::FIRE, "Charts", app.route == Route::Charts, None).clicked() {
+        app.navigate(Route::Charts, &ctx);
     }
     let searching = matches!(app.route, Route::Search(_));
     if nav_item(ui, icon::MAGNIFYING_GLASS, "Search", searching, None).clicked() {
@@ -297,9 +297,9 @@ fn top_bar(app: &mut App, ui: &mut Ui) {
                 app.toggle_theme(&ctx);
             }
             ui.add_space(6.0);
-            let r = ui.add(egui::Label::new(RichText::new("Powered by Audius").font(med(11.5)).color(pal().text_faint)).sense(Sense::click()));
-            if r.on_hover_text("Music streamed from the open Audius network").on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
-                ui.ctx().open_url(egui::OpenUrl::new_tab("https://audius.co"));
+            let r = ui.add(egui::Label::new(RichText::new("Music info by Deezer").font(med(11.5)).color(pal().text_faint)).sense(Sense::click()));
+            if r.on_hover_text("Song info, artwork and charts from Deezer. Audio from YouTube.").on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                ui.ctx().open_url(egui::OpenUrl::new_tab("https://www.deezer.com"));
             }
         });
     });
@@ -312,9 +312,10 @@ fn top_bar(app: &mut App, ui: &mut Ui) {
 fn page(app: &mut App, ui: &mut Ui) {
     match app.route.clone() {
         Route::Home => home(app, ui),
-        Route::Trending => trending(app, ui),
+        Route::Charts => charts(app, ui),
         Route::Search(q) => search(app, ui, &q),
         Route::Playlist(_) => remote_playlist(app, ui),
+        Route::Album(_) => album_page(app, ui),
         Route::Artist(_) => artist(app, ui),
         Route::Liked => {
             let tracks = app.saved.liked.clone();
@@ -408,107 +409,143 @@ fn home(app: &mut App, ui: &mut Ui) {
     let r = R_LG;
     ui.painter().rect_filled(rect, r, Color32::from_rgb(28, 20, 52));
     vgradient(ui, rect.shrink(1.0), pal().accent.gamma_multiply(0.30), Color32::TRANSPARENT);
-    ui.painter().text(rect.left_top() + vec2(28.0, 30.0), Align2::LEFT_TOP, "Discover what's hot on Audius", heavy(28.0), ON_DARK);
+    ui.painter().text(rect.left_top() + vec2(28.0, 30.0), Align2::LEFT_TOP, "Any song. Any artist.", heavy(28.0), ON_DARK);
     ui.painter().text(
         rect.left_top() + vec2(28.0, 72.0),
         Align2::LEFT_TOP,
-        "Free, full-length tracks from independent artists — streamed natively, no browser.",
+        "Search anything and press play: full songs, with autoplay when your queue runs out.",
         regular(14.0),
         ON_DARK_MUTED,
     );
     ui.painter().text(rect.right_center() - vec2(40.0, 0.0), Align2::RIGHT_CENTER, icon::VINYL_RECORD, regular(96.0), pal().accent_soft.gamma_multiply(0.25));
 
-    // Genre chips
+    // Genre chips → charts for that genre
     ui.add_space(14.0);
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
-        for g in crate::api::GENRES.iter().take(14) {
-            if pill(ui, g, false).clicked() {
-                app.trending_genre = Some(g.to_string());
+        for (id, name) in crate::deezer::GENRES.iter().take(14) {
+            if pill(ui, name, false).clicked() {
+                app.chart_genre = (*id, name.to_string());
                 let ctx = ui.ctx().clone();
-                app.navigate(Route::Trending, &ctx);
+                app.navigate(Route::Charts, &ctx);
             }
         }
     });
 
     with_remote(app, ui, |app, ui, page| {
-        let Page::Home { top, underground, playlists } = page else { return };
-        if !playlists.is_empty() {
-            section_title(ui, "Trending playlists", None);
-            playlist_grid(app, ui, playlists, Some(2));
-        }
-        if section_title(ui, "Top tracks this week", Some("See all")) {
-            app.trending_genre = None;
-            app.trending_time = TimeRange::Week;
+        let Page::Home(chart) = page else { return };
+        if section_title(ui, "Top songs right now", Some("See all")) {
+            app.chart_genre = (0, "All genres".into());
             let ctx = ui.ctx().clone();
-            app.navigate(Route::Trending, &ctx);
+            app.navigate(Route::Charts, &ctx);
         }
-        let top10: Vec<Track> = top.iter().take(10).cloned().collect();
-        tracks_block(app, ui, "home_top", &top10);
-        if !underground.is_empty() {
-            section_title(ui, "Underground rising", None);
-            tracks_block(app, ui, "home_ug", underground);
+        tracks_block(app, ui, "home_top", &chart.tracks);
+        if !chart.albums.is_empty() {
+            section_title(ui, "Popular albums", None);
+            album_grid(app, ui, &chart.albums, Some(2));
+        }
+        if !chart.artists.is_empty() {
+            section_title(ui, "Popular artists", None);
+            artist_grid(app, ui, &chart.artists, Some(1));
+        }
+        if !chart.playlists.is_empty() {
+            section_title(ui, "Popular playlists", None);
+            playlist_grid(app, ui, &chart.playlists, Some(1));
         }
     });
 }
 
-fn playlist_grid(app: &mut App, ui: &mut Ui, playlists: &[crate::api::Playlist], rows: Option<usize>) {
+/// "Play" pressed on a card: open the page and start playing once its songs load.
+fn open_and_play(app: &mut App, route: Route, ctx: &egui::Context) {
+    app.navigate(route.clone(), ctx);
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new("autoplay_page"), format!("{route:?}")));
+}
+
+/// Starts the page's songs if "Play" was pressed on its card.
+fn autoplay_page(app: &mut App, ctx: &egui::Context, tracks: &[Track]) {
+    let want: Option<String> = ctx.data_mut(|d| d.get_temp(egui::Id::new("autoplay_page")));
+    if want.as_deref() == Some(format!("{:?}", app.route).as_str()) {
+        ctx.data_mut(|d| d.remove::<String>(egui::Id::new("autoplay_page")));
+        app.play_list(tracks, 0, ctx);
+    }
+}
+
+fn album_grid(app: &mut App, ui: &mut Ui, albums: &[AlbumInfo], rows: Option<usize>) {
     let ctx = ui.ctx().clone();
-    let mut open = None;
-    let mut play = None;
-    card_grid(ui, playlists, rows, |ui, w, p| {
-        let kind = if p.is_album { "Album" } else { "Playlist" };
-        let info = CardInfo {
-            id: egui::Id::new(("pl", &p.id)),
-            art: p.art(),
-            title: &p.playlist_name,
-            subtitle: format!("{kind} · {}", p.user.name),
-            round: false,
-        };
+    let mut action = None;
+    card_grid(ui, albums, rows, |ui, w, a| {
+        let mut sub = a.kind().to_string();
+        if let Some(y) = a.year() {
+            sub = format!("{y} · {sub}");
+        }
+        if !a.artist.name.is_empty() {
+            sub = format!("{sub} · {}", a.artist.name);
+        }
+        let info = CardInfo { id: egui::Id::new(("album", &a.id)), art: a.cover.as_deref(), title: &a.title, subtitle: sub, round: false };
         match card(ui, w, &info) {
-            CardClick::Open => open = Some(p.id.clone()),
-            CardClick::Play => play = Some(p.id.clone()),
+            CardClick::Open => action = Some((a.id.clone(), false)),
+            CardClick::Play => action = Some((a.id.clone(), true)),
             CardClick::None => {}
         }
     });
-    if let Some(id) = open {
-        app.navigate(Route::Playlist(id), &ctx);
-    }
-    if let Some(id) = play {
-        // Opens the playlist and starts it once the tracks have loaded.
-        app.navigate(Route::Playlist(id.clone()), &ctx);
-        ctx.data_mut(|d| d.insert_temp(egui::Id::new("autoplay"), id));
+    match action {
+        Some((id, false)) => app.navigate(Route::Album(id), &ctx),
+        Some((id, true)) => open_and_play(app, Route::Album(id), &ctx),
+        None => {}
     }
 }
 
-fn trending(app: &mut App, ui: &mut Ui) {
+fn playlist_grid(app: &mut App, ui: &mut Ui, playlists: &[PlaylistInfo], rows: Option<usize>) {
     let ctx = ui.ctx().clone();
-    let title = match &app.trending_genre {
-        Some(g) => format!("Trending · {g}"),
-        None => "Trending".to_string(),
-    };
-    page_title(ui, &title, Some("The most played tracks on Audius right now"));
+    let mut action = None;
+    card_grid(ui, playlists, rows, |ui, w, p| {
+        let sub = if p.creator.is_empty() { format!("{} songs", p.nb_tracks) } else { format!("Playlist · {}", p.creator) };
+        let info = CardInfo { id: egui::Id::new(("pl", &p.id)), art: p.picture.as_deref(), title: &p.title, subtitle: sub, round: false };
+        match card(ui, w, &info) {
+            CardClick::Open => action = Some((p.id.clone(), false)),
+            CardClick::Play => action = Some((p.id.clone(), true)),
+            CardClick::None => {}
+        }
+    });
+    match action {
+        Some((id, false)) => app.navigate(Route::Playlist(id), &ctx),
+        Some((id, true)) => open_and_play(app, Route::Playlist(id), &ctx),
+        None => {}
+    }
+}
+
+fn artist_grid(app: &mut App, ui: &mut Ui, artists: &[ArtistInfo], rows: Option<usize>) {
+    let ctx = ui.ctx().clone();
+    let mut open = None;
+    card_grid(ui, artists, rows, |ui, w, a| {
+        let sub = if a.fans > 0 { format!("{} fans", fmt_count(a.fans)) } else { "Artist".into() };
+        let info = CardInfo { id: egui::Id::new(("artist", &a.id)), art: a.picture.as_deref(), title: &a.name, subtitle: sub, round: true };
+        if !matches!(card(ui, w, &info), CardClick::None) {
+            open = Some(a.id.clone());
+        }
+    });
+    if let Some(id) = open {
+        app.navigate(Route::Artist(id), &ctx);
+    }
+}
+
+fn charts(app: &mut App, ui: &mut Ui) {
+    let ctx = ui.ctx().clone();
+    let title = if app.chart_genre.0 == 0 { "Charts".to_string() } else { format!("Charts · {}", app.chart_genre.1) };
+    page_title(ui, &title, Some("The 100 most popular songs right now"));
 
     ui.horizontal(|ui| {
-        for t in TimeRange::ALL {
-            if pill(ui, t.label(), app.trending_time == t).clicked() {
-                app.trending_time = t;
-                app.ensure_loaded(&ctx);
-            }
-        }
-        ui.add_space(12.0);
-        let current = app.trending_genre.clone().unwrap_or_else(|| "All genres".into());
         egui::ComboBox::from_id_salt("genre")
-            .selected_text(RichText::new(format!("{}  {current}", icon::MUSIC_NOTES)).font(med(12.5)))
-            .width(180.0)
+            .selected_text(RichText::new(format!("{}  {}", icon::MUSIC_NOTES, app.chart_genre.1)).font(med(12.5)))
+            .width(200.0)
             .height(420.0)
             .show_ui(ui, |ui| {
-                if ui.selectable_label(app.trending_genre.is_none(), "All genres").clicked() {
-                    app.trending_genre = None;
+                if ui.selectable_label(app.chart_genre.0 == 0, "All genres").clicked() {
+                    app.chart_genre = (0, "All genres".into());
                 }
-                for g in crate::api::GENRES {
-                    if ui.selectable_label(app.trending_genre.as_deref() == Some(*g), *g).clicked() {
-                        app.trending_genre = Some(g.to_string());
+                for (id, name) in crate::deezer::GENRES {
+                    if ui.selectable_label(app.chart_genre.0 == *id, *name).clicked() {
+                        app.chart_genre = (*id, name.to_string());
                     }
                 }
             });
@@ -519,21 +556,11 @@ fn trending(app: &mut App, ui: &mut Ui) {
     with_remote(app, ui, |app, ui, page| {
         let Page::Tracks(tracks) = page else { return };
         if tracks.is_empty() {
-            empty_state(ui, icon::MUSIC_NOTES, "Nothing here yet", "No trending tracks for this genre and time range.", None);
+            empty_state(ui, icon::MUSIC_NOTES, "Nothing here yet", "No chart for this genre right now.", None);
             return;
         }
-        ui.horizontal(|ui| {
-            if play_button(ui, 48.0, false).on_hover_text("Play all").clicked() {
-                let ctx = ui.ctx().clone();
-                app.play_list(tracks, 0, &ctx);
-            }
-            ui.add_space(6.0);
-            if ghost_button(ui, icon::SHUFFLE, "Shuffle").clicked() {
-                shuffle_play(app, tracks, ui.ctx());
-            }
-        });
-        ui.add_space(10.0);
-        tracks_block(app, ui, "trending", tracks);
+        action_row(app, ui, tracks);
+        tracks_block(app, ui, "charts", tracks);
     });
 }
 
@@ -548,38 +575,26 @@ fn shuffle_play(app: &mut App, tracks: &[Track], ctx: &egui::Context) {
 fn search(app: &mut App, ui: &mut Ui, q: &str) {
     page_title(ui, &format!("Results for “{q}”"), None);
     with_remote(app, ui, |app, ui, page| {
-        let Page::Search { tracks, users, playlists } = page else { return };
-        if tracks.is_empty() && users.is_empty() && playlists.is_empty() {
+        let Page::Search(r) = page else { return };
+        if r.tracks.is_empty() && r.artists.is_empty() && r.albums.is_empty() && r.playlists.is_empty() {
             empty_state(ui, icon::MAGNIFYING_GLASS, "No results", "Try different words or check the spelling.", None);
             return;
         }
-        let ctx = ui.ctx().clone();
-        if !users.is_empty() {
+        if !r.artists.is_empty() {
             section_title(ui, "Artists", None);
-            let mut open = None;
-            card_grid(ui, users, Some(1), |ui, w, u| {
-                let info = CardInfo {
-                    id: egui::Id::new(("user", &u.id)),
-                    art: u.avatar(),
-                    title: &u.name,
-                    subtitle: format!("{} followers", fmt_count(u.follower_count)),
-                    round: true,
-                };
-                if !matches!(card(ui, w, &info), CardClick::None) {
-                    open = Some(u.id.clone());
-                }
-            });
-            if let Some(id) = open {
-                app.navigate(Route::Artist(id), &ctx);
-            }
+            artist_grid(app, ui, &r.artists, Some(1));
         }
-        if !tracks.is_empty() {
+        if !r.tracks.is_empty() {
             section_title(ui, "Songs", None);
-            tracks_block(app, ui, "search_tracks", tracks);
+            tracks_block(app, ui, "search_tracks", &r.tracks);
         }
-        if !playlists.is_empty() {
-            section_title(ui, "Playlists & albums", None);
-            playlist_grid(app, ui, playlists, Some(2));
+        if !r.albums.is_empty() {
+            section_title(ui, "Albums & singles", None);
+            album_grid(app, ui, &r.albums, Some(2));
+        }
+        if !r.playlists.is_empty() {
+            section_title(ui, "Playlists", None);
+            playlist_grid(app, ui, &r.playlists, Some(1));
         }
     });
 }
@@ -634,20 +649,41 @@ fn hero(ui: &mut Ui, h: &Hero) {
 fn remote_playlist(app: &mut App, ui: &mut Ui) {
     with_remote(app, ui, |app, ui, page| {
         let Page::Playlist { info, tracks } = page else { return };
-        let kind = if info.is_album { "Album" } else { "Playlist" };
-        let sub = format!("{} · {} songs · {}", info.user.name, tracks.len(), total_time(tracks));
-        hero(ui, &Hero { kind, title: &info.playlist_name, subtitle: &sub, art: info.art(), glyph: icon::PLAYLIST, round: false, banner: None });
-
-        // "Play" pressed on a card: start once the tracks are here.
-        let ctx = ui.ctx().clone();
-        let auto: Option<String> = ctx.data_mut(|d| d.get_temp(egui::Id::new("autoplay")));
-        if auto.as_deref() == Some(info.id.as_str()) {
-            ctx.data_mut(|d| d.remove::<String>(egui::Id::new("autoplay")));
-            app.play_list(tracks, 0, &ctx);
+        let mut sub = format!("{} songs · {}", tracks.len(), total_time(tracks));
+        if !info.creator.is_empty() {
+            sub = format!("{} · {sub}", info.creator);
         }
-
+        hero(ui, &Hero { kind: "Playlist", title: &info.title, subtitle: &sub, art: info.picture.as_deref(), glyph: icon::PLAYLIST, round: false, banner: None });
+        let ctx = ui.ctx().clone();
+        autoplay_page(app, &ctx, tracks);
         action_row(app, ui, tracks);
         tracks_block(app, ui, "playlist", tracks);
+    });
+}
+
+fn album_page(app: &mut App, ui: &mut Ui) {
+    with_remote(app, ui, |app, ui, page| {
+        let Page::Album { info, tracks } = page else { return };
+        let mut sub = info.artist.name.clone();
+        if let Some(y) = info.year() {
+            sub.push_str(&format!(" · {y}"));
+        }
+        sub.push_str(&format!(" · {} songs, {}", tracks.len(), total_time(tracks)));
+        hero(ui, &Hero { kind: info.kind(), title: &info.title, subtitle: &sub, art: info.cover.as_deref(), glyph: icon::VINYL_RECORD, round: false, banner: None });
+        let ctx = ui.ctx().clone();
+        autoplay_page(app, &ctx, tracks);
+        ui.horizontal(|ui| {
+            action_row(app, ui, tracks);
+            if crate::deezer::is_deezer_id(&info.artist.id) && ghost_button(ui, icon::USER, &info.artist.name).clicked() {
+                app.navigate(Route::Artist(info.artist.id.clone()), &ctx);
+            }
+        });
+        tracks_block(app, ui, "album", tracks);
+        if let Some(label) = info.label.as_deref().filter(|l| !l.is_empty()) {
+            ui.add_space(10.0);
+            let date = info.release_date.clone().unwrap_or_default();
+            ui.label(RichText::new(format!("{date}  ·  {label}")).font(regular(12.0)).color(pal().text_muted));
+        }
     });
 }
 
@@ -672,25 +708,77 @@ fn action_row(app: &mut App, ui: &mut Ui, tracks: &[Track]) {
 
 fn artist(app: &mut App, ui: &mut Ui) {
     with_remote(app, ui, |app, ui, page| {
-        let Page::Artist { user, tracks } = page else { return };
-        let mut sub = format!("{} followers · {} tracks", fmt_count(user.follower_count), user.track_count);
-        if let Some(loc) = user.location.as_deref().filter(|l| !l.is_empty()) {
-            sub.push_str(&format!(" · {loc}"));
+        let Page::Artist(p) = page else { return };
+        let sub = format!("{} fans · {} releases", fmt_count(p.artist.fans), p.artist.albums);
+        hero(ui, &Hero { kind: "Artist", title: &p.artist.name, subtitle: &sub, art: p.artist.picture_xl.as_deref(), glyph: icon::USER, round: true, banner: None });
+        action_row(app, ui, &p.top);
+        let ctx = ui.ctx().clone();
+
+        if let Some(latest) = p.releases.first() {
+            section_title(ui, "Latest release", None);
+            if latest_release_card(ui, latest) {
+                app.navigate(Route::Album(latest.id.clone()), &ctx);
+            }
         }
-        let kind = if user.is_verified { "✔ Verified artist" } else { "Artist" };
-        hero(ui, &Hero { kind, title: &user.name, subtitle: &sub, art: user.avatar(), glyph: icon::USER, round: true, banner: user.banner() });
-        action_row(app, ui, tracks);
-        if let Some(bio) = user.bio.as_deref().filter(|b| !b.trim().is_empty()) {
-            ui.label(RichText::new(bio.trim()).color(pal().text_muted));
-            ui.add_space(6.0);
-        }
+
         section_title(ui, "Popular", None);
-        if tracks.is_empty() {
-            ui.label(RichText::new("This artist hasn't uploaded any playable tracks.").color(pal().text_muted));
+        if p.top.is_empty() {
+            ui.label(RichText::new("No popular songs listed for this artist.").color(pal().text_muted));
         } else {
-            tracks_block(app, ui, "artist", tracks);
+            // Ten songs, with a button to show all of them.
+            let id = egui::Id::new(("artist_all", &p.artist.id));
+            let show_all = ui.ctx().data(|d| d.get_temp::<bool>(id).unwrap_or(false));
+            let shown = if show_all { &p.top[..] } else { &p.top[..p.top.len().min(10)] };
+            tracks_block(app, ui, "artist_top", shown);
+            if p.top.len() > 10 {
+                ui.add_space(6.0);
+                let label = if show_all { "Show less".to_string() } else { format!("Show all {}", p.top.len()) };
+                if ghost_button(ui, "", &label).clicked() {
+                    ui.ctx().data_mut(|d| d.insert_temp(id, !show_all));
+                }
+            }
+        }
+
+        if !p.releases.is_empty() {
+            section_title(ui, "Discography", None);
+            album_grid(app, ui, &p.releases, None);
+        }
+        if !p.related.is_empty() {
+            section_title(ui, "Fans also like", None);
+            artist_grid(app, ui, &p.related, Some(1));
         }
     });
+}
+
+/// A wide card for an artist's newest album or single. Returns true when clicked.
+fn latest_release_card(ui: &mut Ui, a: &AlbumInfo) -> bool {
+    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width().min(560.0), 128.0), Sense::click());
+    a11y(ui, &resp, egui::WidgetType::Button, || format!("Latest release: {}", a.title));
+    let fill = if resp.hovered() { pal().surface_active } else { pal().surface_hover };
+    ui.painter().rect_filled(rect, R_LG, fill);
+    let art = Rect::from_min_size(rect.min + vec2(12.0, 12.0), Vec2::splat(104.0));
+    artwork(ui, art, a.cover.as_deref(), R_MD);
+    let tx = art.right() + 18.0;
+    let tw = rect.right() - tx - 16.0;
+    let date = a.release_date.as_deref().map(pretty_date).unwrap_or_default();
+    paint_line(ui, pos2(tx, rect.top() + 26.0), &date.to_uppercase(), semi(11.0), pal().text_muted, tw);
+    paint_line(ui, pos2(tx, rect.top() + 46.0), &a.title, heavy(20.0), pal().text, tw);
+    let songs = if a.nb_tracks == 1 { "1 song".to_string() } else { format!("{} songs", a.nb_tracks) };
+    paint_line(ui, pos2(tx, rect.top() + 80.0), &format!("{} · {songs}", a.kind()), regular(13.0), pal().text_muted, tw);
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
+}
+
+/// "2026-11-06" → "Nov 6, 2026".
+fn pretty_date(d: &str) -> String {
+    const MONTHS: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    let parts: Vec<&str> = d.split('-').collect();
+    match parts.as_slice() {
+        [y, m, day] => match (m.parse::<usize>(), day.parse::<u32>()) {
+            (Ok(m), Ok(day)) if (1..=12).contains(&m) => format!("{} {day}, {y}", MONTHS[m - 1]),
+            _ => d.to_string(),
+        },
+        _ => d.to_string(),
+    }
 }
 
 fn local_collection(app: &mut App, ui: &mut Ui, title: &str, sub: &str, glyph: &str, tracks: &[Track], playlist: Option<usize>) {
@@ -763,8 +851,21 @@ fn queue_page(app: &mut App, ui: &mut Ui) {
     if clear {
         app.queue.truncate(app.queue_pos + 1);
     }
+    ui.horizontal(|ui| {
+        let on = app.saved.autoplay;
+        if pill(ui, if on { "Autoplay: on" } else { "Autoplay: off" }, on).clicked() {
+            app.toggle_autoplay();
+        }
+        ui.label(RichText::new("When your queue ends, keep playing similar songs.").font(regular(12.5)).color(pal().text_muted));
+    });
+    ui.add_space(8.0);
     if upcoming.is_empty() {
-        ui.label(RichText::new("Nothing queued. Right-click a song → “Add to queue”.").color(pal().text_muted));
+        let msg = if app.saved.autoplay {
+            "Nothing queued. Similar songs will play when this one ends."
+        } else {
+            "Nothing queued. Right-click a song → “Add to queue”."
+        };
+        ui.label(RichText::new(msg).color(pal().text_muted));
         return;
     }
     let mut cx = table_ctx(app, &names);
@@ -795,18 +896,24 @@ fn player_bar(app: &mut App, ui: &mut Ui) {
     let left = Rect::from_min_size(full.min, vec2(left_w, full.height()));
     if let Some(t) = app.current.clone() {
         let art = Rect::from_min_size(pos2(left.left(), left.center().y - 28.0), Vec2::splat(56.0));
-        artwork(ui, art, t.art_small(), CornerRadius::same(6));
+        artwork(ui, art, t.art_big(), CornerRadius::same(6));
         let art_resp = ui.interact(art, egui::Id::new("np_art"), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
-        a11y(ui, &art_resp, egui::WidgetType::Button, || format!("Now playing: {} by {}. Open queue", t.title, t.user.name));
+        a11y(ui, &art_resp, egui::WidgetType::Button, || format!("Now playing: {} by {}. Open queue", t.title, t.artist.name));
         if art_resp.clicked() {
             app.navigate(Route::Queue, &ctx);
         }
         let tx = art.right() + 14.0;
         let tw = left.right() - tx - 40.0;
         paint_line(ui, pos2(tx, left.center().y - 18.0), &t.title, semi(13.5), pal().text, tw);
-        let a = link_text(ui, egui::Id::new("np_artist"), pos2(tx, left.center().y + 2.0), &t.user.name, regular(12.5), pal().text_muted, tw);
-        if a.clicked() {
-            app.navigate(Route::Artist(t.user.id.clone()), &ctx);
+        if let LoadState::Resolving(msg) = app.audio.load_state() {
+            // "Finding song on YouTube…" etc. instead of the artist while it loads.
+            paint_line(ui, pos2(tx, left.center().y + 2.0), &msg, regular(12.0), pal().accent_soft, tw);
+            ui.ctx().request_repaint_after(std::time::Duration::from_millis(200));
+        } else {
+            let a = link_text(ui, egui::Id::new("np_artist"), pos2(tx, left.center().y + 2.0), &t.artist.name, regular(12.5), pal().text_muted, tw);
+            if a.clicked() {
+                app.open_artist(&t, &ctx);
+            }
         }
         let liked = app.liked_ids.contains(&t.id);
         let hr = Rect::from_center_size(pos2(left.right() - 18.0, left.center().y), Vec2::splat(30.0));
@@ -842,7 +949,7 @@ fn player_bar(app: &mut App, ui: &mut Ui) {
         if icon_button(ui, icon::SKIP_BACK, 19.0, pal().text, "Previous (Ctrl ←)").clicked() {
             app.previous(&ctx);
         }
-        let loading = app.audio.load_state() == LoadState::Loading && app.current.is_some();
+        let loading = app.audio.load_state().is_busy() && app.current.is_some();
         let (r, resp) = ui.allocate_exact_size(Vec2::splat(40.0), Sense::click());
         let resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand);
         let playing = app.is_playing();
