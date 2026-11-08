@@ -3,6 +3,12 @@ name: Build Windows app
 on:
   push:
   workflow_dispatch:
+  # Publishing a release on GitHub builds pulse.exe and attaches it to that release.
+  release:
+    types: [published]
+
+permissions:
+  contents: write
 
 jobs:
   windows:
@@ -11,9 +17,46 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+
       - name: Build
         run: cargo build --release
+
+      # Makes sure the .exe runs on a fresh PC: it must not need the
+      # Visual C++ Redistributable (vcruntime140.dll / msvcp140.dll).
+      - name: Check pulse.exe needs nothing extra
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath
+          $dumpbin = Get-ChildItem "$vs\VC\Tools\MSVC\*\bin\Hostx64\x64\dumpbin.exe" | Select-Object -First 1
+          $deps = & $dumpbin.FullName /dependents target\release\pulse.exe | Out-String
+          Write-Output $deps
+          if ($deps -match '(?i)vcruntime|msvcp') { throw "pulse.exe still needs the Visual C++ runtime" }
+
       - uses: actions/upload-artifact@v4
         with:
           name: pulse-windows
           path: target/release/pulse.exe
+
+      # When main is built and the version in Cargo.toml (e.g. 0.1.0) has no release yet,
+      # publish one (tag v0.1.0) with pulse.exe attached. To ship a new version later,
+      # bump `version` in Cargo.toml and push.
+      - name: Publish a release for a new version
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $false
+          $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"' | Select-Object -First 1).Matches[0].Groups[1].Value
+          $tag = "v$version"
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -eq 0) { Write-Output "Release $tag already exists, nothing to publish."; exit 0 }
+          gh release create $tag target/release/pulse.exe --target $env:GITHUB_SHA --title "Pulse $tag" --notes-file .github/release-notes.md
+          exit $LASTEXITCODE
+
+      # A release made by hand on GitHub also gets pulse.exe attached.
+      - name: Attach pulse.exe to the release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name }}" target/release/pulse.exe --clobber
