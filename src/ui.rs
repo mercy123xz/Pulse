@@ -970,7 +970,7 @@ fn local_collection(app: &mut App, ui: &mut Ui, title: &str, sub: &str, glyph: &
     let ctx = ui.ctx().clone();
     let kind = if playlist.is_some() { "Playlist" } else { "Library" };
     // Cover: your own picture, else the first song's artwork.
-    let custom = playlist.and_then(|i| app.saved.playlists.get(i)).and_then(|p| p.cover.as_ref()).map(|c| format!("file://{}", c.display().to_string().replace('\\', "/")));
+    let custom = playlist.and_then(|i| app.saved.playlists.get(i)).and_then(|p| p.cover.as_ref()).map(|c| crate::settings::file_uri(c));
     let art = custom.clone().or_else(|| if playlist.is_some() { tracks.first().and_then(|t| t.art_big()).map(str::to_owned) } else { None });
     let clicks = hero(ui, &Hero { editable: playlist.is_some(), kind: tr(kind), title: tr(title), subtitle: sub, art: art.as_deref(), glyph, round: false, banner: None });
     if let Some(i) = playlist {
@@ -1304,7 +1304,10 @@ fn player_bar(app: &mut App, ui: &mut Ui) {
             }
         }
         let liked = app.liked_ids.contains(&t.id);
-        let hr = Rect::from_center_size(pos2(left.right() - 18.0, left.center().y), Vec2::splat(30.0));
+        // The heart sits just after the song's title and artist, like Spotify.
+        let artist_w = one_line(ui, &t.artist.name, regular(12.5), pal().text_muted, tw).size().x;
+        let text_right = tx + title_rect.width().max(artist_w);
+        let hr = Rect::from_center_size(pos2((text_right + 22.0).min(left.right() - 18.0), left.center().y), Vec2::splat(30.0));
         let h = ui.interact(hr, egui::Id::new("np_like"), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
         resp_selected(ui, &h, liked, "Like current song");
         let (font, col) = if liked { (filled_icon(18.0), pal().accent_soft) } else { (regular(18.0), if h.hovered() { pal().text } else { pal().text_muted }) };
