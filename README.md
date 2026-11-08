@@ -1,124 +1,122 @@
-# Pulse
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo/logo-for-dark-backgrounds.svg">
+    <img src="assets/logo/logo-for-light-backgrounds.svg" alt="Pulse" height="72">
+  </picture>
+</p>
 
-A fast, native music player written in Rust. It streams free, full-length music from
-[Audius](https://audius.co), an open music platform for independent artists.
+<p align="center">
+  <b>A fast, native music player for Windows, written in Rust.</b><br>
+  Stream free, full-length music from independent artists on <a href="https://audius.co">Audius</a>.<br>
+  One <code>.exe</code>: no installer, no account, nothing else to download.
+</p>
 
-- Home, Trending (by genre and time range), live search for songs, artists and playlists
-- Artist and playlist pages
-- Liked Songs, Recently Played, your own playlists (saved on your computer)
-- A queue with shuffle, repeat and "play next"
-- Songs start playing while they download, and you can jump anywhere in them
+<p align="center">
+  <a href="https://github.com/mercy123xz/Pulse/releases/latest"><b>⬇ Download for Windows</b></a>
+  &nbsp;·&nbsp; <a href="#features">Features</a>
+  &nbsp;·&nbsp; <a href="#keyboard-shortcuts">Shortcuts</a>
+  &nbsp;·&nbsp; <a href="#building-from-source">Build from source</a>
+</p>
+
+<!-- Add a screenshot: save it as assets/screenshot.png, then delete these comment markers.
+<p align="center"><img src="assets/screenshot.png" alt="Pulse playing music" width="900"></p>
+-->
+
+## Features
+
+**Discover**
+- **Home:** trending playlists, this week's top tracks, up-and-coming underground tracks and quick genre picks
+- **Trending charts** for this week, month, year or all time, filtered by 24 genres
+- **Live search** for songs, artists and playlists as you type
+- **Artist pages** with their most-played tracks, and full **playlist and album** pages
+
+**Listen**
+- Songs start playing right away while the rest downloads, and you can jump anywhere in them
+- Queue with **Play next** and **Add to queue**, plus shuffle and repeat (all or one)
+- Picks up where you left off: your last song, volume and settings are remembered
+
+**Your library**
+- **Liked Songs**, **Recently Played** and your **own playlists**
+- Everything is saved on your PC. No account or sign-in needed
+
+**Made for everyone**
+- Dark and light themes
+- Full keyboard control and screen-reader support, with text colors that meet WCAG AA contrast
+- A true desktop app with no web browser inside. It runs on any 64-bit Windows 10 or 11 PC, even one without a graphics driver
 
 ## Download
 
-Pulse is a single file: **`pulse.exe`**. There's no installer and nothing else to download.
-Double-click it and it opens. It works on any 64-bit Windows 10 or 11 PC, even without a
-graphics card driver.
+1. Grab **`pulse.exe`** from the [latest release](https://github.com/mercy123xz/Pulse/releases/latest).
+2. Double-click it. That's it.
 
-- The first time you open it, Windows may show **"Windows protected your PC"**. That appears
-  for any new app that isn't signed with a paid certificate. Click **More info → Run anyway**.
-- Your likes, playlists and settings are saved in `%APPDATA%\pulse-player`.
-- To remove Pulse, delete `pulse.exe` (and that folder, if you want your data gone too).
+The first time you open it, Windows may show **"Windows protected your PC"**. It does that for any
+new app that isn't signed with a paid certificate. Click **More info → Run anyway**.
 
----
+Your likes, playlists and settings are stored in `%APPDATA%\pulse-player`. To uninstall, delete
+`pulse.exe` (and that folder if you want your data gone too).
 
-## Building it yourself (developers only)
+## Keyboard shortcuts
 
-### 1. Install Rust
+| Action | Keys |
+|---|---|
+| Play / pause | <kbd>Space</kbd> |
+| Next / previous song | <kbd>Ctrl</kbd> + <kbd>→</kbd> / <kbd>Ctrl</kbd> + <kbd>←</kbd> |
+| Volume up / down | <kbd>Ctrl</kbd> + <kbd>↑</kbd> / <kbd>Ctrl</kbd> + <kbd>↓</kbd> |
+| Mute | <kbd>M</kbd> |
+| Shuffle / repeat | <kbd>S</kbd> / <kbd>R</kbd> |
+| Search | <kbd>Ctrl</kbd> + <kbd>K</kbd> |
+| Back / forward between pages | <kbd>Alt</kbd> + <kbd>←</kbd> / <kbd>Alt</kbd> + <kbd>→</kbd> (or your mouse's side buttons) |
+| Move between buttons and songs | <kbd>Tab</kbd> / <kbd>Shift</kbd> + <kbd>Tab</kbd> |
+| On a selected song: play / add to queue / play next | <kbd>Enter</kbd> / <kbd>Q</kbd> / <kbd>N</kbd> |
+| Quit | <kbd>Ctrl</kbd> + <kbd>Q</kbd> |
 
-1. Go to **https://rustup.rs** and download `rustup-init.exe` (64-bit).
-2. Run it. If it says you need the **Visual Studio C++ Build Tools**, choose the option that
-   installs them for you (option 1) and wait. It's a big download, but you only do it once.
-3. When it asks how to install, press **Enter** for the default.
-4. **Close and reopen** any terminal windows afterwards.
+Right-click any song for more options, like adding it to one of your playlists.
 
-To check that it worked, open **PowerShell** and type:
+## Building from source
 
-```powershell
-cargo --version
-```
-
-If you see a version number, you're set.
-
-### 2. Run Pulse
-
-1. Unzip `pulse.zip` somewhere, for example `Documents\pulse`.
-2. Open that folder in File Explorer, click the address bar, type `powershell` and press Enter.
-   A terminal opens inside the folder.
-3. Run:
+You need [Rust](https://rustup.rs). On Windows, the installer offers to set up the Visual Studio C++
+Build Tools too; say yes.
 
 ```powershell
+git clone https://github.com/mercy123xz/Pulse.git
+cd Pulse
 cargo run --release
 ```
 
-The first build downloads the libraries and compiles everything, which takes about 2–5 minutes.
-After that it starts in a few seconds.
+The first build takes a few minutes. The finished app is at `target\release\pulse.exe`.
 
-### 3. Get a normal .exe (optional)
+Every push to this repository also builds `pulse.exe` automatically: open the **Actions** tab,
+pick the latest **Build Windows app** run, and download the `pulse-windows` artifact.
 
-After step 2, the app is at:
+On Linux you'll also need the ALSA development headers (`sudo apt install libasound2-dev`).
 
-```
-target\release\pulse.exe
-```
-
-You can copy that one file anywhere (Desktop, another PC) and double-click it. Right-click it →
-**Send to → Desktop (create shortcut)** for a desktop icon.
-
----
-
-## Using it
-
-| Do this | How |
-|---|---|
-| Play a song | Double-click it, or hover and click ▶ |
-| Search | Click the search bar or press **Ctrl + K** and start typing |
-| Play / pause | **Space** (or the big button) |
-| Next / previous | **Ctrl + →** / **Ctrl + ←** |
-| Back / forward between pages | **Alt + ←** / **Alt + →**, or your mouse's side buttons |
-| Like a song | Click the ♡ on its row or in the player bar |
-| Add to a playlist / queue | Right-click a song |
-| Rename or delete a playlist | Right-click it in the sidebar |
-| Shuffle / repeat / mute | **S** / **R** / **M** |
-| Volume up / down | **Ctrl + ↑** / **Ctrl + ↓** |
-| Dark / light mode | Sun/moon button, top right |
-| Move between controls | **Tab** / **Shift + Tab**, then **Enter** to activate |
-| On a focused song | **Enter** play · **Q** add to queue · **N** play next |
-| On a focused slider (seek, volume) | **←** / **→** |
-| Clear listening history | "Clear history" on the Recently Played page |
-
-Your likes, playlists, volume and last song are saved automatically.
-
----
-
-## How the code is organised
+### How the code is organised
 
 | File | What it does |
 |---|---|
-| `src/main.rs` | Starts the app and opens the window |
-| `src/api.rs` | Talks to the Audius API (trending, search, playlists, artists, audio streams) |
-| `src/audio.rs` | The audio engine: plays MP3s while they're still downloading, seeking, volume |
-| `src/app.rs` | The app's brain: pages, queue, shuffle/repeat, likes, playlists, saving |
-| `src/ui.rs` | Everything you see: sidebar, top bar, pages, player bar, pop-ups |
-| `src/widgets.rs` | Custom-drawn pieces: track rows, cards, sliders, buttons |
-| `src/theme.rs` | Colors, fonts and styling. Edit the `DARK` / `LIGHT` palettes to re-color the app |
+| `src/main.rs` | Opens the window and picks the graphics backend (DirectX 12 on Windows) |
+| `src/api.rs` | Talks to the Audius API: trending, search, playlists, artists, audio streams |
+| `src/audio.rs` | Audio engine: plays MP3s while they download, seeking, volume, resuming dropped downloads |
+| `src/app.rs` | App logic: pages and history, the queue, shuffle and repeat, likes, playlists, saving |
+| `src/ui.rs` | Everything you see: sidebar, top bar, pages, player bar, dialogs |
+| `src/widgets.rs` | Custom-drawn pieces: song rows, cards, sliders, buttons, accessibility helpers |
+| `src/theme.rs` | Colors, fonts and styling for both themes, plus a contrast test |
+| `build.rs` | Bakes the Visual C++ runtime into the Windows `.exe` so it runs on any PC |
 
-Libraries used: [egui/eframe](https://github.com/emilk/egui) (UI),
-[rodio](https://github.com/RustAudio/rodio) + symphonia (audio),
-[ureq](https://github.com/algesten/ureq) (HTTP),
-[Phosphor](https://phosphoricons.com) (icons),
-[Inter](https://rsms.me/inter/) (font, SIL Open Font License, see `assets/fonts`).
+Run the tests with `cargo test`.
 
-## Notes
+## Built with
 
-- All music comes from Audius. Artists keep their rights; please credit them if you share
-  anything. Some tracks are locked by their artists (pay-to-unlock), and Pulse hides those.
-- If Audius ever starts requiring an API key for reading, you can get one free at
-  https://api.audius.co/plans. The client is in `src/api.rs`.
-- No sound? Check that Windows has a default output device selected (Settings → System → Sound).
+- [egui / eframe](https://github.com/emilk/egui): the user interface
+- [wgpu](https://wgpu.rs): graphics through DirectX 12 on Windows
+- [rodio](https://github.com/RustAudio/rodio) and [Symphonia](https://github.com/pdeljanov/Symphonia): audio playback and MP3 decoding
+- [ureq](https://github.com/algesten/ureq) with [rustls](https://github.com/rustls/rustls): networking
+- [Phosphor Icons](https://phosphoricons.com) and the [Inter](https://rsms.me/inter/) typeface (SIL Open Font License)
 
-## Building from GitHub instead
+## About the music
 
-If you put this project in a GitHub repository, the included workflow
-(`.github/workflows/build.yml`) builds `pulse.exe` for you on every push. Open the **Actions**
-tab, click the latest run, and download the `pulse-windows` artifact. You don't need Rust installed on your PC for this.
+All music is streamed from [Audius](https://audius.co) through its free public API. Artists keep all
+rights to their work; please credit them when you share it. Tracks that artists have locked
+(for example, pay-to-unlock releases) are hidden.
+
+Pulse is an independent project and isn't affiliated with or endorsed by Audius.
