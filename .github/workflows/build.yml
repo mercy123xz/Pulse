@@ -37,14 +37,22 @@ jobs:
           name: pulse-windows
           path: target/release/pulse.exe
 
-      # Pushing a version tag (like v0.1.0) publishes a release with pulse.exe attached.
-      - name: Publish a release for version tags
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+      # When main is built and the version in Cargo.toml (e.g. 0.1.0) has no release yet,
+      # publish one (tag v0.1.0) with pulse.exe attached. To ship a new version later,
+      # bump `version` in Cargo.toml and push.
+      - name: Publish a release for a new version
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-        run: >
-          gh release create "${{ github.ref_name }}" target/release/pulse.exe
-          --title "Pulse ${{ github.ref_name }}" --notes-file .github/release-notes.md
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $false
+          $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"' | Select-Object -First 1).Matches[0].Groups[1].Value
+          $tag = "v$version"
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -eq 0) { Write-Output "Release $tag already exists, nothing to publish."; exit 0 }
+          gh release create $tag target/release/pulse.exe --target $env:GITHUB_SHA --title "Pulse $tag" --notes-file .github/release-notes.md
+          exit $LASTEXITCODE
 
       # A release made by hand on GitHub also gets pulse.exe attached.
       - name: Attach pulse.exe to the release
