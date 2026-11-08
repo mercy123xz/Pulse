@@ -26,6 +26,13 @@ pub fn music_dir() -> Option<PathBuf> {
     Some(PathBuf::from(home).join("Music"))
 }
 
+/// A `file:///` address for a picture on this computer, as egui's image loader
+/// expects it (on Windows: file:///C:/Users/…; `file://C:/…` would be read as a network path).
+pub fn file_uri(path: &std::path::Path) -> String {
+    let p = path.display().to_string().replace('\\', "/");
+    format!("file:///{}", p.trim_start_matches('/'))
+}
+
 /// Where downloaded songs go unless the user picks another folder.
 pub fn default_offline_dir() -> PathBuf {
     data_dir().join("offline")
@@ -223,6 +230,12 @@ mod tests {
         assert!(s.mono);
         assert_eq!(s.crossfade_secs, 4.0);
         assert!(s.gapless);
+    }
+
+    #[test]
+    fn picture_addresses() {
+        assert_eq!(file_uri(std::path::Path::new("/home/a/b.png")), "file:///home/a/b.png");
+        assert_eq!(file_uri(std::path::Path::new("C:\\Users\\x\\c.png")), "file:///C:/Users/x/c.png");
     }
 
     #[test]

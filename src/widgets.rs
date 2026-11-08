@@ -581,7 +581,9 @@ fn track_row(ui: &mut Ui, id: egui::Id, i: usize, t: &Track, cx: &TableCtx, ev: 
         return;
     }
     let is_current = cx.now_playing == Some(t.id.as_str());
-    let hovered = resp.hovered() || resp.context_menu_opened() || resp.has_focus();
+    // The heart, artist and album links sit on top of the row, so "the row is hovered"
+    // is "the mouse is anywhere over it" (else the heart vanishes when you point at it).
+    let hovered = resp.hovered() || resp.context_menu_opened() || resp.has_focus() || ui.rect_contains_pointer(rect);
     let style = &parts().track_row;
     let radius = style.radius.map(CornerRadius::same).unwrap_or(r_md());
     if hovered {

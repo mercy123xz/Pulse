@@ -77,7 +77,7 @@ fn read(path: &Path, covers: &Path) -> Track {
             };
             let file = covers.join(format!("{:016x}.{ext}", h.finish()));
             if file.exists() || (std::fs::create_dir_all(covers).is_ok() && std::fs::write(&file, pic.data()).is_ok()) {
-                let uri = format!("file://{}", file.display().to_string().replace('\\', "/"));
+                let uri = crate::settings::file_uri(&file);
                 t.cover_small = Some(uri.clone());
                 t.cover_big = Some(uri);
             }
