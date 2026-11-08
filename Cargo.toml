@@ -1,0 +1,34 @@
+[package]
+name = "pulse"
+version = "0.1.0"
+edition = "2024"
+description = "A fast, native music player for Audius, written in Rust"
+
+[dependencies]
+# Window + UI
+eframe = { version = "0.36", default-features = false, features = ["accesskit", "default_fonts", "glow", "persistence", "wayland", "x11"] }
+egui = "0.36"
+# Loads album art straight from URLs (ui.image("https://..."))
+egui_extras = { version = "0.36", features = ["http", "image"] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
+egui-phosphor = { version = "0.14", features = ["regular", "fill"] }
+
+# Audio playback (MP3 decoding via symphonia)
+rodio = { version = "0.23", default-features = false, features = ["playback", "mp3"] }
+
+# HTTP + JSON
+ureq = { version = "3", features = ["json"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+rand = "0.9"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true
+
+# Make debug builds play audio smoothly (decoding is slow without optimizations)
+[profile.dev.package."*"]
+opt-level = 2
