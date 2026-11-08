@@ -3,6 +3,12 @@ name: Build Windows app
 on:
   push:
   workflow_dispatch:
+  # Publishing a release on GitHub builds pulse.exe and attaches it to that release.
+  release:
+    types: [published]
+
+permissions:
+  contents: write
 
 jobs:
   windows:
@@ -11,9 +17,28 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+
       - name: Build
         run: cargo build --release
+
+      # Makes sure the .exe runs on a fresh PC: it must not need the
+      # Visual C++ Redistributable (vcruntime140.dll / msvcp140.dll).
+      - name: Check pulse.exe needs nothing extra
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath
+          $dumpbin = Get-ChildItem "$vs\VC\Tools\MSVC\*\bin\Hostx64\x64\dumpbin.exe" | Select-Object -First 1
+          $deps = & $dumpbin.FullName /dependents target\release\pulse.exe | Out-String
+          Write-Output $deps
+          if ($deps -match '(?i)vcruntime|msvcp') { throw "pulse.exe still needs the Visual C++ runtime" }
+
       - uses: actions/upload-artifact@v4
         with:
           name: pulse-windows
           path: target/release/pulse.exe
+
+      - name: Attach pulse.exe to the release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name }}" target/release/pulse.exe --clobber
