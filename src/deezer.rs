@@ -59,7 +59,11 @@ pub struct Track {
 }
 
 impl Track {
-    #[cfg(test)]
+    /// Deezer's number for this song, if it came from Deezer.
+    pub fn deezer_number(&self) -> Option<u64> {
+        self.deezer_id()
+    }
+
     pub fn deezer_id(&self) -> Option<u64> {
         self.id.strip_prefix("dz:").and_then(|s| s.parse().ok())
     }
@@ -450,6 +454,86 @@ pub fn artist_page(id: &str) -> Result<ArtistPage, String> {
 /// Newest release first (Deezer returns them in no useful order).
 pub fn sort_newest_first(releases: &mut [AlbumInfo]) {
     releases.sort_by(|a, b| b.release_date.cmp(&a.release_date));
+}
+
+/// Who made a song, from Deezer.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Credits {
+    /// (name, role) — role is e.g. "Main artist" or "Featured".
+    pub people: Vec<(String, String)>,
+    pub album: Option<String>,
+    pub label: Option<String>,
+    pub release_date: Option<String>,
+    pub genres: Vec<String>,
+    pub isrc: Option<String>,
+    pub bpm: Option<f32>,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct DzContributor {
+    name: String,
+    role: String,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct DzTrackCredits {
+    contributors: Vec<DzContributor>,
+    isrc: Option<String>,
+    bpm: Option<f32>,
+    release_date: Option<String>,
+    album: Option<DzAlbum>,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct DzGenre {
+    name: String,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct DzGenres {
+    data: Vec<DzGenre>,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct DzAlbumLabel {
+    label: Option<String>,
+    genres: DzGenres,
+}
+
+/// Song credits: artists and their roles, label, release date, genres.
+pub fn credits(track_id: u64) -> Result<Credits, String> {
+    let t: DzTrackCredits = get(&format!("/track/{track_id}"), &[])?;
+    let mut c = Credits {
+        people: t
+            .contributors
+            .into_iter()
+            .map(|p| {
+                let role = match p.role.as_str() {
+                    "Main" | "" => "Main artist".to_string(),
+                    other => other.to_string(),
+                };
+                (p.name, role)
+            })
+            .collect(),
+        isrc: t.isrc.filter(|s| !s.is_empty()),
+        bpm: t.bpm.filter(|b| *b > 0.0),
+        release_date: t.release_date.filter(|s| !s.is_empty() && s != "0000-00-00"),
+        ..Default::default()
+    };
+    if let Some(al) = t.album {
+        c.album = Some(al.title.clone()).filter(|s| !s.is_empty());
+        // The label and genres live on the album; credits still show without them.
+        if let Ok(a) = get::<DzAlbumLabel>(&format!("/album/{}", al.id), &[]) {
+            c.label = a.label.filter(|s| !s.is_empty());
+            c.genres = a.genres.data.into_iter().map(|g| g.name).collect();
+        }
+    }
+    Ok(c)
 }
 
 pub fn album(id: &str) -> Result<(AlbumInfo, Vec<Track>), String> {

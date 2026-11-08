@@ -5,6 +5,9 @@ use crate::deezer::{AlbumInfo, ArtistInfo, PlaylistInfo, Track};
 use crate::audio::LoadState;
 use crate::theme::*;
 use crate::widgets::*;
+use crate::i18n::tr;
+
+mod settings_page;
 use egui::{Align, Align2, Color32, CornerRadius, Frame, Key, Layout, Margin, Rect, RichText, Sense, Stroke, Ui, Vec2, pos2, vec2};
 use egui_phosphor::regular as icon;
 
@@ -138,12 +141,30 @@ fn sidebar(app: &mut App, ui: &mut Ui) {
     if nav_item(ui, icon::QUEUE, "Queue", app.route == Route::Queue, Some(upcoming)).clicked() {
         app.navigate(Route::Queue, &ctx);
     }
+    if app.saved.settings.show_local_files {
+        let n = app.local_files.len();
+        if nav_item(ui, icon::FOLDER_SIMPLE, "Local Files", app.route == Route::LocalFiles, Some(n)).clicked() {
+            app.navigate(Route::LocalFiles, &ctx);
+        }
+    }
+    // Download progress
+    if let Some((t, p)) = &app.downloading {
+        let p = *p.lock().unwrap();
+        let left = app.download_queue.len();
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            ui.add_space(12.0);
+            ui.spinner();
+            let more = if left > 0 { format!(" (+{left})") } else { String::new() };
+            ui.label(RichText::new(format!("{} {:.0}% · {}{more}", tr("Downloading…"), p * 100.0, t.title)).font(regular(11.5)).color(pal().text_muted));
+        });
+    }
 
     ui.add_space(14.0);
     ui.horizontal(|ui| {
         nav_heading(ui, "Playlists");
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            if icon_button(ui, icon::PLUS, 14.0, pal().text_muted, "Create playlist").clicked() {
+            if icon_button(ui, icon::PLUS, 14.0, pal().text_muted, tr("Create playlist")).clicked() {
                 app.new_playlist = Some((String::new(), None));
             }
         });
@@ -154,7 +175,7 @@ fn sidebar(app: &mut App, ui: &mut Ui) {
             ui.add_space(4.0);
             ui.horizontal(|ui| {
                 ui.add_space(10.0);
-                ui.label(RichText::new("Make your first playlist with +").color(pal().text_faint).size(12.5));
+                ui.label(RichText::new(tr("Make your first playlist with +")).color(pal().text_faint).size(12.5));
             });
         }
         for i in 0..app.saved.playlists.len() {
@@ -184,6 +205,7 @@ fn vgradient_rounded(ui: &Ui, r: Rect, top: Color32, bottom: Color32) {
 }
 
 fn nav_heading(ui: &mut Ui, text: &str) {
+    let text = tr(text);
     ui.horizontal(|ui| {
         ui.add_space(10.0);
         ui.label(RichText::new(text.to_uppercase()).font(semi(10.5)).color(pal().text_faint));
@@ -192,6 +214,7 @@ fn nav_heading(ui: &mut Ui, text: &str) {
 }
 
 fn nav_item(ui: &mut Ui, glyph: &str, label: &str, selected: bool, badge: Option<usize>) -> egui::Response {
+    let label = tr(label);
     let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 36.0), Sense::click());
     resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, label));
     focus_ring(ui, &resp);
@@ -230,11 +253,11 @@ fn top_bar(app: &mut App, ui: &mut Ui) {
     let ctx = ui.ctx().clone();
     ui.horizontal_centered(|ui| {
         let back_col = if app.can_go_back() { pal().text } else { pal().text_faint };
-        if icon_button(ui, icon::CARET_LEFT, 17.0, back_col, "Back").clicked() {
+        if icon_button(ui, icon::CARET_LEFT, 17.0, back_col, tr("Back")).clicked() {
             app.go_back(&ctx);
         }
         let fwd_col = if app.can_go_forward() { pal().text } else { pal().text_faint };
-        if icon_button(ui, icon::CARET_RIGHT, 17.0, fwd_col, "Forward").clicked() {
+        if icon_button(ui, icon::CARET_RIGHT, 17.0, fwd_col, tr("Forward")).clicked() {
             app.go_forward(&ctx);
         }
         ui.add_space(10.0);
@@ -259,7 +282,7 @@ fn top_bar(app: &mut App, ui: &mut Ui) {
             egui::TextEdit::singleline(&mut app.search_text)
                 .id(id)
                 .frame(Frame::NONE)
-                .hint_text(RichText::new("Search songs, artists, playlists").color(pal().text_faint))
+                .hint_text(RichText::new(tr("Search songs, artists, playlists")).color(pal().text_faint))
                 .font(regular(13.5))
                 .desired_width(edit_rect.width())
                 .vertical_align(Align::Center),
@@ -292,12 +315,17 @@ fn top_bar(app: &mut App, ui: &mut Ui) {
         }
 
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            let on_settings = app.route == Route::Settings;
+            let gear_col = if on_settings { pal().accent_soft } else { pal().text_muted };
+            if icon_button(ui, icon::GEAR_SIX, 18.0, gear_col, tr("Settings")).clicked() {
+                app.navigate(Route::Settings, &ctx);
+            }
             let (glyph, tip) = if app.saved.light_mode { (icon::MOON, "Switch to dark mode") } else { (icon::SUN, "Switch to light mode") };
-            if icon_button(ui, glyph, 17.0, pal().text_muted, tip).clicked() {
+            if icon_button(ui, glyph, 17.0, pal().text_muted, tr(tip)).clicked() {
                 app.toggle_theme(&ctx);
             }
             ui.add_space(6.0);
-            let r = ui.add(egui::Label::new(RichText::new("Music info by Deezer").font(med(11.5)).color(pal().text_faint)).sense(Sense::click()));
+            let r = ui.add(egui::Label::new(RichText::new(tr("Music info by Deezer")).font(med(11.5)).color(pal().text_faint)).sense(Sense::click()));
             if r.on_hover_text("Song info, artwork and charts from Deezer. Audio from YouTube.").on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                 ui.ctx().open_url(egui::OpenUrl::new_tab("https://www.deezer.com"));
             }
@@ -317,6 +345,17 @@ fn page(app: &mut App, ui: &mut Ui) {
         Route::Playlist(_) => remote_playlist(app, ui),
         Route::Album(_) => album_page(app, ui),
         Route::Artist(_) => artist(app, ui),
+        Route::Settings => settings_page::settings_page(app, ui),
+        Route::LocalFiles => {
+            if app.local_scanning && app.local_files.is_empty() {
+                page_title(ui, "Local Files", None);
+                skeleton_rows(ui, 8);
+            } else {
+                let tracks = app.local_files.clone();
+                let dir = crate::settings::music_dir().map(|d| d.display().to_string()).unwrap_or_default();
+                local_collection(app, ui, "Local Files", &dir, icon::FOLDER_SIMPLE, &tracks, None);
+            }
+        }
         Route::Liked => {
             let tracks = app.saved.liked.clone();
             let sub = format!("{} songs", tracks.len());
@@ -379,6 +418,7 @@ fn table_ctx<'a>(app: &'a App, names: &'a [String]) -> TableCtx<'a> {
         playlists: names,
         removable: false,
         queue_mode: false,
+        downloads: &app.saved.downloads,
         index_offset: 0,
     }
 }
@@ -393,6 +433,7 @@ fn tracks_block(app: &mut App, ui: &mut Ui, salt: &str, tracks: &[Track]) {
 }
 
 fn page_title(ui: &mut Ui, title: &str, subtitle: Option<&str>) {
+    let (title, subtitle) = (tr(title), subtitle.map(tr));
     ui.add_space(12.0);
     ui.label(RichText::new(title).font(heavy(30.0)));
     if let Some(s) = subtitle {
@@ -904,7 +945,36 @@ fn player_bar(app: &mut App, ui: &mut Ui) {
         }
         let tx = art.right() + 14.0;
         let tw = left.right() - tx - 40.0;
-        paint_line(ui, pos2(tx, left.center().y - 18.0), &t.title, semi(13.5), pal().text, tw);
+        let title_rect = paint_line(ui, pos2(tx, left.center().y - 18.0), &t.title, semi(13.5), pal().text, tw);
+        // Right-click the song title for the song menu (like, share, credits…).
+        let title_resp = ui.interact(title_rect, egui::Id::new("np_title"), Sense::click());
+        let mut np_events = vec![];
+        let names = app.playlist_names();
+        title_resp.context_menu(|ui| {
+            let mcx = MenuCtx {
+                liked: app.liked_ids.contains(&t.id),
+                playlists: &names,
+                index: None,
+                removable: false,
+                queue_mode: false,
+                downloaded: app.is_downloaded(&t.id),
+            };
+            track_menu(ui, &t, &mcx, &mut np_events);
+        });
+        art_resp.context_menu(|ui| {
+            let mcx = MenuCtx {
+                liked: app.liked_ids.contains(&t.id),
+                playlists: &names,
+                index: None,
+                removable: false,
+                queue_mode: false,
+                downloaded: app.is_downloaded(&t.id),
+            };
+            track_menu(ui, &t, &mcx, &mut np_events);
+        });
+        if !np_events.is_empty() {
+            app.handle_events(np_events, std::slice::from_ref(&t), &ctx);
+        }
         if let LoadState::Resolving(msg) = app.audio.load_state() {
             // "Finding song on YouTube…" etc. instead of the artist while it loads.
             paint_line(ui, pos2(tx, left.center().y + 2.0), &msg, regular(12.0), pal().accent_soft, tw);
@@ -1053,6 +1123,7 @@ fn player_bar(app: &mut App, ui: &mut Ui) {
 // ---------------------------------------------------------------------------
 
 fn dialogs(app: &mut App, ctx: &egui::Context) {
+    credits_dialog(app, ctx);
     if let Some(idx) = app.confirm_delete.take() {
         let name = app.saved.playlists.get(idx).map(|p| p.name.clone()).unwrap_or_default();
         let (mut keep, mut delete) = (true, false);
@@ -1163,6 +1234,77 @@ fn dialogs(app: &mut App, ctx: &egui::Context) {
         } else if keep {
             app.rename_playlist = Some((idx, name));
         }
+    }
+}
+
+/// The "View credits" window.
+fn credits_dialog(app: &mut App, ctx: &egui::Context) {
+    let Some((t, data)) = &app.credits else { return };
+    let mut close = false;
+    let modal = egui::Modal::new(egui::Id::new("credits")).show(ctx, |ui| {
+        ui.set_width(380.0);
+        ui.horizontal(|ui| {
+            let (art, _) = ui.allocate_exact_size(Vec2::splat(56.0), Sense::hover());
+            artwork(ui, art, t.art_small(), CornerRadius::same(6));
+            ui.vertical(|ui| {
+                ui.label(RichText::new("Credits").font(heavy(18.0)).color(pal().text));
+                ui.label(RichText::new(&t.title).font(med(13.5)).color(pal().text_muted));
+            });
+        });
+        ui.add_space(10.0);
+        match data {
+            None => {
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    ui.label(RichText::new("Loading credits…").font(regular(13.0)).color(pal().text_muted));
+                });
+            }
+            Some(Err(e)) => {
+                ui.label(RichText::new(e).font(regular(13.0)).color(pal().text_muted));
+            }
+            Some(Ok(c)) => {
+                let row = |ui: &mut Ui, label: &str, value: &str| {
+                    ui.label(RichText::new(value).font(med(14.0)).color(pal().text));
+                    ui.label(RichText::new(label).font(regular(12.0)).color(pal().text_muted));
+                    ui.add_space(6.0);
+                };
+                if c.people.is_empty() {
+                    row(ui, "Main artist", &t.artist.name);
+                }
+                for (name, role) in &c.people {
+                    row(ui, role, name);
+                }
+                ui.separator();
+                ui.add_space(4.0);
+                if let Some(a) = &c.album {
+                    row(ui, "Album", a);
+                }
+                if let Some(d) = &c.release_date {
+                    row(ui, "Released", &pretty_date(d));
+                }
+                if !c.genres.is_empty() {
+                    row(ui, "Genre", &c.genres.join(", "));
+                }
+                if let Some(l) = &c.label {
+                    row(ui, "Label", l);
+                }
+                if let Some(b) = c.bpm {
+                    row(ui, "Tempo", &format!("{b:.0} BPM"));
+                }
+                if let Some(i) = &c.isrc {
+                    row(ui, "ISRC", i);
+                }
+            }
+        }
+        ui.add_space(6.0);
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if ui.button("Close").clicked() {
+                close = true;
+            }
+        });
+    });
+    if close || modal.should_close() {
+        app.credits = None;
     }
 }
 

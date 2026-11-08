@@ -11,6 +11,7 @@
 
 use crate::audio::{Codec, StreamSource};
 use crate::deezer::Track;
+use crate::settings::Quality;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
@@ -60,16 +61,7 @@ pub fn tools_dir() -> PathBuf {
     if let Ok(dir) = std::env::var("PULSE_TOOLS_DIR") {
         return PathBuf::from(dir);
     }
-    let base = if cfg!(windows) {
-        std::env::var_os("APPDATA").map(PathBuf::from)
-    } else if cfg!(target_os = "macos") {
-        std::env::var_os("HOME").map(|h| PathBuf::from(h).join("Library/Application Support"))
-    } else {
-        std::env::var_os("XDG_DATA_HOME")
-            .map(PathBuf::from)
-            .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))
-    };
-    base.unwrap_or_else(std::env::temp_dir).join("pulse-player").join("tools")
+    crate::settings::data_dir().join("tools")
 }
 
 /// Only one setup at a time (several songs may ask at once).
@@ -397,15 +389,6 @@ fn queries(track: &Track) -> [String; 2] {
     [format!("{} \"{title}\"", track.artist.name), format!("{} - {title}", track.artist.name)]
 }
 
-fn percent_encode(s: &str) -> String {
-    s.bytes()
-        .map(|b| match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => (b as char).to_string(),
-            _ => format!("%{b:02X}"),
-        })
-        .collect()
-}
-
 /// Searches YouTube and returns the ids of the videos that match `track`, best first.
 pub fn find_videos(tools: &Tools, track: &Track) -> Result<Vec<String>, String> {
     // Both searches at once, so this takes as long as one.
@@ -426,7 +409,7 @@ pub fn find_videos(tools: &Tools, track: &Track) -> Result<Vec<String>, String> 
     let mut ids: Vec<String> = rank(track, &entries).into_iter().map(|e| e.id.clone()).collect();
     if ids.is_empty() {
         // Some songs only show up on YouTube Music.
-        let url = format!("https://music.youtube.com/search?q={}#songs", percent_encode(&plain));
+        let url = format!("https://music.youtube.com/search?q={}#songs", crate::net::encode(&plain));
         if let Ok(music) = search(tools, url, 8) {
             ids = rank(track, &music).into_iter().map(|e| e.id.clone()).collect();
         }
@@ -496,13 +479,13 @@ fn source_from_info(json: &str) -> Result<StreamSource, String> {
 }
 
 /// Asks yt-dlp for the direct audio link of a YouTube video.
-pub fn audio_source(tools: &Tools, video_id: &str) -> Result<StreamSource, String> {
+pub fn audio_source(tools: &Tools, video_id: &str, quality: Quality) -> Result<StreamSource, String> {
     let mut args = base_args(tools);
     args.extend([
         "--no-playlist".into(),
         "-J".into(),
         "-f".into(),
-        "bestaudio[ext=m4a]/bestaudio[acodec^=mp4a]/bestaudio[ext=mp3]".into(),
+        quality.ytdlp_format().into(),
         // Skip a YouTube client that often hands out broken links.
         "--extractor-args".into(),
         "youtube:player_client=default,-tv_samsung".into(),
@@ -514,12 +497,12 @@ pub fn audio_source(tools: &Tools, video_id: &str) -> Result<StreamSource, Strin
 
 /// Everything needed to play `track` from YouTube. `known_video` skips the search
 /// when Pulse already knows which video it is. Returns the source and the video id.
-pub fn resolve(track: &Track, known_video: Option<String>, status: &dyn Fn(&str)) -> Result<(StreamSource, String), String> {
+pub fn resolve(track: &Track, known_video: Option<String>, quality: Quality, status: &dyn Fn(&str)) -> Result<(StreamSource, String), String> {
     let tools = ensure_tools(status)?;
     let attempt = |status: &dyn Fn(&str)| -> Result<(StreamSource, String), String> {
         if let Some(id) = &known_video {
             status("Loading audio…");
-            if let Ok(src) = audio_source(&tools, id) {
+            if let Ok(src) = audio_source(&tools, id, quality) {
                 return Ok((src, id.clone()));
             }
             // The saved video may be gone: search again.
@@ -530,7 +513,7 @@ pub fn resolve(track: &Track, known_video: Option<String>, status: &dyn Fn(&str)
         // If the best video won't play (removed, age-gated, region-locked), try the next ones.
         let mut first_error = None;
         for id in ids.iter().filter(|id| Some(*id) != known_video.as_ref()).take(3) {
-            match audio_source(&tools, id) {
+            match audio_source(&tools, id, quality) {
                 Ok(src) => return Ok((src, id.clone())),
                 Err(e) => {
                     first_error.get_or_insert(e);
@@ -667,7 +650,7 @@ mod tests {
         let [q, p] = queries(&song("ericdoa", "tengo \"algo\" para ti (feat. x)", 150));
         assert_eq!(q, "ericdoa \"tengo algo para ti\"");
         assert_eq!(p, "ericdoa - tengo algo para ti");
-        assert_eq!(percent_encode("a b&c"), "a%20b%26c");
+        assert_eq!(crate::net::encode("a b&c"), "a%20b%26c");
     }
 
     #[test]

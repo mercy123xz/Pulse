@@ -1,5 +1,6 @@
 //! Reusable, custom-drawn UI pieces (buttons, artwork, sliders, track rows...).
 
+use crate::i18n::tr;
 use crate::deezer::Track;
 use crate::theme::{self, *};
 use egui::{
@@ -7,7 +8,7 @@ use egui::{
     vec2,
 };
 use egui_phosphor::regular as icon;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 // ---------------------------------------------------------------------------
@@ -158,6 +159,7 @@ pub fn play_button(ui: &mut Ui, size: f32, playing: bool) -> Response {
 
 /// A pill-shaped toggle (e.g. "This week" / "This month").
 pub fn pill(ui: &mut Ui, label: &str, selected: bool) -> Response {
+    let label = tr(label);
     let probe = ui.painter().layout_no_wrap(label.to_owned(), med(12.5), pal().text);
     let size = vec2(probe.size().x + 26.0, 30.0);
     let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
@@ -177,6 +179,7 @@ pub fn pill(ui: &mut Ui, label: &str, selected: bool) -> Response {
 
 /// Outline button with icon + label ("Shuffle", "See all", ...).
 pub fn ghost_button(ui: &mut Ui, glyph: &str, label: &str) -> Response {
+    let label = tr(label);
     let text = if glyph.is_empty() { label.to_owned() } else { format!("{glyph}  {label}") };
     let g = ui.painter().layout_no_wrap(text.clone(), med(13.0), pal().text);
     let (rect, resp) = ui.allocate_exact_size(vec2(g.size().x + 28.0, 34.0), Sense::click());
@@ -341,6 +344,118 @@ pub enum TrackEvent {
     RemoveFromQueue(usize),
     OpenArtist(Track),
     OpenAlbum(String),
+    ShowCredits(Track),
+    Share(Track, ShareTarget),
+    Download(Track),
+    RemoveDownload(Track),
+}
+
+/// Where a "Copy link" from the Share menu points.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ShareTarget {
+    YouTube,
+    Spotify,
+    Deezer,
+}
+
+/// What the song menu needs to know about where it was opened.
+pub struct MenuCtx<'a> {
+    pub liked: bool,
+    pub playlists: &'a [String],
+    /// Row number in the list it was opened from (None for the player bar).
+    pub index: Option<usize>,
+    pub removable: bool,
+    pub queue_mode: bool,
+    pub downloaded: bool,
+}
+
+/// The right-click menu for a song. Used by every song list and the player bar.
+pub fn track_menu(ui: &mut Ui, t: &Track, cx: &MenuCtx, ev: &mut Vec<TrackEvent>) {
+    ui.set_min_width(220.0);
+    if let Some(i) = cx.index
+        && menu_item(ui, icon::PLAY, "Play")
+    {
+        ev.push(TrackEvent::Play(i));
+    }
+    ui.menu_button(format!("{}   {}", icon::PLUS, tr("Add to playlist")), |ui| {
+        ui.set_min_width(180.0);
+        if menu_item(ui, icon::PLUS, "New playlist…") {
+            ev.push(TrackEvent::NewPlaylistWith(t.clone()));
+        }
+        if !cx.playlists.is_empty() {
+            ui.separator();
+        }
+        for (pi, name) in cx.playlists.iter().enumerate() {
+            if menu_item(ui, icon::PLAYLIST, name) {
+                ev.push(TrackEvent::AddToPlaylist(pi, t.clone()));
+            }
+        }
+    });
+    let like_label = if cx.liked { "Remove from Liked Songs" } else { "Save to Liked Songs" };
+    if menu_item(ui, icon::HEART, like_label) {
+        ev.push(TrackEvent::ToggleLike(t.clone()));
+    }
+    if !cx.queue_mode {
+        if menu_item(ui, icon::QUEUE, "Add to queue") {
+            ev.push(TrackEvent::AddToQueue(t.clone()));
+        }
+        if menu_item(ui, icon::ARROW_BEND_DOWN_RIGHT, "Play next") {
+            ev.push(TrackEvent::PlayNext(t.clone()));
+        }
+    }
+    ui.separator();
+    if crate::deezer::is_deezer_id(&t.artist.id) && menu_item(ui, icon::USER, "Go to artist") {
+        ev.push(TrackEvent::OpenArtist(t.clone()));
+    }
+    if let Some(al) = t.album.as_ref().filter(|a| crate::deezer::is_deezer_id(&a.id))
+        && menu_item(ui, icon::VINYL_RECORD, "Go to album")
+    {
+        ev.push(TrackEvent::OpenAlbum(al.id.clone()));
+    }
+    if !crate::local::is_local(&t.id) {
+        if cx.downloaded {
+            if menu_item(ui, icon::TRASH, tr("Remove download")) {
+                ev.push(TrackEvent::RemoveDownload(t.clone()));
+            }
+        } else if menu_item(ui, icon::DOWNLOAD_SIMPLE, tr("Download")) {
+            ev.push(TrackEvent::Download(t.clone()));
+        }
+    }
+    if menu_item(ui, icon::IDENTIFICATION_CARD, "View credits") {
+        ev.push(TrackEvent::ShowCredits(t.clone()));
+    }
+    ui.separator();
+    ui.menu_button(format!("{}   {}", icon::SHARE_FAT, tr("Share")), |ui| {
+        ui.set_min_width(200.0);
+        for (glyph, label, target) in [
+            (icon::YOUTUBE_LOGO, "Copy YouTube link", ShareTarget::YouTube),
+            (icon::SPOTIFY_LOGO, "Copy Spotify link", ShareTarget::Spotify),
+            (icon::LINK, "Copy Deezer link", ShareTarget::Deezer),
+        ] {
+            if target == ShareTarget::Deezer && t.deezer_number().is_none() {
+                continue;
+            }
+            if menu_item(ui, glyph, label) {
+                ev.push(TrackEvent::Share(t.clone(), target));
+            }
+        }
+    });
+    if cx.removable {
+        ui.separator();
+        if menu_item(ui, icon::TRASH, "Remove from this playlist")
+            && let Some(i) = cx.index
+        {
+            ev.push(TrackEvent::RemoveFromPlaylist(i));
+        }
+    }
+    if cx.queue_mode {
+        ui.separator();
+        if menu_item(ui, icon::X, "Remove from queue")
+            && let Some(i) = cx.index
+        {
+            ev.push(TrackEvent::RemoveFromQueue(i));
+        }
+    }
 }
 
 pub struct TableCtx<'a> {
@@ -352,6 +467,8 @@ pub struct TableCtx<'a> {
     pub removable: bool,
     /// Set when showing the queue (enables "Remove from queue").
     pub queue_mode: bool,
+    /// Downloaded songs (shown with a small arrow).
+    pub downloads: &'a HashMap<String, std::path::PathBuf>,
     /// Number shown for the first row (queue shows "next up" starting at 1).
     pub index_offset: usize,
 }
@@ -387,9 +504,9 @@ pub fn track_table_header(ui: &mut Ui) {
     let f = med(11.5);
     let p = ui.painter();
     p.text(c.num.center(), Align2::CENTER_CENTER, "#", f.clone(), pal().text_faint);
-    p.text(c.title.left_center(), Align2::LEFT_CENTER, "TITLE", f.clone(), pal().text_faint);
+    p.text(c.title.left_center(), Align2::LEFT_CENTER, tr("Title").to_uppercase(), f.clone(), pal().text_faint);
     if let Some(a) = c.album {
-        p.text(a.left_center(), Align2::LEFT_CENTER, "ALBUM", f.clone(), pal().text_faint);
+        p.text(a.left_center(), Align2::LEFT_CENTER, tr("Album").to_uppercase(), f.clone(), pal().text_faint);
     }
     p.text(c.time.right_center(), Align2::RIGHT_CENTER, icon::CLOCK_COUNTER_CLOCKWISE, regular(14.0), pal().text_faint);
     p.hline(rect.x_range(), rect.bottom(), Stroke::new(1.0, pal().border));
@@ -443,9 +560,13 @@ fn track_row(ui: &mut Ui, id: egui::Id, i: usize, t: &Track, cx: &TableCtx, ev: 
     let title_col = if is_current { pal().accent_soft } else { pal().text };
     paint_line(ui, pos2(tx, rect.center().y - 17.0), &t.title, med(13.5), title_col, tw);
     let mut artist_x = tx;
+    if cx.downloads.contains_key(&t.id) {
+        ui.painter().text(pos2(tx + 7.0, rect.center().y + 11.0), Align2::CENTER_CENTER, icon::ARROW_CIRCLE_DOWN, filled_icon(14.0), pal().accent_soft);
+        artist_x += 19.0;
+    }
     if t.explicit {
         // "E" badge for explicit lyrics, like other music apps.
-        let badge = Rect::from_min_size(pos2(tx, rect.center().y + 4.0), vec2(14.0, 14.0));
+        let badge = Rect::from_min_size(pos2(artist_x, rect.center().y + 4.0), vec2(14.0, 14.0));
         ui.painter().rect_filled(badge, CornerRadius::same(3), pal().text_muted);
         ui.painter().text(badge.center(), Align2::CENTER_CENTER, "E", semi(9.5), pal().bg);
         artist_x += 19.0;
@@ -510,57 +631,15 @@ fn track_row(ui: &mut Ui, id: egui::Id, i: usize, t: &Track, cx: &TableCtx, ev: 
     }
 
     resp.context_menu(|ui| {
-        ui.set_min_width(200.0);
-        if menu_item(ui, icon::PLAY, "Play") {
-            ev.push(TrackEvent::Play(i));
-        }
-        if !cx.queue_mode {
-            if menu_item(ui, icon::ARROW_BEND_DOWN_RIGHT, "Play next") {
-                ev.push(TrackEvent::PlayNext(t.clone()));
-            }
-            if menu_item(ui, icon::QUEUE, "Add to queue") {
-                ev.push(TrackEvent::AddToQueue(t.clone()));
-            }
-        }
-        ui.separator();
-        let like_label = if liked { "Remove from Liked Songs" } else { "Save to Liked Songs" };
-        if menu_item(ui, icon::HEART, like_label) {
-            ev.push(TrackEvent::ToggleLike(t.clone()));
-        }
-        ui.menu_button(format!("{}   Add to playlist", icon::LIST_PLUS), |ui| {
-            ui.set_min_width(180.0);
-            if menu_item(ui, icon::PLUS, "New playlist…") {
-                ev.push(TrackEvent::NewPlaylistWith(t.clone()));
-            }
-            if !cx.playlists.is_empty() {
-                ui.separator();
-            }
-            for (pi, name) in cx.playlists.iter().enumerate() {
-                if menu_item(ui, icon::PLAYLIST, name) {
-                    ev.push(TrackEvent::AddToPlaylist(pi, t.clone()));
-                }
-            }
-        });
-        if menu_item(ui, icon::USER, "Go to artist") {
-            ev.push(TrackEvent::OpenArtist(t.clone()));
-        }
-        if let Some(al) = t.album.as_ref().filter(|a| crate::deezer::is_deezer_id(&a.id))
-            && menu_item(ui, icon::VINYL_RECORD, "Go to album")
-        {
-            ev.push(TrackEvent::OpenAlbum(al.id.clone()));
-        }
-        if cx.removable {
-            ui.separator();
-            if menu_item(ui, icon::TRASH, "Remove from this playlist") {
-                ev.push(TrackEvent::RemoveFromPlaylist(i));
-            }
-        }
-        if cx.queue_mode {
-            ui.separator();
-            if menu_item(ui, icon::X, "Remove from queue") {
-                ev.push(TrackEvent::RemoveFromQueue(i));
-            }
-        }
+        let mcx = MenuCtx {
+            liked,
+            playlists: cx.playlists,
+            index: Some(i),
+            removable: cx.removable,
+            queue_mode: cx.queue_mode,
+            downloaded: cx.downloads.contains_key(&t.id),
+        };
+        track_menu(ui, t, &mcx, ev);
     });
 }
 
@@ -575,6 +654,7 @@ pub fn resp_selected(ui: &Ui, resp: &Response, on: bool, label: &str) {
 }
 
 pub fn menu_item(ui: &mut Ui, glyph: &str, label: &str) -> bool {
+    let label = tr(label);
     let clicked = ui.add(egui::Button::new(format!("{glyph}   {label}")).frame_when_inactive(false)).clicked();
     if clicked {
         ui.close();
@@ -617,6 +697,7 @@ pub fn skeleton_rows(ui: &mut Ui, n: usize) {
 
 /// Centered message with an icon, optional button. Returns true if the button was clicked.
 pub fn empty_state(ui: &mut Ui, glyph: &str, title: &str, body: &str, button: Option<&str>) -> bool {
+    let (title, body, button) = (tr(title), tr(body), button.map(tr));
     let mut clicked = false;
     ui.add_space(60.0);
     ui.vertical_centered(|ui| {
@@ -634,6 +715,7 @@ pub fn empty_state(ui: &mut Ui, glyph: &str, title: &str, body: &str, button: Op
 }
 
 pub fn section_title(ui: &mut Ui, title: &str, action: Option<&str>) -> bool {
+    let (title, action) = (tr(title), action.map(tr));
     let mut clicked = false;
     ui.add_space(18.0);
     ui.horizontal(|ui| {

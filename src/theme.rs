@@ -2,10 +2,11 @@
 
 use egui::{Color32, CornerRadius, FontData, FontDefinitions, FontFamily, FontId, Stroke, Visuals};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicPtr, Ordering};
 
 /// All UI colors. Every text color meets WCAG AA (4.5:1) on the backgrounds it is drawn on,
 /// and white on `accent` is 5.7:1.
+#[derive(Debug, Clone, PartialEq)]
 pub struct Palette {
     pub bg: Color32,
     pub sidebar: Color32,
@@ -57,11 +58,50 @@ pub const LIGHT: Palette = Palette {
 pub const ON_DARK: Color32 = rgb(245, 245, 250);
 pub const ON_DARK_MUTED: Color32 = rgb(205, 205, 218);
 
-static LIGHT_MODE: AtomicBool = AtomicBool::new(false);
+/// High-contrast version of the dark palette: black background, white text,
+/// bright accent and visible borders.
+pub const HIGH_CONTRAST: Palette = Palette {
+    bg: rgb(0, 0, 0),
+    sidebar: rgb(0, 0, 0),
+    surface: rgb(10, 10, 10),
+    surface_hover: rgb(38, 38, 38),
+    surface_active: rgb(56, 56, 56),
+    border: rgb(160, 160, 160),
+    text: rgb(255, 255, 255),
+    text_muted: rgb(220, 220, 220),
+    text_faint: rgb(200, 200, 200),
+    accent: rgb(110, 40, 230),
+    accent_soft: rgb(255, 214, 10),
+};
+
+/// High-contrast version of the light palette.
+pub const HIGH_CONTRAST_LIGHT: Palette = Palette {
+    bg: rgb(255, 255, 255),
+    sidebar: rgb(255, 255, 255),
+    surface: rgb(255, 255, 255),
+    surface_hover: rgb(225, 225, 225),
+    surface_active: rgb(205, 205, 205),
+    border: rgb(60, 60, 60),
+    text: rgb(0, 0, 0),
+    text_muted: rgb(30, 30, 30),
+    text_faint: rgb(50, 50, 50),
+    accent: rgb(90, 20, 200),
+    accent_soft: rgb(75, 0, 170),
+};
+
+/// The palette in use. Swapped whole when the theme changes; each switch keeps the
+/// old one alive (a few hundred bytes), so reads never need a lock.
+static ACTIVE: AtomicPtr<Palette> = AtomicPtr::new(&DARK as *const Palette as *mut Palette);
 
 /// The active palette.
 pub fn pal() -> &'static Palette {
-    if LIGHT_MODE.load(Ordering::Relaxed) { &LIGHT } else { &DARK }
+    // SAFETY: ACTIVE only ever holds pointers to `'static` palettes (constants or leaked boxes).
+    unsafe { &*ACTIVE.load(Ordering::Relaxed) }
+}
+
+fn is_light(p: &Palette) -> bool {
+    let c = p.bg;
+    (c.r() as u32 + c.g() as u32 + c.b() as u32) > 384
 }
 
 pub const R_SM: CornerRadius = CornerRadius::same(6);
@@ -144,10 +184,22 @@ pub fn install(ctx: &egui::Context) {
     });
 }
 
-/// Switches between the dark and light palette and restyles egui's built-in widgets.
-pub fn set_light(ctx: &egui::Context, light: bool) {
-    LIGHT_MODE.store(light, Ordering::Relaxed);
+/// Picks the palette for light/dark mode and high contrast, and applies it.
+pub fn apply(ctx: &egui::Context, light: bool, high_contrast: bool) {
+    let p = match (light, high_contrast) {
+        (false, false) => DARK,
+        (true, false) => LIGHT,
+        (false, true) => HIGH_CONTRAST,
+        (true, true) => HIGH_CONTRAST_LIGHT,
+    };
+    set_palette(ctx, p);
+}
+
+/// Makes `p` the active palette and restyles egui's built-in widgets to match.
+pub fn set_palette(ctx: &egui::Context, p: Palette) {
+    ACTIVE.store(Box::into_raw(Box::new(p)), Ordering::Relaxed);
     let p = pal();
+    let light = is_light(p);
     let mut v = if light { Visuals::light() } else { Visuals::dark() };
     v.panel_fill = p.bg;
     v.window_fill = p.surface;
@@ -210,7 +262,7 @@ mod tests {
     /// Every text color must stay readable (WCAG AA, 4.5:1) on the backgrounds it is drawn on.
     #[test]
     fn text_colors_meet_wcag_aa() {
-        for (name, p) in [("DARK", &DARK), ("LIGHT", &LIGHT)] {
+        for (name, p) in [("DARK", &DARK), ("LIGHT", &LIGHT), ("HIGH_CONTRAST", &HIGH_CONTRAST), ("HIGH_CONTRAST_LIGHT", &HIGH_CONTRAST_LIGHT)] {
             let mut checks = vec![];
             // Body text on every surface, including hovered / selected rows.
             for bg in [p.bg, p.sidebar, p.surface, p.surface_hover, p.surface_active] {
@@ -222,6 +274,9 @@ mod tests {
                 checks.push(("text_faint", p.text_faint, bg));
             }
             checks.push(("white on accent", Color32::WHITE, p.accent));
+            for bg in [p.bg, p.sidebar, p.surface, p.surface_hover] {
+                checks.push(("accent text", p.accent_soft, bg));
+            }
             for (what, fg, bg) in checks {
                 let ratio = contrast(fg, bg);
                 assert!(ratio >= 4.5, "{name}: {what} on {bg:?} is {ratio:.2}:1, needs 4.5:1");

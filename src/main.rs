@@ -4,7 +4,12 @@
 mod app;
 mod audio;
 mod deezer;
+mod downloads;
+mod dsp;
+mod i18n;
+mod local;
 mod net;
+mod settings;
 mod theme;
 mod ui;
 mod widgets;
@@ -38,6 +43,17 @@ fn use_directx(options: &mut eframe::NativeOptions) {
     setup.power_preference = wgpu::PowerPreference::LowPower;
     // The shader compiler built into Windows, so no extra DLL has to ship with the .exe.
     setup.instance_descriptor.backend_options.dx12.shader_compiler = wgpu::Dx12Compiler::Fxc;
+    if !crate::settings::hardware_acceleration_enabled() {
+        // "Hardware acceleration" off: draw with Windows' built-in software renderer (WARP).
+        setup.native_adapter_selector = Some(std::sync::Arc::new(|adapters: &[wgpu::Adapter], _surface: Option<&wgpu::Surface<'_>>| {
+            adapters
+                .iter()
+                .find(|a| a.get_info().device_type == wgpu::DeviceType::Cpu)
+                .or_else(|| adapters.first())
+                .cloned()
+                .ok_or_else(|| "No graphics adapter found".to_string())
+        }));
+    }
     options.wgpu_options.wgpu_setup = WgpuSetup::CreateNew(setup);
 }
 
