@@ -179,6 +179,15 @@ const STRINGS: &[(&str, [&str; 4])] = &[
     ("Make a copy", ["Hacer una copia", "Fazer uma cópia", "Faire une copie", "Kopie erstellen"]),
     ("Copies this theme into the themes folder so you can edit it.", ["Copia este tema a la carpeta de temas para que puedas editarlo.", "Copia este tema para a pasta de temas para você editar.", "Copie ce thème dans le dossier des thèmes pour le modifier.", "Kopiert dieses Design in den Design-Ordner, damit du es bearbeiten kannst."]),
     ("Theme notes", ["Notas del tema", "Notas do tema", "Remarques sur le thème", "Hinweise zum Design"]),
+    ("Import playlist", ["Importar playlist", "Importar playlist", "Importer une playlist", "Playlist importieren"]),
+    ("Import a playlist", ["Importar una playlist", "Importar uma playlist", "Importer une playlist", "Eine Playlist importieren"]),
+    ("Import", ["Importar", "Importar", "Importer", "Importieren"]),
+    ("Cancel", ["Cancelar", "Cancelar", "Annuler", "Abbrechen"]),
+    ("Bring in a playlist from YouTube, Spotify or SoundCloud.", ["Trae una playlist de YouTube, Spotify o SoundCloud.", "Traga uma playlist do YouTube, Spotify ou SoundCloud.", "Importez une playlist depuis YouTube, Spotify ou SoundCloud.", "Hole eine Playlist von YouTube, Spotify oder SoundCloud."]),
+    ("Paste a link to a playlist or album from YouTube, Spotify or SoundCloud. Pulse finds each song and makes a playlist of it.", ["Pega el enlace de una playlist o álbum de YouTube, Spotify o SoundCloud. Pulse busca cada canción y crea una playlist.", "Cole o link de uma playlist ou álbum do YouTube, Spotify ou SoundCloud. O Pulse encontra cada música e cria uma playlist.", "Collez le lien d'une playlist ou d'un album YouTube, Spotify ou SoundCloud. Pulse retrouve chaque titre et en fait une playlist.", "Füge den Link zu einer Playlist oder einem Album von YouTube, Spotify oder SoundCloud ein. Pulse findet jeden Song und macht daraus eine Playlist."]),
+    ("Matching songs…", ["Buscando canciones…", "Encontrando músicas…", "Recherche des titres…", "Songs werden gesucht…"]),
+    ("Views", ["Vistas", "Visualizações", "Vues", "Aufrufe"]),
+    ("Views on YouTube", ["Vistas en YouTube", "Visualizações no YouTube", "Vues sur YouTube", "Aufrufe auf YouTube"]),
     ("Open themes folder", ["Abrir carpeta de temas", "Abrir pasta de temas", "Ouvrir le dossier des thèmes", "Design-Ordner öffnen"]),
 ];
 

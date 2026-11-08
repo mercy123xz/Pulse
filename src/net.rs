@@ -108,6 +108,17 @@ pub fn get_text(url: &str) -> Result<String, String> {
     resp.body_mut().read_to_string().map_err(|e| format!("Download interrupted ({e})"))
 }
 
+/// Downloads a web page as text, the way a browser asks for it.
+pub fn get_page(url: &str) -> Result<String, String> {
+    let mut resp = api()
+        .get(url)
+        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36 Pulse")
+        .header("Accept-Language", "en-US,en;q=0.9")
+        .call()
+        .map_err(friendly_error)?;
+    resp.body_mut().with_config().limit(20 * 1024 * 1024).read_to_string().map_err(|e| format!("Download interrupted ({e})"))
+}
+
 /// Percent-encodes text for use inside a URL.
 pub fn encode(s: &str) -> String {
     s.bytes()

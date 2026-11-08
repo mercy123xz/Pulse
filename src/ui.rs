@@ -197,12 +197,18 @@ fn sidebar(app: &mut App, ui: &mut Ui) {
         if nav_item(ui, icon::PLUS, "Create playlist", false, None).clicked() {
             app.new_playlist = Some((String::new(), None));
         }
+        if nav_item(ui, icon::ARROW_SQUARE_IN, "Import playlist", false, None).clicked() {
+            app.import_open = true;
+        }
     } else {
         ui.horizontal(|ui| {
             nav_heading(ui, "Playlists");
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if icon_button(ui, icon::PLUS, 14.0, pal().text_muted, tr("Create playlist")).clicked() {
                     app.new_playlist = Some((String::new(), None));
+                }
+                if icon_button(ui, icon::ARROW_SQUARE_IN, 14.0, pal().text_muted, tr("Import playlist")).clicked() {
+                    app.import_open = true;
                 }
             });
         });
@@ -495,15 +501,19 @@ fn table_ctx<'a>(app: &'a App, names: &'a [String]) -> TableCtx<'a> {
         queue_mode: false,
         downloads: &app.saved.downloads,
         added: None,
+        views: None,
         index_offset: 0,
     }
 }
 
 /// Draws a track table and applies whatever the user clicked.
 fn tracks_block(app: &mut App, ui: &mut Ui, salt: &str, tracks: &[Track]) {
+    app.ensure_views(tracks);
     let names = app.playlist_names();
     let mut ev = vec![];
-    track_table(ui, salt, tracks, &table_ctx(app, &names), &mut ev);
+    let mut cx = table_ctx(app, &names);
+    cx.views = Some(&app.saved.views);
+    track_table(ui, salt, tracks, &cx, &mut ev);
     let ctx = ui.ctx().clone();
     app.handle_events(ev, tracks, &ctx);
 }
@@ -1444,6 +1454,7 @@ fn player_bar(app: &mut App, ui: &mut Ui) {
 
 fn dialogs(app: &mut App, ctx: &egui::Context) {
     credits_dialog(app, ctx);
+    import_dialog(app, ctx);
     if let Some(idx) = app.confirm_delete.take() {
         let name = app.saved.playlists.get(idx).map(|p| p.name.clone()).unwrap_or_default();
         let (mut keep, mut delete) = (true, false);
@@ -1554,6 +1565,67 @@ fn dialogs(app: &mut App, ctx: &egui::Context) {
         } else if keep {
             app.rename_playlist = Some((idx, name));
         }
+    }
+}
+
+/// The "Import a playlist" window.
+fn import_dialog(app: &mut App, ctx: &egui::Context) {
+    if !app.import_open {
+        return;
+    }
+    let mut close = false;
+    let mut start = false;
+    let modal = egui::Modal::new(egui::Id::new("import")).show(ctx, |ui| {
+        ui.set_width(440.0);
+        ui.label(RichText::new(tr("Import a playlist")).font(heavy(20.0)).color(pal().text));
+        ui.add_space(4.0);
+        ui.label(RichText::new(tr("Paste a link to a playlist or album from YouTube, Spotify or SoundCloud. Pulse finds each song and makes a playlist of it.")).font(regular(12.5)).color(pal().text_muted));
+        ui.add_space(10.0);
+        if let Some(job) = &app.import_running {
+            let p = job.progress.lock().unwrap().clone();
+            ui.horizontal(|ui| {
+                ui.spinner();
+                let count = if p.total > 0 { format!("  {} / {}", p.done, p.total) } else { String::new() };
+                ui.label(RichText::new(format!("{}{count}", tr(&p.status))).font(med(13.0)).color(pal().text));
+            });
+            if p.total > 0 {
+                ui.add(egui::ProgressBar::new(p.done as f32 / p.total as f32).desired_height(6.0).fill(pal().accent));
+            }
+            ui.add_space(10.0);
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if ui.button(tr("Cancel")).clicked() {
+                    app.cancel_import();
+                }
+            });
+            return;
+        }
+        let r = ui.add(egui::TextEdit::singleline(&mut app.import_url).hint_text("https://open.spotify.com/playlist/…").desired_width(f32::INFINITY));
+        if app.import_url.is_empty() && !r.has_focus() {
+            r.request_focus();
+        }
+        let enter = r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            for (glyph, name) in [(icon::YOUTUBE_LOGO, "YouTube"), (icon::SPOTIFY_LOGO, "Spotify"), (icon::SOUNDCLOUD_LOGO, "SoundCloud")] {
+                ui.label(RichText::new(format!("{glyph} {name}")).font(regular(12.0)).color(pal().text_faint));
+            }
+        });
+        ui.add_space(10.0);
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            let ok = !app.import_url.trim().is_empty();
+            if ui.add_enabled(ok, egui::Button::new(RichText::new(tr("Import")).color(Color32::WHITE)).fill(pal().accent)).clicked() || (enter && ok) {
+                start = true;
+            }
+            if ui.button(tr("Cancel")).clicked() {
+                close = true;
+            }
+        });
+    });
+    if start {
+        app.start_import(ctx);
+    }
+    if (close || modal.should_close()) && app.import_running.is_none() {
+        app.import_open = false;
     }
 }
 

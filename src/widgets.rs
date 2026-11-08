@@ -483,6 +483,8 @@ pub struct TableCtx<'a> {
     pub downloads: &'a HashMap<String, std::path::PathBuf>,
     /// When songs were added (shows the "Date added" column).
     pub added: Option<&'a HashMap<String, u64>>,
+    /// YouTube views (shows the "Views" column).
+    pub views: Option<&'a HashMap<String, (u64, u64)>>,
     /// Number shown for the first row (queue shows "next up" starting at 1).
     pub index_offset: usize,
 }
@@ -493,12 +495,13 @@ struct Cols {
     num: Rect,
     title: Rect,
     album: Option<Rect>,
+    views: Option<Rect>,
     date: Option<Rect>,
     like: Rect,
     time: Rect,
 }
 
-fn columns(row: Rect, with_date: bool) -> Cols {
+fn columns(row: Rect, with_date: bool, with_views: bool) -> Cols {
     let w = row.width();
     let x0 = row.left();
     let col = |a: f32, b: f32| Rect::from_x_y_ranges(a..=b, row.y_range());
@@ -506,12 +509,27 @@ fn columns(row: Rect, with_date: bool) -> Cols {
     let time = col(row.right() - 64.0, row.right() - 12.0);
     let like = col(time.left() - 40.0, time.left());
     let date = (with_date && w > 900.0).then(|| col(like.left() - 150.0, like.left() - 12.0));
+    let after_views = date.map(|d| d.left()).unwrap_or(like.left());
+    let views = (with_views && w > 640.0).then(|| col(after_views - 130.0, after_views - 20.0));
     let wide = w > 720.0;
-    let album_right = date.map(|d| d.left()).unwrap_or(like.left()) - 16.0;
+    let album_right = views.map(|v| v.left()).unwrap_or(after_views) - 16.0;
     let album_w = (w * if date.is_some() { 0.24 } else { 0.3 }).min(320.0);
     let album = wide.then(|| col(album_right - album_w, album_right));
     let title_right = album.map(|a| a.left()).unwrap_or(like.left()) - 16.0;
-    Cols { num, title: col(num.right() + 4.0, title_right), album, date, like, time }
+    Cols { num, title: col(num.right() + 4.0, title_right), album, views, date, like, time }
+}
+
+/// 5003515 → "5,003,515".
+pub fn fmt_thousands(n: u64) -> String {
+    let digits = n.to_string();
+    let mut out = String::new();
+    for (i, c) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
 }
 
 /// "Date added" like Spotify: "3 days ago" for recent songs, else the date.
@@ -543,9 +561,9 @@ pub fn fmt_added(when: u64, now: u64) -> String {
     }
 }
 
-pub fn track_table_header(ui: &mut Ui, with_date: bool) {
+pub fn track_table_header(ui: &mut Ui, with_date: bool, with_views: bool) {
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 32.0), Sense::hover());
-    let c = columns(rect, with_date);
+    let c = columns(rect, with_date, with_views);
     let f = med(11.5);
     let p = ui.painter();
     p.text(c.num.center(), Align2::CENTER_CENTER, "#", f.clone(), pal().text_faint);
@@ -556,13 +574,17 @@ pub fn track_table_header(ui: &mut Ui, with_date: bool) {
     if let Some(d) = c.date {
         p.text(d.left_center(), Align2::LEFT_CENTER, tr("Date added").to_uppercase(), f.clone(), pal().text_faint);
     }
+    if let Some(v) = c.views {
+        let r = p.text(v.right_center(), Align2::RIGHT_CENTER, tr("Views").to_uppercase(), f.clone(), pal().text_faint);
+        ui.interact(r, ui.id().with("views_hdr"), Sense::hover()).on_hover_text(tr("Views on YouTube"));
+    }
     p.text(c.time.right_center(), Align2::RIGHT_CENTER, icon::CLOCK_COUNTER_CLOCKWISE, regular(14.0), pal().text_faint);
     p.hline(rect.x_range(), rect.bottom(), Stroke::new(1.0, pal().border));
     ui.add_space(6.0);
 }
 
 pub fn track_table(ui: &mut Ui, id_salt: &str, tracks: &[Track], cx: &TableCtx, events: &mut Vec<TrackEvent>) {
-    track_table_header(ui, cx.added.is_some());
+    track_table_header(ui, cx.added.is_some(), cx.views.is_some());
     let base = ui.id().with(id_salt);
     ui.spacing_mut().item_spacing.y = 0.0;
     for (i, t) in tracks.iter().enumerate() {
@@ -594,7 +616,7 @@ fn track_row(ui: &mut Ui, id: egui::Id, i: usize, t: &Track, cx: &TableCtx, ev: 
     if let Some(b) = style.border {
         ui.painter().hline(rect.x_range(), rect.bottom() - 0.5, b);
     }
-    let c = columns(rect, cx.added.is_some());
+    let c = columns(rect, cx.added.is_some(), cx.views.is_some());
 
     // Number / play icon / "now playing" bars
     if hovered {
@@ -649,6 +671,9 @@ fn track_row(ui: &mut Ui, id: egui::Id, i: usize, t: &Track, cx: &TableCtx, ev: 
         ));
     }
 
+    if let (Some(v), Some((n, _))) = (c.views, cx.views.and_then(|m| m.get(&t.id))) {
+        ui.painter().text(v.right_center(), Align2::RIGHT_CENTER, fmt_thousands(*n), regular(12.5), pal().text_muted);
+    }
     if let (Some(d), Some(when)) = (c.date, cx.added.and_then(|a| a.get(&t.id))) {
         let text = fmt_added(*when, crate::app::now_unix());
         paint_line(ui, pos2(d.left(), d.center().y - 8.0), tr(&text), regular(12.5), pal().text_muted, d.width());
@@ -745,7 +770,7 @@ pub fn skeleton_rows(ui: &mut Ui, n: usize) {
     let col = pal().surface_hover.gamma_multiply(a);
     for k in 0..n {
         let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), ROW_H), Sense::hover());
-        let c = columns(rect, false);
+        let c = columns(rect, false, false);
         let art = Rect::from_min_size(pos2(c.title.left(), rect.center().y - 20.0), Vec2::splat(40.0));
         ui.painter().rect_filled(art, CornerRadius::same(5), col);
         let w1 = 140.0 + ((k * 37) % 90) as f32;
@@ -803,5 +828,7 @@ mod added_tests {
         assert_eq!(super::fmt_added(now - 3 * 86_400, now), "3 days ago");
         assert_eq!(super::fmt_added(now - 15 * 86_400, now), "2 weeks ago");
         assert_eq!(super::fmt_added(1_700_000_000, now), "Nov 14, 2023");
+        assert_eq!(super::fmt_thousands(5_003_515), "5,003,515");
+        assert_eq!(super::fmt_thousands(739), "739");
     }
 }
