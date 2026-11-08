@@ -7,8 +7,8 @@
 
 <p align="center">
   <b>A fast, native music player for Windows, written in Rust.</b><br>
-  Stream free, full-length music from independent artists on <a href="https://audius.co">Audius</a>.<br>
-  One <code>.exe</code>: no installer, no account, nothing else to download.
+  Search any artist and play full songs, with autoplay when your queue runs out.<br>
+  One <code>.exe</code>: no installer, no account.
 </p>
 
 <p align="center">
@@ -25,13 +25,16 @@
 ## Features
 
 **Discover**
-- **Home:** trending playlists, this week's top tracks, up-and-coming underground tracks and quick genre picks
-- **Trending charts** for this week, month, year or all time, filtered by 24 genres
-- **Live search** for songs, artists and playlists as you type
-- **Artist pages** with their most-played tracks, and full **playlist and album** pages
+- **Home:** today's top songs, popular albums, artists and playlists, and quick genre picks
+- **Charts:** the top 100 songs overall or in 27 genres
+- **Live search** for songs, artists, albums and playlists as you type
+- **Artist pages** with their latest release, most popular songs, full discography and similar artists
+- **Album and playlist pages** with cover art
 
 **Listen**
-- Songs start playing right away while the rest downloads, and you can jump anywhere in them
+- Full-length songs, found and streamed from YouTube automatically
+- **Autoplay:** when your queue runs out, Pulse keeps playing similar songs (turn it off in the Queue)
+- The next song is found while the current one plays, so tracks change without a wait
 - Queue with **Play next** and **Add to queue**, plus shuffle and repeat (all or one)
 - Picks up where you left off: your last song, volume and settings are remembered
 
@@ -52,8 +55,14 @@
 The first time you open it, Windows may show **"Windows protected your PC"**. It does that for any
 new app that isn't signed with a paid certificate. Click **More info → Run anyway**.
 
-Your likes, playlists and settings are stored in `%APPDATA%\pulse-player`. To uninstall, delete
-`pulse.exe` (and that folder if you want your data gone too).
+The first time you play a song, Pulse downloads two free tools it needs for YouTube playback,
+[yt-dlp](https://github.com/yt-dlp/yt-dlp) and [Deno](https://deno.com) (about 60 MB, once). It gets
+them from their official GitHub releases and checks them against the published checksums. After
+that, songs start in a few seconds, and Pulse updates yt-dlp by itself once a day so playback keeps
+working when YouTube changes.
+
+Your likes, playlists, settings and those tools are stored in `%APPDATA%\pulse-player`. To
+uninstall, delete `pulse.exe` (and that folder if you want everything gone).
 
 ## Keyboard shortcuts
 
@@ -95,8 +104,10 @@ On Linux you'll also need the ALSA development headers (`sudo apt install libaso
 | File | What it does |
 |---|---|
 | `src/main.rs` | Opens the window and picks the graphics backend (DirectX 12 on Windows) |
-| `src/api.rs` | Talks to the Audius API: trending, search, playlists, artists, audio streams |
-| `src/audio.rs` | Audio engine: plays MP3s while they download, seeking, volume, resuming dropped downloads |
+| `src/deezer.rs` | Song info, artwork and charts from the Deezer API: search, artists, albums, playlists, similar songs |
+| `src/youtube.rs` | YouTube playback: installs and updates yt-dlp and Deno, finds the matching video, gets the audio link |
+| `src/audio.rs` | Audio engine: streams MP3/M4A in chunks, seeking, volume, resuming dropped downloads |
+| `src/net.rs` | Shared HTTP helpers |
 | `src/app.rs` | App logic: pages and history, the queue, shuffle and repeat, likes, playlists, saving |
 | `src/ui.rs` | Everything you see: sidebar, top bar, pages, player bar, dialogs |
 | `src/widgets.rs` | Custom-drawn pieces: song rows, cards, sliders, buttons, accessibility helpers |
@@ -109,14 +120,17 @@ Run the tests with `cargo test`.
 
 - [egui / eframe](https://github.com/emilk/egui): the user interface
 - [wgpu](https://wgpu.rs): graphics through DirectX 12 on Windows
-- [rodio](https://github.com/RustAudio/rodio) and [Symphonia](https://github.com/pdeljanov/Symphonia): audio playback and MP3 decoding
+- [rodio](https://github.com/RustAudio/rodio) and [Symphonia](https://github.com/pdeljanov/Symphonia): audio playback and MP3/AAC decoding
+- [yt-dlp](https://github.com/yt-dlp/yt-dlp) and [Deno](https://deno.com): finding and streaming songs from YouTube (downloaded on first use)
+- [Deezer API](https://developers.deezer.com/api): song info, artwork and charts
 - [ureq](https://github.com/algesten/ureq) with [rustls](https://github.com/rustls/rustls): networking
 - [Phosphor Icons](https://phosphoricons.com) and the [Inter](https://rsms.me/inter/) typeface (SIL Open Font License)
 
 ## About the music
 
-All music is streamed from [Audius](https://audius.co) through its free public API. Artists keep all
-rights to their work; please credit them when you share it. Tracks that artists have locked
-(for example, pay-to-unlock releases) are hidden.
+Song info, artwork and charts come from the free [Deezer API](https://developers.deezer.com/api).
+The audio is streamed from YouTube using yt-dlp. Streaming YouTube outside its own apps may go
+against YouTube's Terms of Service; use Pulse for personal listening and support the artists you
+enjoy. Pulse only plays full songs: if YouTube can't play one, Pulse says so and you can skip to the next.
 
-Pulse is an independent project and isn't affiliated with or endorsed by Audius.
+Pulse is an independent project and isn't affiliated with or endorsed by Deezer, YouTube or Google.
