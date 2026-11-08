@@ -703,13 +703,15 @@ mod tests {
 
     #[test]
     fn bundled_themes_load_their_layouts() {
+        let mut w = vec![];
+        assert_eq!(parse_toml("[layout]\nplayer = \"controls-left\"", &mut w).layout.player, PlayerStyle::ControlsLeft);
         let all = list();
         let get = |n: &str| all.iter().find(|t| t.name == n).unwrap();
         assert_eq!(get("Lunar").layout.sidebar, SidebarStyle::Icons);
         assert_eq!(get("Lunar").layout.hero, HeroStyle::FullBleed);
         assert!(get("Lunar").layout.inset);
         assert_eq!(get("Blossom").layout.now_playing_art, NowPlayingArt::SidebarLarge);
-        assert_eq!(get("Dreary Mono").layout.player, PlayerStyle::ControlsLeft);
+        assert_eq!(get("Dreary Mono").layout.player, PlayerStyle::Centered);
         let mono = get("Dreary Mono").active(0, false);
         assert_eq!(mono.radius, [2, 2, 4]);
         assert_eq!(mono.parts.hero.uppercase, Some(true));

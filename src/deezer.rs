@@ -537,6 +537,11 @@ struct DzAlbumLabel {
     genres: DzGenres,
 }
 
+/// One song by its Deezer number.
+pub fn track_by_id(id: u64) -> Result<Track, String> {
+    get::<DzTrack>(&format!("/track/{id}"), &[]).map(|t| track(t, None))
+}
+
 /// An album's genres.
 pub fn album_genres(id: &str) -> Result<Vec<String>, String> {
     let a: DzAlbumLabel = get(&format!("/album/{id}"), &[])?;
@@ -591,6 +596,35 @@ pub fn playlist(id: &str) -> Result<(PlaylistInfo, Vec<Track>), String> {
 
 /// Songs similar to `t`, for autoplay: the artist's radio, or a search by name
 /// for songs saved by older versions of Pulse.
+/// A Daily Mix: songs like an artist's (their radio) mixed with their own hits,
+/// shuffled the same way all day so the mix stays put until tomorrow.
+pub fn mix(artist_id: &str) -> Result<Vec<Track>, String> {
+    let radio: List<DzTrack> = get(&format!("/artist/{artist_id}/radio"), &[("limit", "40")]).unwrap_or_default();
+    let top: List<DzTrack> = get(&format!("/artist/{artist_id}/top"), &[("limit", "10")])?;
+    let (radio, top) = (tracks(radio), tracks(top));
+    let mut out: Vec<Track> = vec![];
+    let mut top = top.into_iter();
+    for (i, t) in radio.into_iter().enumerate() {
+        if i % 4 == 0
+            && let Some(h) = top.next()
+        {
+            out.push(h);
+        }
+        out.push(t);
+    }
+    out.extend(top);
+    let mut seen = std::collections::HashSet::new();
+    out.retain(|t| seen.insert(t.id.clone()));
+    // Shuffle with today's date as the seed.
+    let day = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() / 86_400).unwrap_or(0);
+    let mut seed = day ^ artist_id.bytes().fold(0u64, |h, b| h.wrapping_mul(31).wrapping_add(b as u64));
+    for i in (1..out.len()).rev() {
+        seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        out.swap(i, (seed >> 33) as usize % (i + 1));
+    }
+    Ok(out)
+}
+
 pub fn similar_to(t: &Track) -> Result<Vec<Track>, String> {
     let artist_id = if t.has_artist_page() {
         t.artist.id.clone()

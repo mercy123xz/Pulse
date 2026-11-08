@@ -268,6 +268,8 @@ pub struct CardInfo<'a> {
     pub title: &'a str,
     pub subtitle: String,
     pub round: bool,
+    /// A label on the picture, like "Daily Mix 01".
+    pub badge: Option<&'a str>,
 }
 
 pub enum CardClick {
@@ -295,6 +297,14 @@ pub fn card(ui: &mut Ui, w: f32, info: &CardInfo) -> CardClick {
     let art_rect = Rect::from_min_size(rect.min + vec2(pad, pad), Vec2::splat(w - pad * 2.0));
     let radius = if info.round { CornerRadius::same(((w - pad * 2.0) / 2.0).min(255.0) as u8) } else { r_md() };
     artwork(ui, art_rect, info.art, radius);
+    if let Some(b) = info.badge {
+        // Darken the bottom of the picture a little and put the label on it.
+        vgradient(ui, Rect::from_min_max(pos2(art_rect.left(), art_rect.bottom() - 46.0), art_rect.max), Color32::TRANSPARENT, Color32::from_black_alpha(150));
+        let g = one_line(ui, b, heavy(15.0), Color32::WHITE, art_rect.width() - 20.0);
+        let label = Rect::from_min_size(pos2(art_rect.left() + 8.0, art_rect.bottom() - 32.0), g.size() + vec2(12.0, 6.0));
+        ui.painter().rect_filled(label, CornerRadius::same(4), pal().accent);
+        ui.painter().galley(label.min + vec2(6.0, 3.0), g, Color32::WHITE);
+    }
 
     let text_w = w - pad * 2.0;
     paint_line(ui, pos2(rect.left() + pad, art_rect.bottom() + 10.0), info.title, semi(13.5), pal().text, text_w);

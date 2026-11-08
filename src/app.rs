@@ -28,6 +28,9 @@ pub enum Route {
     Local(usize),
     LocalFiles,
     Settings,
+    /// A Daily Mix built around one of your most-played artists (Deezer artist id).
+    Mix(String),
+    Profile,
 }
 
 /// Data downloaded for a page.
@@ -44,6 +47,58 @@ pub enum Remote {
     Loading,
     Ready(Box<Page>),
     Failed(String),
+}
+
+/// Somewhere you went or something you played, for the home page.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Place {
+    Album(String),
+    Artist(String),
+    Playlist(String),
+    /// One of your playlists, by name (positions change when playlists are deleted).
+    Yours(String),
+    Liked,
+    Mix(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Visit {
+    pub place: Place,
+    pub title: String,
+    pub subtitle: String,
+    pub image: Option<String>,
+    pub round: bool,
+    /// Times played or opened, and when last (Unix seconds).
+    pub count: u32,
+    pub last: u64,
+}
+
+/// Adds or moves `v` to the front of `list` (keeping at most `max`), counting it.
+fn bump(list: &mut Vec<Visit>, mut v: Visit, max: usize) {
+    if let Some(i) = list.iter().position(|x| x.place == v.place) {
+        let old = list.remove(i);
+        v.count = old.count + 1;
+        if v.image.is_none() {
+            v.image = old.image;
+        }
+    } else {
+        v.count = 1;
+    }
+    list.insert(0, v);
+    list.truncate(max);
+}
+
+/// Your most-played artists, best first: plays count, recent plays count more.
+pub fn top_artists(artists: &[Visit], now: u64) -> Vec<&Visit> {
+    let mut v: Vec<(f64, &Visit)> = artists
+        .iter()
+        .map(|a| {
+            let days = now.saturating_sub(a.last) as f64 / 86_400.0;
+            (a.count as f64 / (1.0 + days / 14.0), a)
+        })
+        .collect();
+    v.sort_by(|a, b| b.0.total_cmp(&a.0));
+    v.into_iter().map(|(_, a)| a).collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -191,6 +246,26 @@ pub struct Saved {
     pub album_genres: HashMap<String, Vec<String>>,
     /// YouTube view counts: song id → (views, when looked up).
     pub views: HashMap<String, (u64, u64)>,
+    /// Artists and albums you've played, most recent first (for the home page).
+    pub played_artists: Vec<Visit>,
+    pub played_albums: Vec<Visit>,
+    /// Pages you opened, most recent first ("Recents" on the home page).
+    pub visits: Vec<Visit>,
+    pub profile: Profile,
+}
+
+/// Your profile, kept on this computer.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Profile {
+    pub name: String,
+    /// A copy of your picture in Pulse's data folder.
+    pub picture: Option<std::path::PathBuf>,
+    pub bio: String,
+    /// When the profile was made (Unix seconds); 0 = not made yet.
+    pub created: u64,
+    /// "Later" was pressed on the welcome screen.
+    pub skipped: bool,
 }
 
 impl Default for Saved {
@@ -211,6 +286,10 @@ impl Default for Saved {
             liked_added: HashMap::new(),
             album_genres: HashMap::new(),
             views: HashMap::new(),
+            played_artists: vec![],
+            played_albums: vec![],
+            visits: vec![],
+            profile: Profile::default(),
         }
     }
 }
@@ -356,6 +435,8 @@ pub struct App {
     pub import_open: bool,
     pub import_url: String,
     pub import_running: Option<ImportJob>,
+    /// The profile form, when open (first-launch welcome or "Edit profile").
+    pub profile_editing: Option<crate::ui::ProfileForm>,
 
     // YouTube view counts
     views_queue: std::collections::VecDeque<Track>,
@@ -431,6 +512,7 @@ impl App {
             import_open: false,
             import_url: String::new(),
             import_running: None,
+            profile_editing: None,
             views_queue: Default::default(),
             views_pending: HashSet::new(),
             views_tx,
@@ -443,6 +525,10 @@ impl App {
             app.saved.settings.scheme = "Light".into();
         }
         app.apply_theme(&cc.egui_ctx);
+        // First launch: offer to make a profile.
+        if app.saved.profile.created == 0 && !app.saved.profile.skipped {
+            app.profile_editing = Some(crate::ui::ProfileForm { welcome: true, ..Default::default() });
+        }
         // Forget downloads whose files were deleted outside Pulse.
         app.saved.downloads.retain(|_, path| path.is_file());
         app.audio.set_effects(crate::audio::Effects::from_settings(&app.saved.settings));
@@ -519,7 +605,8 @@ impl App {
             Route::Playlist(id) => format!("playlist:{id}"),
             Route::Album(id) => format!("album:{id}"),
             Route::Artist(id) => format!("artist:{id}"),
-            Route::Liked | Route::Recent | Route::Queue | Route::Local(_) | Route::LocalFiles | Route::Settings => return None,
+            Route::Mix(id) => format!("mix:{id}"),
+            Route::Liked | Route::Recent | Route::Queue | Route::Local(_) | Route::LocalFiles | Route::Settings | Route::Profile => return None,
         })
     }
 
@@ -540,6 +627,7 @@ impl App {
             Route::Playlist(id) => Box::new(move || deezer::playlist(&id).map(|(info, tracks)| Page::Playlist { info, tracks })),
             Route::Album(id) => Box::new(move || deezer::album(&id).map(|(info, tracks)| Page::Album { info, tracks })),
             Route::Artist(id) => Box::new(move || deezer::artist_page(&id).map(Page::Artist)),
+            Route::Mix(id) => Box::new(move || deezer::mix(&id).map(Page::Tracks)),
             _ => return,
         };
         let tx = self.tx.clone();
@@ -696,6 +784,7 @@ impl App {
         self.saved.recent.retain(|t| t.id != track.id);
         self.saved.recent.insert(0, track.clone());
         self.saved.recent.truncate(50);
+        self.record_play(&track);
         self.current = Some(track);
     }
 
@@ -738,6 +827,7 @@ impl App {
         self.saved.recent.retain(|t| t.id != track.id);
         self.saved.recent.insert(0, track.clone());
         self.saved.recent.truncate(50);
+        self.record_play(&track);
         self.current = Some(track);
         self.maybe_fetch_autoplay(ctx);
     }
@@ -1005,11 +1095,88 @@ impl App {
         }
     }
 
+    /// Saves the profile form. A new picture is copied into Pulse's data folder.
+    pub fn save_profile(&mut self, f: &crate::ui::ProfileForm) -> Result<(), String> {
+        let dir = crate::settings::data_dir().join("covers");
+        let mut picture = f.picture.clone();
+        if let Some(src) = &f.picture
+            && !src.starts_with(&dir)
+        {
+            std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+            let ext = src.extension().and_then(|x| x.to_str()).unwrap_or("png").to_lowercase();
+            let dest = dir.join(format!("profile-{}.{ext}", now_unix()));
+            std::fs::copy(src, &dest).map_err(|e| format!("Couldn't copy the picture ({e})"))?;
+            if let Some(old) = self.saved.profile.picture.take() {
+                let _ = std::fs::remove_file(old);
+            }
+            picture = Some(dest);
+        }
+        let p = &mut self.saved.profile;
+        p.name = f.name.trim().to_string();
+        p.bio = f.bio.trim().to_string();
+        p.picture = picture;
+        if p.created == 0 {
+            p.created = now_unix();
+        }
+        Ok(())
+    }
+
+    /// Copies a share code for playlist `i` to the clipboard.
+    pub fn share_playlist(&mut self, i: usize, ctx: &egui::Context) {
+        let Some(p) = self.saved.playlists.get(i) else { return };
+        let code = crate::share::encode(&p.name, &self.saved.profile.name, &p.tracks);
+        ctx.copy_text(code);
+        self.toast("Share code copied. Friends paste it into Import playlist.", ctx);
+    }
+
     pub fn remove_from_playlist(&mut self, i: usize, id: &str) {
         if let Some(p) = self.saved.playlists.get_mut(i) {
             p.tracks.retain(|t| t.id != id);
             p.added.remove(id);
         }
+    }
+
+    /// Remembers the artist and album of a song you played (for the home page).
+    fn record_play(&mut self, t: &Track) {
+        let now = now_unix();
+        if t.has_artist_page() {
+            let image = t.artist.picture.clone().or_else(|| t.art_big().map(str::to_owned));
+            let v = Visit { place: Place::Artist(t.artist.id.clone()), title: t.artist.name.clone(), subtitle: "Artist".into(), image, round: true, count: 0, last: now };
+            bump(&mut self.saved.played_artists, v, 60);
+        }
+        if let Some(al) = t.album.as_ref().filter(|a| deezer::is_deezer_id(&a.id)) {
+            let v = Visit {
+                place: Place::Album(al.id.clone()),
+                title: al.title.clone(),
+                subtitle: t.artist.name.clone(),
+                image: t.art_big().map(str::to_owned),
+                round: false,
+                count: 0,
+                last: now,
+            };
+            bump(&mut self.saved.played_albums, v, 30);
+        }
+    }
+
+    /// Remembers a page you opened (for "Recents"). Cheap to call every frame.
+    pub fn note_visit(&mut self, place: Place, title: &str, subtitle: &str, image: Option<&str>, round: bool) {
+        if self.saved.visits.first().is_some_and(|v| v.place == place) {
+            return;
+        }
+        let v = Visit { place, title: title.to_string(), subtitle: subtitle.to_string(), image: image.map(str::to_owned), round, count: 0, last: now_unix() };
+        bump(&mut self.saved.visits, v, 20);
+    }
+
+    /// The page for a remembered place.
+    pub fn route_for(&self, place: &Place) -> Option<Route> {
+        Some(match place {
+            Place::Album(id) => Route::Album(id.clone()),
+            Place::Artist(id) => Route::Artist(id.clone()),
+            Place::Playlist(id) => Route::Playlist(id.clone()),
+            Place::Yours(name) => Route::Local(self.saved.playlists.iter().position(|p| p.name == *name)?),
+            Place::Liked => Route::Liked,
+            Place::Mix(id) => Route::Mix(id.clone()),
+        })
     }
 
     /// Asks for YouTube view counts of songs that don't have a recent one.
@@ -1123,7 +1290,8 @@ impl App {
                 self.import_url.clear();
                 self.navigate(Route::Local(i), ctx);
                 let extra = if imp.matched < total { format!(" ({} not found on Deezer, they'll still play)", total - imp.matched) } else { String::new() };
-                self.toast(&format!("Imported “{name}”: {total} songs{extra}"), ctx);
+                let from = imp.owner.map(|o| format!(" from {o}")).unwrap_or_default();
+                self.toast(&format!("Imported “{name}”{from}: {total} songs{extra}"), ctx);
             }
             Err(e) => self.toast(&e, ctx),
         }
@@ -1554,6 +1722,28 @@ mod share_tests {
             album: Some(deezer::AlbumRef { id: album.into(), title: album.into() }),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn remembers_what_you_play() {
+        let v = |id: &str, last: u64| Visit { place: Place::Artist(id.into()), title: id.into(), subtitle: String::new(), image: None, round: true, count: 0, last };
+        let mut list = vec![];
+        bump(&mut list, v("a", 100), 3);
+        bump(&mut list, v("b", 100), 3);
+        bump(&mut list, v("a", 100), 3);
+        assert_eq!(list[0].place, Place::Artist("a".into()));
+        assert_eq!(list[0].count, 2);
+        bump(&mut list, v("c", 100), 3);
+        bump(&mut list, v("d", 100), 3);
+        assert_eq!(list.len(), 3, "keeps at most 3");
+        // Played often long ago vs. a little recently.
+        let mut old = v("old", 0);
+        old.count = 10;
+        let mut new = v("new", 365 * 86_400);
+        new.count = 3;
+        let both = [old, new];
+        let top = top_artists(&both, 365 * 86_400);
+        assert_eq!(top[0].title, "new");
     }
 
     #[test]

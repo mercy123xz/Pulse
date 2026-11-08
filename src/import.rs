@@ -21,6 +21,8 @@ pub enum Source {
     YouTube,
     Spotify,
     SoundCloud,
+    /// A Pulse share code.
+    Shared,
 }
 
 impl Source {
@@ -29,6 +31,7 @@ impl Source {
             Source::YouTube => "YouTube",
             Source::Spotify => "Spotify",
             Source::SoundCloud => "SoundCloud",
+            Source::Shared => "shared",
         }
     }
 }
@@ -57,11 +60,16 @@ pub struct Progress {
 /// when known) and how many matched a Deezer song.
 pub struct Imported {
     pub name: String,
+    /// Who shared it (share codes only).
+    pub owner: Option<String>,
     pub tracks: Vec<(Track, Option<String>)>,
     pub matched: usize,
 }
 
 pub fn detect(url: &str) -> Result<Source, String> {
+    if crate::share::is_code(url) {
+        return Ok(Source::Shared);
+    }
     let u = url.trim().to_lowercase();
     if u.contains("youtube.com/") || u.contains("youtu.be/") {
         Ok(Source::YouTube)
@@ -70,7 +78,7 @@ pub fn detect(url: &str) -> Result<Source, String> {
     } else if u.contains("soundcloud.com/") {
         Ok(Source::SoundCloud)
     } else {
-        Err("Paste a link to a YouTube, Spotify or SoundCloud playlist.".into())
+        Err("Paste a link to a YouTube, Spotify or SoundCloud playlist, or a Pulse share code.".into())
     }
 }
 
@@ -80,11 +88,15 @@ pub fn run(url: &str, progress: &Arc<Mutex<Progress>>, cancel: &AtomicBool) -> R
         *progress.lock().unwrap() = Progress { status: status.to_string(), done, total };
     };
     let source = detect(url)?;
+    if source == Source::Shared {
+        return shared(url, &set, cancel);
+    }
     set(&format!("Reading the {} playlist…", source.name()), 0, 0);
     let (name, items) = match source {
         Source::YouTube => youtube(url, &|s| set(s, 0, 0))?,
         Source::Spotify => spotify(url)?,
         Source::SoundCloud => soundcloud(url, &|done, total| set("Reading the SoundCloud playlist…", done, total), cancel)?,
+        Source::Shared => unreachable!("share codes return early"),
     };
     if items.is_empty() {
         return Err("That playlist is empty, private, or couldn't be read.".into());
@@ -117,7 +129,31 @@ pub fn run(url: &str, progress: &Arc<Mutex<Progress>>, cancel: &AtomicBool) -> R
         }
     }
     set("Done", total, total);
-    Ok(Imported { name, tracks, matched })
+    Ok(Imported { name, owner: None, tracks, matched })
+}
+
+/// A Pulse share code: Deezer songs are fetched by number, the rest are in the code.
+fn shared(code: &str, set: &dyn Fn(&str, usize, usize), cancel: &AtomicBool) -> Result<Imported, String> {
+    let s = crate::share::decode(code)?;
+    let total = s.t.len();
+    let mut tracks = vec![];
+    for (i, e) in s.t.iter().enumerate() {
+        if cancel.load(Ordering::Relaxed) {
+            return Err("Import cancelled.".into());
+        }
+        set("Getting songs…", i, total);
+        match e {
+            crate::share::Entry::Deezer(n) => {
+                if let Ok(t) = crate::deezer::track_by_id(*n) {
+                    tracks.push((t, None));
+                }
+                std::thread::sleep(std::time::Duration::from_millis(120));
+            }
+            crate::share::Entry::Song { t, a, d, c } => tracks.push((crate::share::song_track(t, a, *d, c, i), None)),
+        }
+    }
+    let matched = tracks.len();
+    Ok(Imported { name: s.n, owner: Some(s.o).filter(|o| !o.is_empty()), tracks, matched })
 }
 
 /// A song that isn't on Deezer: kept with what the other service said about it.

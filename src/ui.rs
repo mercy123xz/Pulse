@@ -7,7 +7,10 @@ use crate::theme::*;
 use crate::widgets::*;
 use crate::i18n::tr;
 
+mod personal;
 mod settings_page;
+
+pub use personal::ProfileForm;
 use egui::{Align, Align2, Color32, CornerRadius, Frame, Key, Layout, Margin, Rect, RichText, Sense, Stroke, Ui, Vec2, pos2, vec2};
 use egui_phosphor::regular as icon;
 
@@ -236,6 +239,9 @@ fn sidebar(app: &mut App, ui: &mut Ui) {
                 if menu_item(ui, icon::PENCIL_SIMPLE, "Rename") {
                     app.rename_playlist = Some((i, name.clone()));
                 }
+                if menu_item(ui, icon::SHARE_FAT, "Copy share code") {
+                    app.share_playlist(i, &ctx);
+                }
                 if menu_item(ui, icon::TRASH, "Delete") {
                     app.confirm_delete = Some(i);
                 }
@@ -394,6 +400,23 @@ fn top_bar(app: &mut App, ui: &mut Ui) {
         }
 
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            // Your profile picture: opens your profile.
+            let (r, resp) = ui.allocate_exact_size(Vec2::splat(34.0), Sense::click());
+            personal::avatar(ui, r, app);
+            if app.route == Route::Profile || resp.hovered() {
+                ui.painter().circle_stroke(r.center(), 18.0, Stroke::new(2.0, pal().accent_soft));
+            }
+            let who = if app.saved.profile.name.is_empty() { tr("Profile").to_string() } else { app.saved.profile.name.clone() };
+            a11y(ui, &resp, egui::WidgetType::Button, || who.clone());
+            focus_ring(ui, &resp);
+            if resp.on_hover_text(&who).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                if app.saved.profile.created == 0 {
+                    app.profile_editing = Some(ProfileForm { welcome: true, ..Default::default() });
+                } else {
+                    app.navigate(Route::Profile, &ctx);
+                }
+            }
+            ui.add_space(4.0);
             let on_settings = app.route == Route::Settings;
             let gear_col = if on_settings { pal().accent_soft } else { pal().text_muted };
             if icon_button(ui, icon::GEAR_SIX, 18.0, gear_col, tr("Settings")).clicked() {
@@ -427,6 +450,8 @@ fn page(app: &mut App, ui: &mut Ui) {
         Route::Album(_) => album_page(app, ui),
         Route::Artist(_) => artist(app, ui),
         Route::Settings => settings_page::settings_page(app, ui),
+        Route::Mix(id) => personal::mix_page(app, ui, &id),
+        Route::Profile => personal::profile_page(app, ui),
         Route::LocalFiles => {
             if app.local_scanning && app.local_files.is_empty() {
                 page_title(ui, "Local Files", None);
@@ -530,7 +555,30 @@ fn page_title(ui: &mut Ui, title: &str, subtitle: Option<&str>) {
 }
 
 fn home(app: &mut App, ui: &mut Ui) {
-    // Greeting banner
+    if personal::has_history(app) {
+        personal::home(app, ui);
+        section_title(ui, "Discover", None);
+    } else {
+        welcome_banner(ui);
+    }
+
+    // Genre chips → charts for that genre
+    ui.add_space(14.0);
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
+        for (id, name) in crate::deezer::GENRES.iter().take(14) {
+            if pill(ui, name, false).clicked() {
+                app.chart_genre = (*id, name.to_string());
+                let ctx = ui.ctx().clone();
+                app.navigate(Route::Charts, &ctx);
+            }
+        }
+    });
+    home_discovery(app, ui);
+}
+
+/// The "Any song. Any artist." banner, shown until you've listened to something.
+fn welcome_banner(ui: &mut Ui) {
     ui.add_space(8.0);
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 150.0), Sense::hover());
     let r = r_lg();
@@ -545,20 +593,10 @@ fn home(app: &mut App, ui: &mut Ui) {
         ON_DARK_MUTED,
     );
     ui.painter().text(rect.right_center() - vec2(40.0, 0.0), Align2::RIGHT_CENTER, icon::VINYL_RECORD, regular(96.0), pal().accent_soft.gamma_multiply(0.25));
+}
 
-    // Genre chips → charts for that genre
-    ui.add_space(14.0);
-    ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
-        for (id, name) in crate::deezer::GENRES.iter().take(14) {
-            if pill(ui, name, false).clicked() {
-                app.chart_genre = (*id, name.to_string());
-                let ctx = ui.ctx().clone();
-                app.navigate(Route::Charts, &ctx);
-            }
-        }
-    });
-
+/// Today's top songs, popular albums, artists and playlists.
+fn home_discovery(app: &mut App, ui: &mut Ui) {
     with_remote(app, ui, |app, ui, page| {
         let Page::Home(chart) = page else { return };
         if section_title(ui, "Top songs right now", Some("See all")) {
@@ -608,7 +646,7 @@ fn album_grid(app: &mut App, ui: &mut Ui, albums: &[AlbumInfo], rows: Option<usi
         if !a.artist.name.is_empty() {
             sub = format!("{sub} · {}", a.artist.name);
         }
-        let info = CardInfo { id: egui::Id::new(("album", &a.id)), art: a.cover.as_deref(), title: &a.title, subtitle: sub, round: false };
+        let info = CardInfo { id: egui::Id::new(("album", &a.id)), art: a.cover.as_deref(), title: &a.title, subtitle: sub, round: false, badge: None };
         match card(ui, w, &info) {
             CardClick::Open => action = Some((a.id.clone(), false)),
             CardClick::Play => action = Some((a.id.clone(), true)),
@@ -627,7 +665,7 @@ fn playlist_grid(app: &mut App, ui: &mut Ui, playlists: &[PlaylistInfo], rows: O
     let mut action = None;
     card_grid(ui, playlists, rows, |ui, w, p| {
         let sub = if p.creator.is_empty() { format!("{} songs", p.nb_tracks) } else { format!("Playlist · {}", p.creator) };
-        let info = CardInfo { id: egui::Id::new(("pl", &p.id)), art: p.picture.as_deref(), title: &p.title, subtitle: sub, round: false };
+        let info = CardInfo { id: egui::Id::new(("pl", &p.id)), art: p.picture.as_deref(), title: &p.title, subtitle: sub, round: false, badge: None };
         match card(ui, w, &info) {
             CardClick::Open => action = Some((p.id.clone(), false)),
             CardClick::Play => action = Some((p.id.clone(), true)),
@@ -641,12 +679,31 @@ fn playlist_grid(app: &mut App, ui: &mut Ui, playlists: &[PlaylistInfo], rows: O
     }
 }
 
+/// Cards for remembered places (home page, profile).
+fn album_grid_visits(app: &mut App, ui: &mut Ui, items: &[crate::app::Visit], rows: Option<usize>) {
+    let ctx = ui.ctx().clone();
+    let mut action = None;
+    card_grid(ui, items, rows, |ui, w, v| {
+        let info = CardInfo { id: egui::Id::new(("visit", format!("{:?}", v.place))), art: v.image.as_deref(), title: &v.title, subtitle: tr(&v.subtitle).to_string(), round: v.round, badge: None };
+        match card(ui, w, &info) {
+            CardClick::Open => action = Some((v.place.clone(), false)),
+            CardClick::Play => action = Some((v.place.clone(), true)),
+            CardClick::None => {}
+        }
+    });
+    if let Some((place, play)) = action
+        && let Some(route) = app.route_for(&place)
+    {
+        if play { open_and_play(app, route, &ctx) } else { app.navigate(route, &ctx) }
+    }
+}
+
 fn artist_grid(app: &mut App, ui: &mut Ui, artists: &[ArtistInfo], rows: Option<usize>) {
     let ctx = ui.ctx().clone();
     let mut open = None;
     card_grid(ui, artists, rows, |ui, w, a| {
         let sub = if a.fans > 0 { format!("{} fans", fmt_count(a.fans)) } else { "Artist".into() };
-        let info = CardInfo { id: egui::Id::new(("artist", &a.id)), art: a.picture.as_deref(), title: &a.name, subtitle: sub, round: true };
+        let info = CardInfo { id: egui::Id::new(("artist", &a.id)), art: a.picture.as_deref(), title: &a.name, subtitle: sub, round: true, badge: None };
         if !matches!(card(ui, w, &info), CardClick::None) {
             open = Some(a.id.clone());
         }
@@ -849,6 +906,7 @@ fn remote_playlist(app: &mut App, ui: &mut Ui) {
             sub = format!("{} · {sub}", info.creator);
         }
         hero(ui, &Hero { editable: false, kind: "Playlist", title: &info.title, subtitle: &sub, art: info.picture.as_deref(), glyph: icon::PLAYLIST, round: false, banner: None });
+        app.note_visit(crate::app::Place::Playlist(info.id.clone()), &info.title, &format!("Playlist · {}", info.creator), info.picture.as_deref(), false);
         let ctx = ui.ctx().clone();
         autoplay_page(app, &ctx, tracks);
         action_row(app, ui, tracks);
@@ -865,6 +923,7 @@ fn album_page(app: &mut App, ui: &mut Ui) {
         }
         sub.push_str(&format!(" · {} songs, {}", tracks.len(), total_time(tracks)));
         hero(ui, &Hero { editable: false, kind: info.kind(), title: &info.title, subtitle: &sub, art: info.cover.as_deref(), glyph: icon::VINYL_RECORD, round: false, banner: None });
+        app.note_visit(crate::app::Place::Album(info.id.clone()), &info.title, &format!("{} · {}", info.kind(), info.artist.name), info.cover.as_deref(), false);
         let ctx = ui.ctx().clone();
         autoplay_page(app, &ctx, tracks);
         ui.horizontal(|ui| {
@@ -906,6 +965,7 @@ fn artist(app: &mut App, ui: &mut Ui) {
         let Page::Artist(p) = page else { return };
         let sub = format!("{} fans · {} releases", fmt_count(p.artist.fans), p.artist.albums);
         hero(ui, &Hero { editable: false, kind: "Artist", title: &p.artist.name, subtitle: &sub, art: p.artist.picture_xl.as_deref(), glyph: icon::USER, round: true, banner: None });
+        app.note_visit(crate::app::Place::Artist(p.artist.id.clone()), &p.artist.name, "Artist", p.artist.picture.as_deref().or(p.artist.picture_xl.as_deref()), true);
         action_row(app, ui, &p.top);
         let ctx = ui.ctx().clone();
 
@@ -983,6 +1043,11 @@ fn local_collection(app: &mut App, ui: &mut Ui, title: &str, sub: &str, glyph: &
     let custom = playlist.and_then(|i| app.saved.playlists.get(i)).and_then(|p| p.cover.as_ref()).map(|c| crate::settings::file_uri(c));
     let art = custom.clone().or_else(|| if playlist.is_some() { tracks.first().and_then(|t| t.art_big()).map(str::to_owned) } else { None });
     let clicks = hero(ui, &Hero { editable: playlist.is_some(), kind: tr(kind), title: tr(title), subtitle: sub, art: art.as_deref(), glyph, round: false, banner: None });
+    match (&app.route, playlist) {
+        (_, Some(_)) => app.note_visit(crate::app::Place::Yours(title.to_string()), title, "Playlist", art.as_deref(), false),
+        (Route::Liked, _) => app.note_visit(crate::app::Place::Liked, tr("Liked Songs"), "Playlist", None, false),
+        _ => {}
+    }
     if let Some(i) = playlist {
         if clicks.title {
             app.rename_playlist = Some((i, title.to_string()));
@@ -1127,6 +1192,9 @@ fn list_toolbar(app: &mut App, ui: &mut Ui, tracks: &[Track], playlist: Option<u
                 }
                 if menu_item(ui, icon::IMAGE, "Change cover") {
                     pick_cover(app, i, &ctx);
+                }
+                if menu_item(ui, icon::SHARE_FAT, "Copy share code") {
+                    app.share_playlist(i, &ctx);
                 }
                 if menu_item(ui, icon::TRASH, "Delete playlist") {
                     app.confirm_delete = Some(i);
@@ -1455,6 +1523,7 @@ fn player_bar(app: &mut App, ui: &mut Ui) {
 fn dialogs(app: &mut App, ctx: &egui::Context) {
     credits_dialog(app, ctx);
     import_dialog(app, ctx);
+    personal::profile_dialog(app, ctx);
     if let Some(idx) = app.confirm_delete.take() {
         let name = app.saved.playlists.get(idx).map(|p| p.name.clone()).unwrap_or_default();
         let (mut keep, mut delete) = (true, false);
