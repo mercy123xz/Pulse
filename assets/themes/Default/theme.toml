@@ -1,3 +1,6 @@
 name = "Default"
 author = "Pulse"
-description = "Pulse's standard look: dark violet, with a light version."
+description = "Pulse's standard look: dark violet, with a light version, over soft glows in the colors of what's playing."
+
+[layout]
+backdrop = true

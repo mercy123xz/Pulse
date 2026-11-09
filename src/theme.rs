@@ -175,6 +175,8 @@ pub struct LayoutOpts {
     pub now_playing_art: NowPlayingArt,
     /// Main area drawn as a rounded panel set in from the window edges.
     pub inset: bool,
+    /// Soft glows in the colors of the playing song's cover behind the main area.
+    pub backdrop: bool,
 }
 
 impl LayoutOpts {
@@ -184,6 +186,7 @@ impl LayoutOpts {
         player: PlayerStyle::Centered,
         now_playing_art: NowPlayingArt::Bar,
         inset: false,
+        backdrop: false,
     };
 }
 
@@ -233,7 +236,7 @@ pub fn r_lg() -> CornerRadius {
     CornerRadius::same(active().radius[2])
 }
 
-fn is_light(p: &Palette) -> bool {
+pub fn is_light(p: &Palette) -> bool {
     let c = p.bg;
     (c.r() as u32 + c.g() as u32 + c.b() as u32) > 384
 }

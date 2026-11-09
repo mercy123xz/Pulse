@@ -2,14 +2,11 @@
 Works on any 64-bit Windows 10 or 11 PC.
 
 **New in this version**
-- Right-click any song: like, add to playlist or queue, view credits, download, or share a YouTube, Spotify or Deezer link
-- Settings: language (English, Español, Português, Français, Deutsch), streaming and download quality, equalizer, crossfade, gapless playback, automix, mono audio, local files, high contrast and more
-- Playlists: rename, your own cover picture, search, genre filters, sorting and "date added"
-- Import playlists from YouTube, Spotify or SoundCloud by pasting a link
-- Themes: Default, Blossom, Dreary Mono and Lunar, or make your own (Spicetify color schemes work)
-- YouTube view counts next to songs
-- Download songs for offline listening
-
-The first time you open it, Windows may show **"Windows protected your PC"**. That happens with any new app that isn't signed with a paid certificate. Click **More info → Run anyway**.
-
-Your likes, playlists and settings are saved in `%APPDATA%\pulse-player`, and stay there if you uninstall.
+- New experimental theme **Aurora**: northern-light greens, very round floating panel, and a background that glows in the colors of the song that's playing
+- The Default and Lunar themes get the song-colored background too (turn the drift off in Settings → Moving background, or use Reduce motion)
+- Artist pages show the 10 most popular songs; featured artists are shown and clickable everywhere
+- The artist's name on album pages is a link; no more "0 songs" on releases; sharper artist banners
+- Labels under sidebar icons, a heart cover for Liked Songs, playlist covers in the sidebar
+- Daily Mixes are now **Orbits**
+- Redesigned right-click and "…" menus; play, shuffle and repeat icons centered in every theme
+- Pages open faster: Pulse loads a page when you point at its card

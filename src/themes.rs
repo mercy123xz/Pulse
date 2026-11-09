@@ -19,7 +19,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 /// Themes built into Pulse: (folder name, color.ini, user.css, theme.toml).
-const BUNDLED: [(&str, &str, &str, &str); 4] = [
+const BUNDLED: [(&str, &str, &str, &str); 5] = [
     (
         "Default",
         include_str!("../assets/themes/Default/color.ini"),
@@ -43,6 +43,12 @@ const BUNDLED: [(&str, &str, &str, &str); 4] = [
         include_str!("../assets/themes/Lunar/color.ini"),
         include_str!("../assets/themes/Lunar/user.css"),
         include_str!("../assets/themes/Lunar/theme.toml"),
+    ),
+    (
+        "Aurora",
+        include_str!("../assets/themes/Aurora/color.ini"),
+        include_str!("../assets/themes/Aurora/user.css"),
+        include_str!("../assets/themes/Aurora/theme.toml"),
     ),
 ];
 
@@ -181,6 +187,7 @@ struct TomlLayout {
     player: Option<String>,
     now_playing_art: Option<String>,
     inset: Option<bool>,
+    backdrop: Option<bool>,
 }
 
 struct Meta {
@@ -221,6 +228,9 @@ fn parse_toml(text: &str, warnings: &mut Vec<String>) -> Meta {
     }
     if let Some(b) = t.layout.inset {
         layout.inset = b;
+    }
+    if let Some(b) = t.layout.backdrop {
+        layout.backdrop = b;
     }
     Meta { name: t.name, author: t.author, description: t.description, layout }
 }
@@ -684,6 +694,7 @@ theme.toml - name and layout
   player = "centered"         # or "controls-left"
   now_playing_art = "bar"     # or "sidebar-large"
   inset = false               # true: main area as a rounded panel
+  backdrop = false            # true: soft glows in the playing song's colors
 
 Pulse reloads a theme as soon as you save one of its files.
 Tip: in Settings > Themes, "Make a copy" puts a built-in theme here to start from.
@@ -710,6 +721,8 @@ mod tests {
         assert_eq!(get("Lunar").layout.sidebar, SidebarStyle::Icons);
         assert_eq!(get("Lunar").layout.hero, HeroStyle::FullBleed);
         assert!(get("Lunar").layout.inset);
+        assert!(get("Aurora").layout.backdrop && get("Default").layout.backdrop);
+        assert!(!get("Dreary Mono").layout.backdrop);
         assert_eq!(get("Blossom").layout.now_playing_art, NowPlayingArt::SidebarLarge);
         assert_eq!(get("Dreary Mono").layout.player, PlayerStyle::Centered);
         let mono = get("Dreary Mono").active(0, false);

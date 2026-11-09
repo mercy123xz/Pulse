@@ -138,6 +138,8 @@ pub struct Settings {
     pub high_contrast: bool,
     /// Turns off moving backgrounds and fades.
     pub reduce_motion: bool,
+    /// Themes with a song-colored background: let it drift while music plays.
+    pub moving_background: bool,
     pub hardware_acceleration: bool,
     /// Theme name and its color scheme.
     pub theme: String,
@@ -163,6 +165,7 @@ impl Default for Settings {
             offline_dir: None,
             high_contrast: false,
             reduce_motion: false,
+            moving_background: true,
             hardware_acceleration: true,
             theme: "Default".into(),
             scheme: String::new(),

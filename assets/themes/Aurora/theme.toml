@@ -1,0 +1,9 @@
+name = "Aurora"
+author = "Pulse"
+description = "Experimental: northern-light greens, very round floating panels, the controls on the left, and glows that drift with the music."
+
+[layout]
+player = "controls-left"
+hero = "fullbleed"
+inset = true
+backdrop = true
