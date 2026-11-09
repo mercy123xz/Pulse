@@ -584,7 +584,8 @@ impl App {
         let saved: Saved = cc.storage.and_then(|s| eframe::get_value(s, STORAGE_KEY)).unwrap_or_default();
         let themes = crate::themes::list();
         crate::i18n::set_language(saved.settings.language);
-        crate::theme::set_reduce_motion(saved.settings.reduce_motion);
+        crate::perf::apply(saved.settings.perf_mode, &saved.settings.perf_keep);
+        crate::theme::set_reduce_motion(saved.settings.reduce_motion || !crate::perf::on(crate::perf::Extra::Animations));
         let (tx, rx) = channel();
         let (views_tx, views_rx) = channel();
         let (prefetch_failed_tx, prefetch_failed_rx) = channel();
@@ -683,6 +684,7 @@ impl App {
             app.queue_pos = app.saved.last_queue_pos.min(app.queue.len() - 1);
         }
         crate::single::listen(cc.egui_ctx.clone());
+        app.apply_perf(&cc.egui_ctx);
         crate::artcache::set_limit_mb(app.saved.settings.art_cache_mb);
         std::thread::spawn(crate::artcache::trim_disk);
         app.apply_theme(&cc.egui_ctx);
@@ -824,8 +826,8 @@ impl App {
     /// Keeps at most 60 loaded pages in memory: the ones opened longest ago go first
     /// (they load again if you go back to them).
     fn trim_page_cache(&mut self) {
-        const KEEP: usize = 60;
-        if self.cache.len() <= KEEP {
+        let keep = if crate::perf::mode() == crate::perf::Mode::UltraLow { 20 } else { 60 };
+        if self.cache.len() <= keep {
             return;
         }
         let current = self.route_key();
@@ -838,7 +840,7 @@ impl App {
             .collect();
         // Never-opened (loaded ahead) pages first, then the oldest.
         keys.sort_by_key(|(_, at)| *at);
-        let extra = self.cache.len() - KEEP;
+        let extra = self.cache.len() - keep;
         for (k, _) in keys.into_iter().take(extra) {
             self.cache.remove(&k);
             self.cache_used.remove(&k);
@@ -849,6 +851,9 @@ impl App {
     /// at once. Pages already loaded or loading aren't asked for again, and only a couple
     /// of these run at a time.
     pub fn preload(&mut self, route: Route, ctx: &egui::Context) {
+        if !crate::perf::on(crate::perf::Extra::Preloading) {
+            return;
+        }
         if self.preloading.load(std::sync::atomic::Ordering::Relaxed) >= 2 {
             return;
         }
@@ -1007,7 +1012,11 @@ impl App {
         self.receive_autoplay(ctx);
 
         if self.is_playing() || self.audio.load_state().is_busy() {
-            ctx.request_repaint_after(Duration::from_millis(250));
+            // Behind a game or minimized, nobody sees the progress bar: once a second is
+            // plenty to move on to the next song.
+            let hidden = ctx.input(|i| !i.focused || i.viewport().minimized.unwrap_or(false));
+            let every = if hidden { Duration::from_secs(1) } else { crate::perf::playing_redraw() };
+            ctx.request_repaint_after(every);
         }
 
         // Window title shows the current song.
@@ -1323,11 +1332,44 @@ impl App {
 
     // ---------------------------------------------------------------- settings
 
+    /// Puts the performance mode into effect (no restart needed).
+    pub fn apply_perf(&mut self, ctx: &egui::Context) {
+        use crate::perf::{Extra, on};
+        let s = &self.saved.settings;
+        crate::perf::apply(s.perf_mode, &s.perf_keep);
+        crate::theme::set_reduce_motion(s.reduce_motion || !on(Extra::Animations));
+        // egui's own small animations (hover fades, opening sections).
+        let anim = if on(Extra::Animations) && !s.reduce_motion { 1.0 / 12.0 } else { 0.0 };
+        ctx.all_styles_mut(|st| st.animation_time = anim);
+        if !on(Extra::Lookups) {
+            self.featured_queue.clear();
+            self.views_queue.clear();
+        }
+    }
+
+    /// Gaming Mode on or off (Ultra-low resource counts as on).
+    pub fn toggle_gaming(&mut self, ctx: &egui::Context) {
+        let before = self.saved.settings.clone();
+        self.saved.settings.perf_mode = match before.perf_mode {
+            crate::perf::Mode::Normal => crate::perf::Mode::Gaming,
+            _ => crate::perf::Mode::Normal,
+        };
+        self.apply_settings(&before, ctx);
+    }
+
     /// Puts changed settings into effect. `before` is how they were.
     pub fn apply_settings(&mut self, before: &crate::settings::Settings, ctx: &egui::Context) {
         let s = self.saved.settings.clone();
         crate::i18n::set_language(s.language);
-        crate::theme::set_reduce_motion(s.reduce_motion);
+        self.apply_perf(ctx);
+        if s.perf_mode != before.perf_mode {
+            let msg = match s.perf_mode {
+                crate::perf::Mode::Normal => "Gaming Mode off",
+                crate::perf::Mode::Gaming => "Gaming Mode on: extras paused, music unchanged",
+                crate::perf::Mode::UltraLow => "Ultra-low resource mode on",
+            };
+            self.toast(crate::i18n::tr(msg), ctx);
+        }
         if s.art_cache_mb != before.art_cache_mb {
             crate::artcache::set_limit_mb(s.art_cache_mb);
             std::thread::spawn(crate::artcache::trim_disk);
@@ -1525,6 +1567,9 @@ impl App {
 
     /// Looks up featured artists for songs in a list (once per song, ever), one at a time.
     pub fn ensure_featured(&mut self, tracks: &[Track]) {
+        if !crate::perf::on(crate::perf::Extra::Lookups) {
+            return;
+        }
         for t in tracks.iter().take(80) {
             if let Some(n) = t.deezer_number()
                 && t.featured.is_empty()
@@ -1641,6 +1686,9 @@ impl App {
 
     /// Asks for YouTube view counts of songs that don't have a recent one.
     pub fn ensure_views(&mut self, tracks: &[Track]) {
+        if !crate::perf::on(crate::perf::Extra::Lookups) {
+            return;
+        }
         const WEEK: u64 = 7 * 86_400;
         let now = now_unix();
         for t in tracks.iter().take(60) {

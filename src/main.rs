@@ -13,6 +13,7 @@ mod import;
 mod itunes;
 mod local;
 mod net;
+mod perf;
 mod settings;
 mod share;
 mod single;

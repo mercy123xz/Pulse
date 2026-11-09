@@ -84,7 +84,7 @@ fn loading_text(msg: &str) -> String {
 
 /// The song-colored glows behind the main area, for themes that ask for them.
 fn paint_backdrop(app: &mut App, ui: &Ui, rect: Rect, radius: CornerRadius, outside: Option<Color32>) {
-    if !layout().backdrop {
+    if !layout().backdrop || !crate::perf::on(crate::perf::Extra::ListArtwork) {
         return;
     }
     let cover = app.current.as_ref().and_then(|t| t.art_small()).map(str::to_owned);
@@ -110,6 +110,9 @@ fn shortcuts(app: &mut App, ctx: &egui::Context) {
     let typing = ctx.egui_wants_keyboard_input();
     if ctx.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::K)) {
         app.focus_search = true;
+    }
+    if ctx.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::G)) {
+        app.toggle_gaming(ctx);
     }
     if ctx.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::ArrowRight)) {
         app.next(ctx);
@@ -615,7 +618,7 @@ fn top_bar(app: &mut App, ui: &mut Ui) {
             }
             ui.add_space(4.0);
             // Labeled, so each button says what it does (narrow windows keep just the icons).
-            let roomy = ui.available_width() > 330.0;
+            let roomy = ui.available_width() > 430.0;
             let on_settings = app.route == Route::Settings;
             let settings = if roomy {
                 labeled_button(ui, icon::GEAR_SIX, tr("Settings"), on_settings)
@@ -624,6 +627,24 @@ fn top_bar(app: &mut App, ui: &mut Ui) {
             };
             if settings.clicked() {
                 app.navigate(Route::Settings, &ctx);
+            }
+            // Gaming Mode: one click on or off; the tooltip says what's paused.
+            let mode = crate::perf::mode();
+            let gaming = mode != crate::perf::Mode::Normal;
+            let label = if mode == crate::perf::Mode::UltraLow { tr("Ultra-low") } else { tr("Gaming") };
+            let g = if roomy {
+                labeled_button(ui, icon::GAME_CONTROLLER, label, gaming)
+            } else {
+                icon_button(ui, icon::GAME_CONTROLLER, 18.0, if gaming { pal().accent_soft } else { pal().text_muted }, label)
+            };
+            let tip = if gaming {
+                let off: Vec<&str> = crate::perf::switched_off().into_iter().map(|e| tr(e.label())).collect();
+                format!("{} (Ctrl+G)\n{}\n• {}", tr(mode.label()), tr("Paused while it's on (music plays the same):"), off.join("\n• "))
+            } else {
+                format!("{} (Ctrl+G)", tr("Gaming Mode: pause the extras while you play"))
+            };
+            if g.on_hover_text(tip).clicked() {
+                app.toggle_gaming(&ctx);
             }
             if app.theme_has_light_and_dark() {
                 let (glyph, label, tip) = if app.saved.light_mode { (icon::MOON, "Dark", "Switch to dark mode") } else { (icon::SUN, "Light", "Switch to light mode") };

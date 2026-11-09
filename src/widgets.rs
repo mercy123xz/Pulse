@@ -895,7 +895,9 @@ fn track_row(ui: &mut Ui, id: egui::Id, list: &str, i: usize, t: &Track, tracks:
 
     // Art + title + artist
     let art = Rect::from_min_size(pos2(c.title.left(), rect.center().y - 20.0), Vec2::splat(40.0));
-    artwork(ui, art, t.art_small(), CornerRadius::same(5));
+    // Ultra-low resource: no pictures in long lists (a plain tile instead).
+    let pic = if crate::perf::on(crate::perf::Extra::ListArtwork) { t.art_small() } else { None };
+    artwork(ui, art, pic, CornerRadius::same(5));
     let tx = art.right() + 12.0;
     let tw = c.title.right() - tx;
     let title_col = if is_current { pal().accent_soft } else { pal().text };
@@ -1142,7 +1144,9 @@ pub fn dots_menu(ui: &mut Ui, size: f32, tip: &str, add: impl FnOnce(&mut Ui)) {
 
 /// Animated "now playing" bars.
 pub fn equalizer(ui: &Ui, center: Pos2) {
-    let t = ui.input(|i| i.time) as f32;
+    // With animations off (Gaming Mode, Reduce motion) the bars stand still.
+    let moving = !crate::theme::reduce_motion();
+    let t = if moving { ui.input(|i| i.time) as f32 } else { 0.7 };
     for k in 0..3 {
         let phase = t * (5.0 + k as f32 * 1.7) + k as f32 * 1.3;
         let h = 4.0 + (phase.sin() * 0.5 + 0.5) * 9.0;
@@ -1150,7 +1154,9 @@ pub fn equalizer(ui: &Ui, center: Pos2) {
         let r = Rect::from_min_max(pos2(x - 1.5, center.y + 6.5 - h), pos2(x + 1.5, center.y + 6.5));
         ui.painter().rect_filled(r, CornerRadius::same(1), pal().accent_soft);
     }
-    ui.ctx().request_repaint_after(std::time::Duration::from_millis(33));
+    if moving {
+        ui.ctx().request_repaint_after(std::time::Duration::from_millis(33));
+    }
 }
 
 // ---------------------------------------------------------------------------

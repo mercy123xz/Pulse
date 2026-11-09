@@ -142,6 +142,9 @@ pub struct Settings {
     pub moving_background: bool,
     /// Most disk space for saved pictures, in MB.
     pub art_cache_mb: u64,
+    /// Gaming Mode / Ultra-low resource, and the extras you kept on in them.
+    pub perf_mode: crate::perf::Mode,
+    pub perf_keep: Vec<String>,
     pub hardware_acceleration: bool,
     /// Theme name and its color scheme.
     pub theme: String,
@@ -169,6 +172,8 @@ impl Default for Settings {
             reduce_motion: false,
             moving_background: true,
             art_cache_mb: 300,
+            perf_mode: crate::perf::Mode::Normal,
+            perf_keep: vec![],
             hardware_acceleration: true,
             theme: "Default".into(),
             scheme: String::new(),

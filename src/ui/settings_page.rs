@@ -132,6 +132,31 @@ pub fn settings_page(app: &mut App, ui: &mut Ui) {
         }
     });
 
+    // ------------------------------------------------------------ Performance
+    section(ui, tr("Performance"));
+    row(ui, tr("Mode"), tr("Gaming Mode pauses the extras while you play a game (Ctrl+G). Ultra-low resource also drops pictures in lists and redraws less. Music plays exactly the same in every mode."), |ui| {
+        for m in [crate::perf::Mode::Normal, crate::perf::Mode::Gaming, crate::perf::Mode::UltraLow] {
+            if ui.selectable_label(s.perf_mode == m, tr(m.label())).clicked() {
+                s.perf_mode = m;
+            }
+        }
+    });
+    if s.perf_mode != crate::perf::Mode::Normal {
+        ui.label(RichText::new(tr("Paused in this mode (tick one to keep it on):")).font(semi(12.5)).color(pal().text_muted));
+        for e in crate::perf::Extra::ALL.into_iter().filter(|e| e.off_in(s.perf_mode)) {
+            let key = crate::perf::key(e).to_string();
+            let mut keep = s.perf_keep.contains(&key);
+            if ui.checkbox(&mut keep, tr(e.label())).changed() {
+                if keep {
+                    s.perf_keep.push(key);
+                } else {
+                    s.perf_keep.retain(|k| *k != key);
+                }
+            }
+        }
+        ui.add_space(6.0);
+    }
+
     // ------------------------------------------------------------ Compatibility
     section(ui, tr("Compatibility"));
     row(ui, tr("High contrast mode"), tr("Stronger colors and borders, easier to read."), |ui| {
