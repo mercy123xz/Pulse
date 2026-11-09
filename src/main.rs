@@ -61,6 +61,10 @@ fn use_directx(options: &mut eframe::NativeOptions) {
     let mut setup = WgpuSetupCreateNew::without_display_handle();
     // A music player doesn't need the gaming GPU: prefer the battery-friendly one.
     setup.power_preference = wgpu::PowerPreference::LowPower;
+    // DirectX 12 only. Left to choose, wgpu sometimes picks Vulkan, and some Vulkan drivers
+    // crash Pulse. Windows' software renderer (WARP) is DirectX 12 too, so PCs without a
+    // graphics driver still open.
+    setup.instance_descriptor.backends = wgpu::Backends::DX12;
     // The shader compiler built into Windows, so no extra DLL has to ship with the .exe.
     setup.instance_descriptor.backend_options.dx12.shader_compiler = wgpu::Dx12Compiler::Fxc;
     if !crate::settings::hardware_acceleration_enabled() {

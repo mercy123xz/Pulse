@@ -32,6 +32,10 @@ fn main() {
         return;
     }
 
+    // An 8 MB stack for the window's thread (Windows gives 1 MB by default, Linux 8 MB), so a
+    // deep page can't overflow it.
+    println!("cargo:rustc-link-arg-bins=/STACK:8388608");
+
     // Stop the linker from picking the DLL versions of the Visual C++ runtime...
     for lib in [
         "libvcruntimed.lib",
