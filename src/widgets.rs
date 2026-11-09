@@ -485,6 +485,8 @@ pub enum TrackEvent {
     Play(usize),
     /// The pointer rests on the song's title: load the page it would open.
     Preview(Track),
+    /// Move an upcoming song in the queue: (its row in "Next up", rows to move; negative = up).
+    MoveInQueue(usize, isize),
     PlayNext(Track),
     AddToQueue(Track),
     ToggleLike(Track),
@@ -612,11 +614,22 @@ pub fn track_menu(ui: &mut Ui, t: &Track, cx: &MenuCtx, ev: &mut Vec<TrackEvent>
             ev.push(TrackEvent::RemoveFromPlaylist(i));
         }
     }
-    if cx.queue_mode {
+    if cx.queue_mode
+        && let Some(i) = cx.index
+    {
         menu_separator(ui);
-        if menu_item(ui, icon::X, "Remove from queue")
-            && let Some(i) = cx.index
-        {
+        if i > 0 {
+            if menu_item(ui, icon::ARROW_LINE_UP, "Move to top") {
+                ev.push(TrackEvent::MoveInQueue(i, -(i as isize)));
+            }
+            if menu_item(ui, icon::ARROW_UP, "Move up") {
+                ev.push(TrackEvent::MoveInQueue(i, -1));
+            }
+        }
+        if menu_item(ui, icon::ARROW_DOWN, "Move down") {
+            ev.push(TrackEvent::MoveInQueue(i, 1));
+        }
+        if menu_item(ui, icon::X, "Remove from queue") {
             ev.push(TrackEvent::RemoveFromQueue(i));
         }
     }
@@ -826,6 +839,16 @@ fn track_row(ui: &mut Ui, id: egui::Id, list: &str, i: usize, t: &Track, tracks:
     // (focusing it then scrolls it into view, see `focus_ring`).
     let resp = ui.interact(rect, id, Sense::click());
     a11y(ui, &resp, WidgetType::Button, || format!("{} by {}, {}", t.title, t.all_artists(), fmt_duration(t.duration)));
+    // The song you came here for is scrolled into view once, even from far down the list.
+    if let Some((hid, at)) = cx.highlight
+        && hid == t.id
+    {
+        let key = egui::Id::new(("highlight_scrolled", hid, at.to_bits()));
+        if !ui.ctx().data(|d| d.get_temp::<bool>(key).unwrap_or(false)) {
+            resp.scroll_to_me(Some(egui::Align::Center));
+            ui.ctx().data_mut(|d| d.insert_temp(key, true));
+        }
+    }
     if !ui.is_rect_visible(rect) {
         return;
     }
@@ -849,16 +872,11 @@ fn track_row(ui: &mut Ui, id: egui::Id, list: &str, i: usize, t: &Track, tracks:
     if let Some(b) = style.border {
         ui.painter().hline(rect.x_range(), rect.bottom() - 0.5, b);
     }
-    if let Some((hid, at)) = cx.highlight
+    if let Some((hid, _)) = cx.highlight
         && hid == t.id
     {
-        // The song you came here for: tinted, and scrolled into view once.
+        // The song you came here for stays tinted for a moment.
         ui.painter().rect_filled(rect, radius, pal().accent.gamma_multiply(0.22));
-        let key = egui::Id::new(("highlight_scrolled", hid, at.to_bits()));
-        if !ui.ctx().data(|d| d.get_temp::<bool>(key).unwrap_or(false)) {
-            resp.scroll_to_me(Some(egui::Align::Center));
-            ui.ctx().data_mut(|d| d.insert_temp(key, true));
-        }
     }
     let c = columns(rect, cx.added.is_some(), cx.views.is_some());
 
@@ -960,6 +978,18 @@ fn track_row(ui: &mut Ui, id: egui::Id, list: &str, i: usize, t: &Track, tracks:
     if resp.secondary_clicked() && !is_selected {
         // Right-clicking a song outside the selection selects just that song.
         ev.push(TrackEvent::Select { list: list.to_string(), index: i, ctrl: false, shift: false });
+    }
+    // In the queue, Alt+↑/↓ moves the focused song and Delete removes it.
+    if resp.has_focus() && cx.queue_mode {
+        if ui.input_mut(|inp| inp.consume_key(Modifiers::ALT, Key::ArrowUp)) && i > 0 {
+            ev.push(TrackEvent::MoveInQueue(i, -1));
+        }
+        if ui.input_mut(|inp| inp.consume_key(Modifiers::ALT, Key::ArrowDown)) {
+            ev.push(TrackEvent::MoveInQueue(i, 1));
+        }
+        if ui.input_mut(|inp| inp.consume_key(Modifiers::NONE, Key::Delete)) {
+            ev.push(TrackEvent::RemoveFromQueue(i));
+        }
     }
     // Keyboard equivalents of the right-click menu for the focused row.
     if resp.has_focus() && !cx.queue_mode {

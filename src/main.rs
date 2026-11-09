@@ -14,6 +14,7 @@ mod local;
 mod net;
 mod settings;
 mod share;
+mod single;
 mod theme;
 mod themes;
 mod ui;
@@ -21,6 +22,10 @@ mod widgets;
 mod youtube;
 
 fn main() -> eframe::Result {
+    // Already open: that window comes to the front instead.
+    if !single::claim() {
+        return Ok(());
+    }
     #[allow(unused_mut)]
     let mut options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()

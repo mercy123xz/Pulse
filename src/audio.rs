@@ -267,25 +267,47 @@ fn sequential_download(
                 }
                 if result.is_err() {
                     retries += 1;
-                    if retries > 4 {
+                    if !wait_to_retry(retries, still) {
                         return;
                     }
-                    std::thread::sleep(Duration::from_millis(400 * retries));
                 }
                 let end = until.or(total).map(|t| (have + CHUNK).min(t) - 1);
                 match crate::net::get_range(url, headers, have, end) {
-                    Ok(next) => body = next.body,
+                    Ok(next) => {
+                        body = next.body;
+                        retries = 0;
+                    }
                     Err(_) => {
                         retries += 1;
-                        if retries > 4 {
+                        if !wait_to_retry(retries, still) {
                             return;
                         }
-                        std::thread::sleep(Duration::from_millis(400 * retries));
                     }
                 }
             }
         }
     }
+}
+
+/// Waits before trying a download again after the connection dropped. Short waits at
+/// first, then up to 5 seconds, for about a minute in all, so a brief Wi-Fi drop
+/// doesn't cut the song short. False when it's time to give up (or the song was left).
+fn wait_to_retry(tries: u64, still: &dyn Fn() -> bool) -> bool {
+    if tries > 16 {
+        return false;
+    }
+    let wait = Duration::from_millis((400 * tries).min(5000));
+    // Wait in small steps so skipping the song stops the wait at once.
+    let step = Duration::from_millis(100);
+    let mut waited = Duration::ZERO;
+    while waited < wait {
+        if !still() {
+            return false;
+        }
+        std::thread::sleep(step);
+        waited += step;
+    }
+    still()
 }
 
 /// Pieces of a file downloading side by side, added to the buffer in order.
@@ -364,10 +386,9 @@ impl ParallelPieces {
                 }
                 Ok((i, Err(_))) => {
                     self.tries[i] += 1;
-                    if self.tries[i] > 4 {
+                    if !wait_to_retry(self.tries[i] as u64, still) {
                         return;
                     }
-                    std::thread::sleep(Duration::from_millis(300 * self.tries[i] as u64));
                     self.launch(i);
                 }
                 Err(_) => {}

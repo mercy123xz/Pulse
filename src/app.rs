@@ -277,6 +277,10 @@ pub struct Saved {
     pub profile: Profile,
     /// Songs whose featured artists were already looked up.
     pub featured_checked: HashSet<String>,
+    /// The queue when Pulse was closed, where in it you were, and how far into the song.
+    pub last_queue: Vec<Track>,
+    pub last_queue_pos: usize,
+    pub last_position: f32,
 }
 
 /// Your profile, kept on this computer.
@@ -316,6 +320,9 @@ impl Default for Saved {
             visits: vec![],
             profile: Profile::default(),
             featured_checked: HashSet::new(),
+            last_queue: vec![],
+            last_queue_pos: 0,
+            last_position: 0.0,
         }
     }
 }
@@ -407,6 +414,8 @@ pub struct App {
     pub current: Option<Track>,
     /// The current track is shown but hasn't been streamed yet (restored from last session).
     pub needs_load: bool,
+    /// Where to pick the last song up after a restart: (song id, seconds in).
+    resume_at: Option<(String, f32)>,
     pub seek_preview: Option<f32>,
     pub muted_volume: Option<f32>,
     failures_in_row: u32,
@@ -525,7 +534,13 @@ impl App {
             liked_ids: saved.liked.iter().map(|t| t.id.clone()).collect(),
             current: saved.last_track.clone(),
             needs_load: saved.last_track.is_some(),
-            queue: saved.last_track.clone().into_iter().collect(),
+            // The queue comes back as it was, if it still holds the last song.
+            queue: match &saved.last_track {
+                Some(t) if saved.last_queue.get(saved.last_queue_pos).is_some_and(|q| q.id == t.id) => saved.last_queue.clone(),
+                Some(t) => vec![t.clone()],
+                None => vec![],
+            },
+            resume_at: saved.last_track.as_ref().filter(|_| saved.last_position > 5.0).map(|t| (t.id.clone(), saved.last_position)),
             saved,
             route: Route::Home,
             back: vec![],
@@ -537,7 +552,7 @@ impl App {
             search_edited_at: None,
             focus_search: false,
             chart_genre: (0, "All genres".into()),
-            queue_pos: 0,
+            queue_pos: 0, // set just below
             unshuffled: None,
             seek_preview: None,
             muted_volume: None,
@@ -598,6 +613,10 @@ impl App {
         if app.saved.light_mode && app.saved.settings.theme == "Default" && app.saved.settings.scheme.is_empty() {
             app.saved.settings.scheme = "Light".into();
         }
+        if app.queue.len() > 1 {
+            app.queue_pos = app.saved.last_queue_pos.min(app.queue.len() - 1);
+        }
+        crate::single::listen(cc.egui_ctx.clone());
         app.apply_theme(&cc.egui_ctx);
         // First launch: offer to make a profile.
         if app.saved.profile.created == 0 && !app.saved.profile.skipped {
@@ -620,12 +639,41 @@ impl App {
 
     pub fn save(&mut self, storage: &mut dyn eframe::Storage) {
         self.saved.last_track = self.current.clone();
+        // The queue, kept to a few thousand songs around where you are.
+        let from = self.queue_pos.saturating_sub(500);
+        self.saved.last_queue = self.queue.iter().skip(from).take(3000).cloned().collect();
+        self.saved.last_queue_pos = self.queue_pos - from;
+        self.saved.last_position = match &self.resume_at {
+            // Not started again since the restart: keep the old spot.
+            Some((_, secs)) if self.needs_load => *secs,
+            _ if self.needs_load => 0.0,
+            _ => self.audio.position().as_secs_f32(),
+        };
+        self.trim_saved();
         let mut ids = self.youtube_ids.lock().unwrap().clone();
         if ids.len() > 5000 {
             ids.clear(); // keep the saved file small; ids are found again when needed
         }
         self.saved.youtube_ids = ids;
         eframe::set_value(storage, STORAGE_KEY, &self.saved);
+    }
+
+    /// Keeps the lookups remembered between runs from growing without end.
+    fn trim_saved(&mut self) {
+        let s = &mut self.saved;
+        if s.views.len() > 6000 {
+            // Keep the most recently looked-up counts.
+            let mut v: Vec<(String, (u64, u64))> = s.views.drain().collect();
+            v.sort_by_key(|(_, (_, at))| std::cmp::Reverse(*at));
+            v.truncate(4000);
+            s.views = v.into_iter().collect();
+        }
+        if s.featured_checked.len() > 20000 {
+            s.featured_checked.clear(); // only means a few lookups happen again
+        }
+        if s.album_genres.len() > 5000 {
+            s.album_genres.clear();
+        }
     }
 
     // ---------------------------------------------------------------- navigation
@@ -832,6 +880,12 @@ impl App {
             }
             LoadState::Ready => {
                 self.failures_in_row = 0;
+                // After a restart, carry on from where the song was.
+                if let Some((id, secs)) = self.resume_at.take()
+                    && self.current.as_ref().is_some_and(|c| c.id == id)
+                {
+                    self.audio.seek(Duration::from_secs_f32(secs));
+                }
                 if self.audio.finished() {
                     self.on_track_end(ctx);
                 } else {
@@ -2027,6 +2081,15 @@ impl App {
                         && i < p.tracks.len()
                     {
                         p.tracks.remove(i);
+                    }
+                }
+                TrackEvent::MoveInQueue(i, by) => {
+                    let from = self.queue_pos + 1 + i;
+                    let last = self.queue.len().saturating_sub(1);
+                    let to = (from as isize + by).clamp(self.queue_pos as isize + 1, last as isize) as usize;
+                    if from <= last && to != from {
+                        let t = self.queue.remove(from);
+                        self.queue.insert(to, t);
                     }
                 }
                 TrackEvent::RemoveFromQueue(i) => {

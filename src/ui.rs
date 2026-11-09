@@ -1419,8 +1419,8 @@ fn queue_page(app: &mut App, ui: &mut Ui) {
         }
     }
 
-    let upcoming: Vec<Track> = app.queue.iter().skip(app.queue_pos + 1).cloned().collect();
-    let clear = section_title(ui, "Next up", (!upcoming.is_empty()).then_some("Clear"));
+    let has_upcoming = app.queue.len() > app.queue_pos + 1;
+    let clear = section_title(ui, "Next up", has_upcoming.then_some("Clear"));
     if clear {
         app.queue.truncate(app.queue_pos + 1);
     }
@@ -1432,7 +1432,7 @@ fn queue_page(app: &mut App, ui: &mut Ui) {
         ui.label(RichText::new("When your queue ends, keep playing similar songs.").font(regular(12.5)).color(pal().text_muted));
     });
     ui.add_space(8.0);
-    if upcoming.is_empty() {
+    if app.queue.len() <= app.queue_pos + 1 {
         let msg = if app.saved.autoplay {
             "Nothing queued. Similar songs will play when this one ends."
         } else {
@@ -1444,8 +1444,12 @@ fn queue_page(app: &mut App, ui: &mut Ui) {
     let mut cx = table_ctx(app, &names);
     cx.queue_mode = true;
     let mut ev = vec![];
-    track_table(ui, "q_next", &upcoming, &cx, &mut ev);
-    app.handle_events(ev, &upcoming, &ctx);
+    // Drawn straight from the queue (no copy each frame, which adds up for long queues).
+    track_table(ui, "q_next", &app.queue[app.queue_pos + 1..], &cx, &mut ev);
+    if !ev.is_empty() {
+        let upcoming: Vec<Track> = app.queue[app.queue_pos + 1..].to_vec();
+        app.handle_events(ev, &upcoming, &ctx);
+    }
 }
 
 fn total_time(tracks: &[Track]) -> String {
