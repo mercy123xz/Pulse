@@ -184,6 +184,19 @@ pub fn settings_page(app: &mut App, ui: &mut Ui) {
         switch(ui, &mut s.hardware_acceleration, tr("Enable hardware acceleration"));
     });
 
+    // ------------------------------------------------------------ Discord
+    if crate::discord::available() {
+        section(ui, "Discord");
+        row(
+            ui,
+            tr("Show what you're listening to"),
+            tr("Your Discord profile shows the song, artists and cover while Pulse plays. Pulse talks to the Discord app on this PC, so it needs to be open."),
+            |ui| {
+                switch(ui, &mut app.saved.settings.discord_status, tr("Show what you're listening to"));
+            },
+        );
+    }
+
     your_data_section(app, ui, &ctx);
 
     // ------------------------------------------------------------ Updates

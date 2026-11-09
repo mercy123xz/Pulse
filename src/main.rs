@@ -9,6 +9,7 @@ mod backup;
 mod crash;
 mod deezer;
 mod diag;
+mod discord;
 mod downloads;
 mod dsp;
 mod i18n;

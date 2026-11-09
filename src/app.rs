@@ -558,6 +558,10 @@ pub struct App {
     pub diag: crate::diag::Diagnostics,
     /// Checks for, downloads and installs new versions.
     pub updater: crate::update::Updater,
+    /// The "Listening to Pulse" status on Discord.
+    discord: crate::discord::Presence,
+    /// When the music was paused (the Discord status goes away after a while).
+    paused_since: Option<f64>,
     pub pending_restore: Option<(String, Box<Saved>)>,
     /// Lyrics looked up this session, by song id.
     pub lyrics: HashMap<String, LyricsState>,
@@ -687,6 +691,8 @@ impl App {
             save_now: false,
             diag: Default::default(),
             updater: Default::default(),
+            discord: Default::default(),
+            paused_since: None,
             pending_restore: None,
             lyrics: HashMap::new(),
             lyrics_tx,
@@ -1168,6 +1174,30 @@ impl App {
                 self.updater.check(ctx);
             }
         }
+    }
+
+    /// Keeps the Discord status in step with the player. Paused for two minutes, it
+    /// goes away: you're not listening any more.
+    fn discord_status(&mut self, ctx: &egui::Context) {
+        if !self.saved.settings.discord_status {
+            self.discord.update(false, None);
+            self.paused_since = None;
+            return;
+        }
+        let playing = self.is_playing();
+        let now = ctx.input(|i| i.time);
+        if playing {
+            self.paused_since = None;
+        } else if self.paused_since.is_none() {
+            self.paused_since = Some(now);
+        }
+        let gone = self.paused_since.is_some_and(|t| now - t > 120.0);
+        // A song only restored from last time (not played yet) isn't shown.
+        let want = self.current.as_ref().filter(|_| !self.needs_load && !gone).map(|t| crate::discord::song_status(t, playing, self.audio.position()));
+        if want.is_some() && !playing {
+            ctx.request_repaint_after(Duration::from_secs(121));
+        }
+        self.discord.update(true, want);
     }
 
     /// Starts the update: from the installer when this copy was installed, otherwise
@@ -2481,6 +2511,7 @@ impl eframe::App for App {
             self.diag.gpu = Some(crate::diag::gpu(frame));
         }
         self.updates(&ctx);
+        self.discord_status(&ctx);
         // Developer check: PULSE_DEBUG_REPAINT=1 prints what asked for each redraw.
         static DEBUG_REPAINT: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
         if *DEBUG_REPAINT.get_or_init(|| std::env::var_os("PULSE_DEBUG_REPAINT").is_some()) {
