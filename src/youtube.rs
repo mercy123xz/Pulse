@@ -37,8 +37,13 @@ struct Asset {
     save_as: &'static str,
 }
 
+// On Windows, the "folder" build of yt-dlp: unlike the single .exe it doesn't unpack
+// itself to a temp folder every time it starts, so each song starts 1–3 s sooner.
+// It's unzipped into tools\ytdlp\.
 #[cfg(windows)]
-const YTDLP: Asset = Asset { name: "yt-dlp.exe", save_as: "yt-dlp.exe" };
+const YTDLP: Asset = Asset { name: "yt-dlp_win.zip", save_as: "ytdlp/yt-dlp.exe" };
+/// True when YTDLP is a zip that unpacks into a folder.
+const YTDLP_IS_ZIP: bool = cfg!(windows);
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 const YTDLP: Asset = Asset { name: "yt-dlp_linux", save_as: "yt-dlp" };
 #[cfg(target_os = "macos")]
@@ -71,16 +76,15 @@ static SETUP: Mutex<()> = Mutex::new(());
 /// `status` receives progress text for the player bar.
 pub fn ensure_tools(status: &dyn Fn(&str)) -> Result<Tools, String> {
     let _guard = SETUP.lock().unwrap_or_else(|e| e.into_inner());
-    let dir = tools_dir();
-    let tools = Tools { ytdlp: dir.join(YTDLP.save_as), deno: dir.join(DENO.save_as), dir: dir.clone() };
+    let tools = installed_tools();
     if tools.ytdlp.is_file() && tools.deno.is_file() {
         update_in_background(&tools);
         return Ok(tools);
     }
-    std::fs::create_dir_all(&dir).map_err(|e| format!("Couldn't create {} ({e})", dir.display()))?;
+    std::fs::create_dir_all(&tools.dir).map_err(|e| format!("Couldn't create {} ({e})", tools.dir.display()))?;
 
     // Rough sizes, only used to show one combined percentage.
-    const YTDLP_MB: f64 = 18.0;
+    const YTDLP_MB: f64 = 24.0;
     const DENO_MB: f64 = 43.0;
     let show = |done_mb: f64| {
         let pct = (done_mb / (YTDLP_MB + DENO_MB) * 100.0).clamp(0.0, 99.0);
@@ -89,13 +93,7 @@ pub fn ensure_tools(status: &dyn Fn(&str)) -> Result<Tools, String> {
     show(0.0);
 
     if !tools.ytdlp.is_file() {
-        let sums = crate::net::get_text(&format!("{YTDLP_RELEASE}/SHA2-256SUMS"))?;
-        let expected = checksum_for(&sums, YTDLP.name).ok_or("yt-dlp's checksum list is missing this file")?;
-        let bytes = crate::net::download(&format!("{YTDLP_RELEASE}/{}", YTDLP.name), |done, _| {
-            show(done as f64 / 1e6)
-        })?;
-        verify(&bytes, &expected, "yt-dlp")?;
-        write_executable(&tools.ytdlp, &bytes)?;
+        install_ytdlp(&tools, &|mb| show(mb))?;
     }
     if !tools.deno.is_file() {
         let sums = crate::net::get_text(&format!("{DENO_RELEASE}/{}.sha256sum", DENO.name))?;
@@ -109,6 +107,78 @@ pub fn ensure_tools(status: &dyn Fn(&str)) -> Result<Tools, String> {
     }
     stamp_updated(&tools);
     Ok(tools)
+}
+
+fn installed_tools() -> Tools {
+    let dir = tools_dir();
+    Tools { ytdlp: dir.join(YTDLP.save_as), deno: dir.join(DENO.save_as), dir }
+}
+
+/// The checksum yt-dlp publishes for the current release of our build.
+fn latest_ytdlp_sum() -> Result<String, String> {
+    let sums = crate::net::get_text(&format!("{YTDLP_RELEASE}/SHA2-256SUMS"))?;
+    checksum_for(&sums, YTDLP.name).ok_or_else(|| "yt-dlp's checksum list is missing this file".to_string())
+}
+
+/// Downloads, checks and installs yt-dlp. For the folder build, the new copy is
+/// unpacked next to the old one and swapped in, so a failed update never breaks it.
+fn install_ytdlp(tools: &Tools, progress: &dyn Fn(f64)) -> Result<(), String> {
+    let expected = latest_ytdlp_sum()?;
+    let bytes = crate::net::download(&format!("{YTDLP_RELEASE}/{}", YTDLP.name), |done, _| progress(done as f64 / 1e6))?;
+    verify(&bytes, &expected, "yt-dlp")?;
+    if YTDLP_IS_ZIP {
+        let folder = tools.ytdlp.parent().unwrap_or(&tools.dir).to_path_buf();
+        let fresh = folder.with_extension("new");
+        let _ = std::fs::remove_dir_all(&fresh);
+        unzip_all(&bytes, &fresh)?;
+        let old = folder.with_extension("old");
+        let _ = std::fs::remove_dir_all(&old);
+        if folder.exists() {
+            std::fs::rename(&folder, &old).map_err(|e| format!("Couldn't replace yt-dlp ({e}); it may be busy"))?;
+        }
+        std::fs::rename(&fresh, &folder).map_err(|e| format!("Couldn't install yt-dlp ({e})"))?;
+        let _ = std::fs::remove_dir_all(&old);
+        // The single-file yt-dlp.exe from older Pulse versions isn't needed any more.
+        let _ = std::fs::remove_file(tools.dir.join("yt-dlp.exe"));
+    } else {
+        write_executable(&tools.ytdlp, &bytes)?;
+    }
+    let _ = std::fs::write(tools.dir.join("yt-dlp.sha256"), &expected);
+    Ok(())
+}
+
+/// Unpacks a whole zip into `dest` (rejecting paths that would leave it).
+fn unzip_all(zip: &[u8], dest: &Path) -> Result<(), String> {
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(zip)).map_err(|e| format!("Bad yt-dlp download ({e})"))?;
+    for i in 0..archive.len() {
+        let mut f = archive.by_index(i).map_err(|e| format!("Bad yt-dlp download ({e})"))?;
+        let Some(rel) = f.enclosed_name() else { return Err("Bad yt-dlp download (unsafe file name)".into()) };
+        let out = dest.join(rel);
+        if f.is_dir() {
+            std::fs::create_dir_all(&out).map_err(|e| e.to_string())?;
+            continue;
+        }
+        if let Some(parent) = out.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        let mut file = std::fs::File::create(&out).map_err(|e| format!("Couldn't unpack yt-dlp ({e})"))?;
+        std::io::copy(&mut f, &mut file).map_err(|e| format!("Couldn't unpack yt-dlp ({e})"))?;
+    }
+    Ok(())
+}
+
+/// Gets the newest yt-dlp if it changed (checked by its published checksum).
+fn update_ytdlp(tools: &Tools) {
+    if !YTDLP_IS_ZIP {
+        let _ = run(&tools.ytdlp, &["-U".into()], Duration::from_secs(120));
+        return;
+    }
+    let installed = std::fs::read_to_string(tools.dir.join("yt-dlp.sha256")).unwrap_or_default();
+    if let Ok(latest) = latest_ytdlp_sum()
+        && latest.trim() != installed.trim()
+    {
+        let _ = install_ytdlp(tools, &|_| {});
+    }
 }
 
 /// Finds the checksum for `file` in a `sha256sum`-style list.
@@ -176,15 +246,13 @@ fn update_in_background(tools: &Tools) {
     }
     stamp_updated(tools);
     let tools = tools.clone();
-    std::thread::spawn(move || {
-        let _ = run(&tools.ytdlp, &["-U".into()], Duration::from_secs(120));
-    });
+    std::thread::spawn(move || update_ytdlp(&tools));
 }
 
 /// Runs yt-dlp right now to pick up a fix, after a song failed to play.
 fn update_now(tools: &Tools) {
     stamp_updated(tools);
-    let _ = run(&tools.ytdlp, &["-U".into()], Duration::from_secs(120));
+    update_ytdlp(tools);
 }
 
 // ---------------------------------------------------------------------------
@@ -433,7 +501,7 @@ pub fn views(track: &Track) -> Result<Option<(String, u64)>, String> {
     if !tools_ready() {
         return Ok(None);
     }
-    let tools = Tools { ytdlp: tools_dir().join(YTDLP.save_as), deno: tools_dir().join(DENO.save_as), dir: tools_dir() };
+    let tools = installed_tools();
     let [_, plain] = queries(track);
     let entries = search(&tools, format!("ytsearch6:{plain}"), 6)?;
     Ok(rank(track, &entries).into_iter().find_map(|e| e.view_count.map(|v| (e.id.clone(), v))))
@@ -694,6 +762,20 @@ mod tests {
         assert_eq!(wait_for(Some(90), 100).unwrap(), Duration::ZERO);
         assert_eq!(wait_for(Some(105), 100).unwrap(), Duration::from_secs(5));
         assert!(wait_for(Some(1000), 100).is_err());
+    }
+
+    #[test]
+    fn unpacks_the_yt_dlp_folder_build() {
+        let Ok(zip) = std::fs::read("/tmp/ytz/w.zip") else {
+            eprintln!("skipping: /tmp/ytz/w.zip not found");
+            return;
+        };
+        let dest = std::env::temp_dir().join(format!("pulse-unzip-{}", std::process::id()));
+        unzip_all(&zip, &dest).unwrap();
+        assert!(dest.join("yt-dlp.exe").is_file());
+        assert!(dest.join("_internal").is_dir());
+        std::fs::remove_dir_all(dest).unwrap();
+        assert!(unzip_all(b"not a zip", Path::new("/tmp/x")).is_err());
     }
 
     #[test]

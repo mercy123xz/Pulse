@@ -73,7 +73,7 @@ The first time you run either one, Windows may show **"Windows protected your PC
 new app that isn't signed with a paid certificate. Click **More info → Run anyway**.
 
 The first time you play a song, Pulse downloads two free tools it needs for YouTube playback,
-[yt-dlp](https://github.com/yt-dlp/yt-dlp) and [Deno](https://deno.com) (about 60 MB, once). It gets
+[yt-dlp](https://github.com/yt-dlp/yt-dlp) and [Deno](https://deno.com) (about 70 MB, once). It gets
 them from their official GitHub releases and checks them against the published checksums. After
 that, songs start in a few seconds, and Pulse updates yt-dlp by itself once a day so playback keeps
 working when YouTube changes.

@@ -15,9 +15,15 @@ pub use crate::dsp::Effects;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
-/// Bytes per download request. YouTube slows down single huge requests, so audio
-/// is fetched in pieces this size, one after another.
+/// Bytes per download request when downloading one piece after another.
+/// YouTube slows down single huge requests, so audio is never fetched in one go.
 const CHUNK: u64 = 4 * 1024 * 1024;
+/// The first piece of a song (enough to start an MP3 right away).
+const FIRST_CHUNK: u64 = 1024 * 1024;
+/// Size of the pieces fetched side by side after the first one.
+const PIECE: u64 = 1024 * 1024;
+/// How many pieces download at the same time (kept small: light on the PC and the network).
+const PARALLEL: usize = 3;
 
 // ---------------------------------------------------------------------------
 // Where a song's audio is
@@ -173,7 +179,7 @@ fn open_streaming_decoder(
         *buffered.lock().unwrap() = 1.0;
         return build_decoder(StreamReader { buf, pos: 0 }, src.codec, Some(total));
     }
-    let first = crate::net::get_range(&src.url, &src.headers, 0, Some(CHUNK - 1))?;
+    let first = crate::net::get_range(&src.url, &src.headers, 0, Some(FIRST_CHUNK - 1))?;
     if !still_wanted() {
         return Err("cancelled".into());
     }
@@ -181,60 +187,25 @@ fn open_streaming_decoder(
     let buf = Arc::new(StreamBuffer::default());
     buf.state.lock().unwrap().total = total;
 
-    // Download thread: keeps filling the buffer, one chunk at a time.
+    // Download thread: keeps filling the buffer. When the server sends pieces of the file
+    // (ranges) and its size is known, the rest is fetched as several pieces at once.
     {
         let buf = buf.clone();
         let url = src.url.clone();
         let headers = src.headers.clone();
         let partial = first.partial;
-        let mut body = first.body;
+        let body = first.body;
         std::thread::spawn(move || {
-            let mut chunk = vec![0u8; 64 * 1024];
-            let mut retries = 0u64;
-            loop {
-                if buf.state.lock().unwrap().cancelled || !still_wanted() {
-                    break;
-                }
-                match body.read(&mut chunk) {
-                    Ok(n) if n > 0 => {
-                        let mut st = buf.state.lock().unwrap();
-                        st.bytes.extend_from_slice(&chunk[..n]);
-                        if let Some(t) = st.total {
-                            *buffered.lock().unwrap() = st.bytes.len() as f32 / t.max(1) as f32;
-                        }
-                        drop(st);
-                        buf.changed.notify_all();
-                    }
-                    result => {
-                        // This request ended (finished or the connection dropped).
-                        let have = buf.state.lock().unwrap().bytes.len() as u64;
-                        let finished = match total {
-                            Some(t) => have >= t,
-                            None => result.is_ok(), // no size known: a clean end means done
-                        };
-                        if finished || (!partial && result.is_ok()) {
-                            break;
-                        }
-                        if result.is_err() {
-                            retries += 1;
-                            if retries > 4 {
-                                break;
-                            }
-                            std::thread::sleep(Duration::from_millis(400 * retries));
-                        }
-                        let end = total.map(|t| (have + CHUNK).min(t) - 1);
-                        match crate::net::get_range(&url, &headers, have, end) {
-                            Ok(next) => body = next.body,
-                            Err(_) => {
-                                retries += 1;
-                                if retries > 4 {
-                                    break;
-                                }
-                                std::thread::sleep(Duration::from_millis(400 * retries));
-                            }
-                        }
-                    }
-                }
+            let parallel_from = match total {
+                Some(t) if partial && t > FIRST_CHUNK => Some(FIRST_CHUNK),
+                _ => None,
+            };
+            // Start the other pieces right away, while the first one is still arriving.
+            let pieces = parallel_from.map(|from| ParallelPieces::start(&url, &headers, from, total.unwrap()));
+            let still = || !buf.state.lock().unwrap().cancelled && still_wanted();
+            sequential_download(&buf, &url, &headers, body, partial, if pieces.is_some() { Some(FIRST_CHUNK) } else { total }, &buffered, &still);
+            if let Some(mut p) = pieces {
+                p.finish(&buf, &buffered, total.unwrap(), &still);
             }
             let mut st = buf.state.lock().unwrap();
             st.done = true;
@@ -248,6 +219,161 @@ fn open_streaming_decoder(
     }
 
     build_decoder(StreamReader { buf, pos: 0 }, src.codec, total)
+}
+
+/// Reads `body` into the buffer, resuming with range requests if the connection drops,
+/// until `until` bytes are there (or the end of the file when `until` is None).
+#[allow(clippy::too_many_arguments)]
+fn sequential_download(
+    buf: &StreamBuffer,
+    url: &str,
+    headers: &[(String, String)],
+    mut body: Box<dyn Read + Send>,
+    partial: bool,
+    until: Option<u64>,
+    buffered: &Mutex<f32>,
+    still: &dyn Fn() -> bool,
+) {
+    let mut chunk = vec![0u8; 64 * 1024];
+    let mut retries = 0u64;
+    let total = buf.state.lock().unwrap().total;
+    loop {
+        if !still() {
+            return;
+        }
+        match body.read(&mut chunk) {
+            Ok(n) if n > 0 => {
+                let mut st = buf.state.lock().unwrap();
+                st.bytes.extend_from_slice(&chunk[..n]);
+                if let Some(t) = st.total {
+                    *buffered.lock().unwrap() = st.bytes.len() as f32 / t.max(1) as f32;
+                }
+                let have = st.bytes.len() as u64;
+                drop(st);
+                buf.changed.notify_all();
+                if until.is_some_and(|u| have >= u) {
+                    return;
+                }
+            }
+            result => {
+                // This request ended (finished or the connection dropped).
+                let have = buf.state.lock().unwrap().bytes.len() as u64;
+                let finished = match until {
+                    Some(t) => have >= t,
+                    None => result.is_ok(), // no size known: a clean end means done
+                };
+                if finished || (!partial && result.is_ok()) {
+                    return;
+                }
+                if result.is_err() {
+                    retries += 1;
+                    if retries > 4 {
+                        return;
+                    }
+                    std::thread::sleep(Duration::from_millis(400 * retries));
+                }
+                let end = until.or(total).map(|t| (have + CHUNK).min(t) - 1);
+                match crate::net::get_range(url, headers, have, end) {
+                    Ok(next) => body = next.body,
+                    Err(_) => {
+                        retries += 1;
+                        if retries > 4 {
+                            return;
+                        }
+                        std::thread::sleep(Duration::from_millis(400 * retries));
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Pieces of a file downloading side by side, added to the buffer in order.
+struct ParallelPieces {
+    url: String,
+    headers: Vec<(String, String)>,
+    /// Start of each piece, and its download (None once handed out to a thread).
+    starts: Vec<u64>,
+    total: u64,
+    next_to_start: usize,
+    rx: std::sync::mpsc::Receiver<(usize, Result<Vec<u8>, String>)>,
+    tx: std::sync::mpsc::Sender<(usize, Result<Vec<u8>, String>)>,
+    tries: Vec<u32>,
+}
+
+impl ParallelPieces {
+    fn start(url: &str, headers: &[(String, String)], from: u64, total: u64) -> Self {
+        let starts: Vec<u64> = (from..total).step_by(PIECE as usize).collect();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut p = Self { url: url.to_string(), headers: headers.to_vec(), tries: vec![0; starts.len()], starts, total, next_to_start: 0, rx, tx };
+        for _ in 0..PARALLEL {
+            p.launch_next();
+        }
+        p
+    }
+
+    fn launch(&self, i: usize) {
+        let (url, headers, tx) = (self.url.clone(), self.headers.clone(), self.tx.clone());
+        let start = self.starts[i];
+        let end = (start + PIECE).min(self.total) - 1;
+        std::thread::spawn(move || {
+            let r = crate::net::get_range(&url, &headers, start, Some(end)).and_then(|mut r| {
+                let mut v = Vec::with_capacity((end - start + 1) as usize);
+                r.body.read_to_end(&mut v).map_err(|e| e.to_string())?;
+                if v.len() as u64 != end - start + 1 {
+                    return Err("short piece".into());
+                }
+                Ok(v)
+            });
+            let _ = tx.send((i, r));
+        });
+    }
+
+    fn launch_next(&mut self) {
+        if self.next_to_start < self.starts.len() {
+            self.launch(self.next_to_start);
+            self.next_to_start += 1;
+        }
+    }
+
+    /// Adds the pieces to the buffer in order as they arrive; gives up on a piece after 4 tries.
+    fn finish(&mut self, buf: &StreamBuffer, buffered: &Mutex<f32>, total: u64, still: &dyn Fn() -> bool) {
+        let mut waiting: std::collections::HashMap<usize, Vec<u8>> = Default::default();
+        let mut next = 0;
+        while next < self.starts.len() {
+            if !still() {
+                return;
+            }
+            // The buffer must have reached this piece's start (the first piece is sequential).
+            if buf.state.lock().unwrap().bytes.len() as u64 != self.starts[next] {
+                return;
+            }
+            if let Some(v) = waiting.remove(&next) {
+                let mut st = buf.state.lock().unwrap();
+                st.bytes.extend_from_slice(&v);
+                *buffered.lock().unwrap() = st.bytes.len() as f32 / total.max(1) as f32;
+                drop(st);
+                buf.changed.notify_all();
+                next += 1;
+                continue;
+            }
+            match self.rx.recv_timeout(Duration::from_millis(200)) {
+                Ok((i, Ok(v))) => {
+                    waiting.insert(i, v);
+                    self.launch_next();
+                }
+                Ok((i, Err(_))) => {
+                    self.tries[i] += 1;
+                    if self.tries[i] > 4 {
+                        return;
+                    }
+                    std::thread::sleep(Duration::from_millis(300 * self.tries[i] as u64));
+                    self.launch(i);
+                }
+                Err(_) => {}
+            }
+        }
+    }
 }
 
 fn build_decoder(reader: StreamReader, codec: Codec, total: Option<u64>) -> Result<Decoder<StreamReader>, String> {
@@ -286,6 +412,46 @@ impl LoadState {
 }
 
 type Dec = Decoder<StreamReader>;
+
+/// Times the steps of starting a song, from the progress messages it reports.
+struct Steps {
+    marks: Mutex<Vec<(&'static str, std::time::Instant)>>,
+}
+
+impl Steps {
+    fn new() -> Self {
+        Self { marks: Mutex::new(vec![("getting ready", std::time::Instant::now())]) }
+    }
+
+    /// Notes that a new step began (repeated messages of the same step are ignored).
+    fn mark(&self, text: &str) {
+        let step = match text {
+            t if t.starts_with("First-time setup") => "first-time setup",
+            t if t.starts_with("Finding") => "finding",
+            t if t.starts_with("Loading audio") => "link",
+            t if t.starts_with("Updating") => "updating yt-dlp",
+            "audio" => "audio",
+            _ => "other",
+        };
+        let mut m = self.marks.lock().unwrap();
+        if m.last().is_none_or(|(s, _)| *s != step) {
+            m.push((step, std::time::Instant::now()));
+        }
+    }
+
+    fn summary(&self, started: std::time::Instant) -> String {
+        let m = self.marks.lock().unwrap();
+        let now = std::time::Instant::now();
+        let parts: Vec<String> = m
+            .iter()
+            .enumerate()
+            .map(|(i, (step, at))| (step, m.get(i + 1).map(|(_, t)| *t).unwrap_or(now) - *at))
+            .filter(|(_, d)| d.as_secs_f32() >= 0.05)
+            .map(|(step, d)| format!("{step} {:.1} s", d.as_secs_f32()))
+            .collect();
+        format!("Started in {:.1} s: {}", started.elapsed().as_secs_f32(), parts.join(" · "))
+    }
+}
 
 /// The song on a deck.
 struct Playing {
@@ -341,6 +507,8 @@ pub struct AudioEngine {
     next_generation: Arc<AtomicU64>,
     load_state: Arc<Mutex<(u64, LoadState)>>,
     notice: Arc<Mutex<Option<String>>>,
+    /// How long the last song took to start, step by step (shown on the song title).
+    timing: Arc<Mutex<Option<String>>>,
     alive: Arc<AtomicBool>,
     pub device_error: Option<String>,
 }
@@ -386,6 +554,7 @@ impl AudioEngine {
             next_generation: Arc::new(AtomicU64::new(0)),
             load_state: Arc::new(Mutex::new((0, LoadState::Idle))),
             notice: Arc::new(Mutex::new(None)),
+            timing: Arc::new(Mutex::new(None)),
             alive: Arc::new(AtomicBool::new(true)),
             device_error,
         };
@@ -437,9 +606,13 @@ impl AudioEngine {
         let notice = self.notice.clone();
         let shared = self.shared.clone();
         let effects = self.effects.clone();
+        let timing = self.timing.clone();
         let id = id.to_string();
+        *timing.lock().unwrap() = None;
 
         std::thread::spawn(move || {
+            let started = std::time::Instant::now();
+            let steps = Steps::new();
             let set_state = |s: LoadState| {
                 let mut ls = load_state.lock().unwrap();
                 if ls.0 == generation {
@@ -448,10 +621,12 @@ impl AudioEngine {
                 ctx.request_repaint();
             };
             let current = || gen_counter.load(Ordering::SeqCst) == generation;
+            let from_ahead = prepared.is_some();
             let (decoder, buffered) = match prepared {
                 Some(p) => (p.decoder, p.buffered),
                 None => {
                     let status = |text: &str| {
+                        steps.mark(text);
                         if current() {
                             set_state(LoadState::Resolving(text.to_owned()));
                         }
@@ -463,6 +638,7 @@ impl AudioEngine {
                     if !current() {
                         return; // the user already picked another song
                     }
+                    steps.mark("audio");
                     set_state(LoadState::Loading);
                     let still_wanted = {
                         let gen_counter = gen_counter.clone();
@@ -482,6 +658,11 @@ impl AudioEngine {
             if !current() {
                 return;
             }
+            *timing.lock().unwrap() = Some(if from_ahead {
+                format!("Started in {:.1} s (found ahead of time)", started.elapsed().as_secs_f32())
+            } else {
+                steps.summary(started)
+            });
             let duration = decoder.total_duration().filter(|d| !d.is_zero()).unwrap_or(expected);
             let ctl = Arc::new(TrackCtl::default());
             let source = Processor::new(decoder, effects, ctl.clone(), 1.0, false);
@@ -552,6 +733,11 @@ impl AudioEngine {
     pub fn load_state(&self) -> LoadState {
         let ls = self.load_state.lock().unwrap();
         if ls.0 == self.generation.load(Ordering::SeqCst) { ls.1.clone() } else { LoadState::Loading }
+    }
+
+    /// How long the current song took to start, e.g. "Started in 3.2 s: finding 1.4 s · link 1.1 s · audio 0.7 s".
+    pub fn timing(&self) -> Option<String> {
+        self.timing.lock().unwrap().clone()
     }
 
     /// A message from the last song start, shown once.
@@ -823,6 +1009,28 @@ mod tests {
         println!("{file}: samples after seeking to 20 s: {rest} (~{:.1} s)", rest as f32 / 88_200.0);
         assert!(rest > 88_200 * 8 && rest < 88_200 * 11, "about 10 s should remain");
         assert!((*buffered.lock().unwrap() - 1.0).abs() < 1e-6, "download completed");
+    }
+
+    /// A 4-minute song from a server that limits each connection's speed (like YouTube):
+    /// several pieces download side by side, it starts much sooner than one connection
+    /// would allow, and every byte ends up in the right place.
+    #[test]
+    fn long_song_downloads_in_parallel_pieces() {
+        let Ok(data) = std::fs::read("/tmp/test_long.m4a") else {
+            eprintln!("skipping: /tmp/test_long.m4a not found");
+            return;
+        };
+        let one_connection = data.len() as f32 / 500_000.0;
+        let url = slow_server(data, 500_000, true);
+        let buffered = Arc::new(Mutex::new(0.0));
+        let t0 = Instant::now();
+        let dec = open_streaming_decoder(&source(url, Codec::Mp4), || true, buffered.clone()).expect("decoder");
+        let ready = t0.elapsed().as_secs_f32();
+        println!("ready after {ready:.1} s (one connection would need ~{one_connection:.1} s)");
+        assert!(ready < one_connection * 0.6, "parallel pieces should be much faster");
+        let samples = dec.count();
+        let secs = samples as f32 / 88_200.0;
+        assert!((secs - 240.0).abs() < 1.0, "whole song decoded in order: {secs:.1} s");
     }
 
     #[test]
