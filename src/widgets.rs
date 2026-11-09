@@ -761,8 +761,33 @@ pub fn track_table(ui: &mut Ui, id_salt: &str, tracks: &[Track], cx: &TableCtx, 
     let empty = HashSet::new();
     let selected = if cx.selection.0 == id_salt { cx.selection.1 } else { &empty };
     ui.spacing_mut().item_spacing.y = 0.0;
-    for (i, t) in tracks.iter().enumerate() {
+    // Only the rows on screen (plus a few either side, so Tab and the arrow keys can step
+    // onto the next one) are built. Long playlists stay as quick as short ones.
+    let top = ui.cursor().top();
+    let clip = ui.clip_rect();
+    const MARGIN: usize = 6;
+    let first = (((clip.top() - top) / ROW_H).floor().max(0.0) as usize).saturating_sub(MARGIN).min(tracks.len());
+    let last = ((((clip.bottom() - top) / ROW_H).ceil().max(0.0) as usize) + MARGIN).clamp(first, tracks.len());
+    // The song you came here for is scrolled into view once, even from far down the list.
+    if let Some((hid, at)) = cx.highlight
+        && let Some(i) = tracks.iter().position(|t| t.id == hid)
+        && !(first..last).contains(&i)
+    {
+        let key = egui::Id::new(("highlight_scrolled", hid, at.to_bits()));
+        if !ui.ctx().data(|d| d.get_temp::<bool>(key).unwrap_or(false)) {
+            let y = top + i as f32 * ROW_H;
+            ui.scroll_to_rect(egui::Rect::from_min_size(egui::pos2(ui.max_rect().left(), y), vec2(1.0, ROW_H)), Some(egui::Align::Center));
+            ui.ctx().data_mut(|d| d.insert_temp(key, true));
+        }
+    }
+    if first > 0 {
+        ui.allocate_space(vec2(ui.available_width(), first as f32 * ROW_H));
+    }
+    for (i, t) in tracks.iter().enumerate().take(last).skip(first) {
         track_row(ui, base.with(i), id_salt, i, t, tracks, selected, cx, events);
+    }
+    if last < tracks.len() {
+        ui.allocate_space(vec2(ui.available_width(), (tracks.len() - last) as f32 * ROW_H));
     }
     ui.spacing_mut().item_spacing.y = 6.0;
 
@@ -837,8 +862,8 @@ fn group_menu(ui: &mut Ui, rows: &[usize], tracks: &[Track], cx: &TableCtx, ev: 
 #[allow(clippy::too_many_arguments)]
 fn track_row(ui: &mut Ui, id: egui::Id, list: &str, i: usize, t: &Track, tracks: &[Track], selected: &HashSet<usize>, cx: &TableCtx, ev: &mut Vec<TrackEvent>) {
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), ROW_H), Sense::hover());
-    // Register the row even when it's scrolled out of view, so Tab can reach it
-    // (focusing it then scrolls it into view, see `focus_ring`).
+    // Rows just off screen are registered too, so Tab can reach them
+    // (focusing one then scrolls it into view, see `focus_ring`).
     let resp = ui.interact(rect, id, Sense::click());
     a11y(ui, &resp, WidgetType::Button, || format!("{} by {}, {}", t.title, t.all_artists(), fmt_duration(t.duration)));
     // The song you came here for is scrolled into view once, even from far down the list.
