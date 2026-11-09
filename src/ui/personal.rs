@@ -1,4 +1,4 @@
-//! The personal parts: home page made from what you listen to, Daily Mixes,
+//! The personal parts: home page made from what you listen to, Orbits,
 //! your profile page, and the welcome screen where you make your profile.
 
 use super::{Hero, album_grid_visits, hero, open_and_play, page_title, tracks_block, with_remote};
@@ -55,7 +55,7 @@ pub fn has_history(app: &App) -> bool {
     !app.saved.played_artists.is_empty() || !app.saved.liked.is_empty() || !app.saved.playlists.is_empty()
 }
 
-/// The home page: your shortcuts, Daily Mixes, recent albums and pages, then discovery.
+/// The home page: your shortcuts, Orbits, recent albums and pages, then discovery.
 pub fn home(app: &mut App, ui: &mut Ui) {
     let ctx = ui.ctx().clone();
     ui.add_space(12.0);
@@ -65,7 +65,7 @@ pub fn home(app: &mut App, ui: &mut Ui) {
     // ---- Quick tiles: Liked Songs, your playlists, recent albums (up to 8)
     let mut tiles: Vec<(Place, String, Option<String>, &'static str)> = vec![];
     if !app.saved.liked.is_empty() {
-        tiles.push((Place::Liked, tr("Liked Songs").to_string(), None, icon::HEART));
+        tiles.push((Place::Liked, tr("Liked Songs").to_string(), Some(LIKED_ART.to_owned()), icon::HEART));
     }
     for v in &app.saved.visits {
         if tiles.len() >= 8 {
@@ -75,11 +75,18 @@ pub fn home(app: &mut App, ui: &mut Ui) {
             tiles.push((v.place.clone(), v.title.clone(), v.image.clone(), icon::MUSIC_NOTES));
         }
     }
-    for p in &app.saved.playlists {
+    for (i, p) in app.saved.playlists.iter().enumerate() {
         let place = Place::Yours(p.name.clone());
         if tiles.len() < 8 && !tiles.iter().any(|t| t.0 == place) {
-            let art = p.cover.as_ref().map(|c| crate::settings::file_uri(c)).or_else(|| p.tracks.first().and_then(|t| t.art_small()).map(str::to_owned));
-            tiles.push((place, p.name.clone(), art, icon::PLAYLIST));
+            tiles.push((place, p.name.clone(), app.playlist_art(i), icon::PLAYLIST));
+        }
+    }
+    // Your playlists show their current picture, not the one from when you last opened them.
+    for t in tiles.iter_mut() {
+        if let Place::Yours(name) = &t.0
+            && let Some(i) = app.saved.playlists.iter().position(|p| p.name == *name)
+        {
+            t.2 = app.playlist_art(i);
         }
     }
     for a in &app.saved.played_albums {
@@ -112,21 +119,19 @@ pub fn home(app: &mut App, ui: &mut Ui) {
         }
     }
 
-    // ---- Made for you: Daily Mixes from your top artists
+    // ---- Orbits: a mix around each of the artists you play most
     let top: Vec<Visit> = top_artists(&app.saved.played_artists, now_unix()).into_iter().take(6).cloned().collect();
     if !top.is_empty() {
         ui.add_space(12.0);
-        ui.label(RichText::new(tr("Made For")).font(med(12.0)).color(pal().text_muted));
-        let who = if app.saved.profile.name.is_empty() { tr("You").to_string() } else { app.saved.profile.name.clone() };
-        section_title(ui, &who, None);
+        section_title(ui, "Your Orbits", None);
+        ui.label(RichText::new(tr("Mixes that circle the artists you play most")).font(regular(12.5)).color(pal().text_muted));
+        ui.add_space(4.0);
         let mut action = None;
-        let labels: Vec<String> = (1..=top.len()).map(|n| format!("Daily Mix {n:02}")).collect();
+        let labels: Vec<String> = top.iter().map(|a| orbit_title(&a.title)).collect();
         let items: Vec<(usize, &Visit)> = top.iter().enumerate().collect();
         card_grid(ui, &items, Some(1), |ui, w, (i, a)| {
-            // "Artist and more": the other artists in your top list stand in for the mix's variety.
-            let others: Vec<&str> = top.iter().filter(|o| o.place != a.place).take(2).map(|o| o.title.as_str()).collect();
-            let sub = if others.is_empty() { format!("{} {}", a.title, tr("and more")) } else { format!("{}, {} {}", a.title, others.join(", "), tr("and more")) };
-            let info = CardInfo { id: egui::Id::new(("mix", *i)), art: a.image.as_deref(), title: &labels[*i], subtitle: sub, round: false, badge: Some(&labels[*i]) };
+            let sub = format!("{} {}", a.title, tr("and similar artists"));
+            let info = CardInfo { id: egui::Id::new(("mix", *i)), art: a.image.as_deref(), title: &labels[*i], subtitle: sub, round: false, badge: Some(tr("Orbit")) };
             if let Place::Artist(id) = &a.place {
                 match card(ui, w, &info) {
                     CardClick::Open => action = Some((id.clone(), false)),
@@ -207,18 +212,23 @@ fn quick_tile(ui: &mut Ui, w: f32, art: Option<&str>, glyph: &str, title: &str, 
     out
 }
 
-/// A Daily Mix page.
+/// "Lil Baby Orbit": a mix built around one artist.
+pub fn orbit_title(artist: &str) -> String {
+    tr("{} Orbit").replace("{}", artist)
+}
+
+/// An Orbit page.
 pub fn mix_page(app: &mut App, ui: &mut Ui, artist_id: &str) {
-    let idx = top_artists(&app.saved.played_artists, now_unix()).iter().position(|a| a.place == Place::Artist(artist_id.to_string()));
     let seed = app.saved.played_artists.iter().find(|a| a.place == Place::Artist(artist_id.to_string())).cloned();
     let name = seed.as_ref().map(|s| s.title.clone()).unwrap_or_default();
     let image = seed.and_then(|s| s.image);
-    let title = format!("Daily Mix {:02}", idx.map(|i| i + 1).unwrap_or(1));
+    let title = orbit_title(&name);
     with_remote(app, ui, |app, ui, page| {
         let Page::Tracks(tracks) = page else { return };
-        let sub = format!("{name} {} · {} songs · {}", tr("and more"), tracks.len(), tr("Updated daily"));
-        hero(ui, &Hero { editable: false, kind: tr("Made for you"), title: &title, subtitle: &sub, art: image.as_deref(), glyph: icon::SHUFFLE, round: false, banner: None, links: &[] });
-        app.note_visit(Place::Mix(artist_id.to_string()), &title, &format!("{name} {}", tr("and more")), image.as_deref(), false);
+        let n = tracks.len();
+        let sub = format!("{name} {} · {n} {} · {}", tr("and similar artists"), tr(if n == 1 { "song" } else { "songs" }), tr("Updated daily"));
+        hero(ui, &Hero { editable: false, kind: tr("Orbit"), title: &title, subtitle: &sub, art: image.as_deref(), glyph: icon::PLANET, round: false, banner: None, links: &[] });
+        app.note_visit(Place::Mix(artist_id.to_string()), &title, "Orbit", image.as_deref(), false);
         let ctx = ui.ctx().clone();
         super::autoplay_page(app, &ctx, tracks);
         super::action_row(app, ui, tracks);
@@ -303,7 +313,7 @@ pub fn profile_page(app: &mut App, ui: &mut Ui) {
             .playlists
             .iter()
             .enumerate()
-            .map(|(i, pl)| (i, pl.name.clone(), pl.tracks.len(), pl.cover.as_ref().map(|c| crate::settings::file_uri(c)).or_else(|| pl.tracks.first().and_then(|t| t.art_small()).map(str::to_owned))))
+            .map(|(i, pl)| (i, pl.name.clone(), pl.tracks.len(), app.playlist_art(i)))
             .collect();
         for (i, name, n, art) in &names {
             ui.horizontal(|ui| {
@@ -312,7 +322,7 @@ pub fn profile_page(app: &mut App, ui: &mut Ui) {
                 ui.vertical(|ui| {
                     ui.add_space(6.0);
                     let t = ui.add(egui::Label::new(RichText::new(name).font(semi(14.0)).color(pal().text)).sense(Sense::click()));
-                    ui.label(RichText::new(format!("{n} {}", tr("songs"))).font(regular(12.0)).color(pal().text_muted));
+                    ui.label(RichText::new(format!("{n} {}", tr(if *n == 1 { "song" } else { "songs" }))).font(regular(12.0)).color(pal().text_muted));
                     if t.clicked() || resp.clicked() {
                         open = Some(*i);
                     }

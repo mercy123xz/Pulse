@@ -48,8 +48,15 @@ pub fn fmt_count(n: u64) -> String {
 
 /// Draws album art from a URL into `rect` (only if visible, so off-screen
 /// images aren't downloaded). Shows a placeholder until it loads.
+/// Stands in for a picture URL: draws the Liked Songs heart art.
+pub const LIKED_ART: &str = "pulse://liked";
+
 pub fn artwork(ui: &Ui, rect: Rect, url: Option<&str>, radius: CornerRadius) {
     if !ui.is_rect_visible(rect) {
+        return;
+    }
+    if url == Some(LIKED_ART) {
+        liked_art(ui, rect, radius);
         return;
     }
     ui.painter().rect_filled(rect, radius, pal().surface_active);
@@ -74,6 +81,29 @@ pub fn artwork(ui: &Ui, rect: Rect, url: Option<&str>, radius: CornerRadius) {
         }
         img.paint_at(ui, rect);
     }
+}
+
+/// Liked Songs' cover: a filled heart on a diagonal gradient of the theme's accent.
+fn liked_art(ui: &Ui, rect: Rect, radius: CornerRadius) {
+    let dark = pal().accent;
+    let light = pal().accent_soft.lerp_to_gamma(Color32::WHITE, 0.3);
+    // The rounded outline, filled as a fan with each point colored by how far along
+    // the top-left → bottom-right diagonal it is.
+    let mut outline = vec![];
+    egui::epaint::tessellator::path::rounded_rectangle(&mut outline, rect, radius.into());
+    let span = (rect.width() + rect.height()).max(1.0);
+    let at = |p: Pos2| light.lerp_to_gamma(dark, ((p.x - rect.left()) + (p.y - rect.top())) / span);
+    let mut mesh = egui::Mesh::default();
+    mesh.colored_vertex(rect.center(), at(rect.center()));
+    for p in &outline {
+        mesh.colored_vertex(*p, at(*p));
+    }
+    let n = outline.len() as u32;
+    for i in 0..n {
+        mesh.add_triangle(0, 1 + i, 1 + (i + 1) % n);
+    }
+    ui.painter().add(egui::Shape::mesh(mesh));
+    ui.painter().text(rect.center() + vec2(0.0, rect.height() * 0.02), Align2::CENTER_CENTER, icon::HEART, filled_icon(rect.height() * 0.42), Color32::WHITE);
 }
 
 /// Vertical gradient (used behind page headers).
@@ -136,6 +166,24 @@ pub fn focus_ring(ui: &Ui, resp: &Response) {
 }
 
 /// A round, borderless icon button. `tip` doubles as its screen-reader name.
+/// A small rounded button with an icon and a short label ("Settings", "Light").
+pub fn labeled_button(ui: &mut Ui, glyph: &str, label: &str, active: bool) -> Response {
+    let font = med(12.5);
+    let g = one_line(ui, label, font, pal().text, 200.0);
+    let w = 12.0 + 16.0 + 6.0 + g.size().x + 12.0;
+    let (rect, resp) = ui.allocate_exact_size(vec2(w, 32.0), Sense::click());
+    a11y(ui, &resp, WidgetType::Button, || label.to_owned());
+    focus_ring(ui, &resp);
+    let hovered = resp.hovered();
+    let fill = if active { pal().surface_active } else if hovered { pal().surface_hover } else { Color32::TRANSPARENT };
+    ui.painter().rect_filled(rect, CornerRadius::same(16), fill);
+    let col = if active { pal().accent_soft } else if hovered { pal().text } else { pal().text_muted };
+    let text_col = if active || hovered { pal().text } else { pal().text_muted };
+    ui.painter().text(pos2(rect.left() + 20.0, rect.center().y), Align2::CENTER_CENTER, glyph, regular(16.0), col);
+    ui.painter().galley(pos2(rect.left() + 34.0, rect.center().y - g.size().y / 2.0), g, text_col);
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
 pub fn icon_button(ui: &mut Ui, glyph: &str, size: f32, color: Color32, tip: &str) -> Response {
     icon_button_impl(ui, glyph, size, color, tip, None)
 }
@@ -320,7 +368,7 @@ pub struct CardInfo<'a> {
     pub title: &'a str,
     pub subtitle: String,
     pub round: bool,
-    /// A label on the picture, like "Daily Mix 01".
+    /// A label on the picture, like "Orbit".
     pub badge: Option<&'a str>,
 }
 
