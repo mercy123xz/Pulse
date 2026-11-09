@@ -24,6 +24,7 @@ mod single;
 mod theme;
 mod themes;
 mod ui;
+mod update;
 mod widgets;
 mod youtube;
 

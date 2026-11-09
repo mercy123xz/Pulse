@@ -54,6 +54,35 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Installer build failed" }
           Get-ChildItem target\installer
 
+      # Signs the installer with Pulse's release key, so Pulse can check an update
+      # before running it. The key is the PULSE_SIGNING_KEY secret (an Ed25519 key in
+      # PEM form); the public half is installer/update-key.pub.pem and is built into Pulse.
+      - name: Sign installer
+        shell: bash
+        env:
+          PULSE_SIGNING_KEY: ${{ secrets.PULSE_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          setup=$(ls target/installer/PulseSetup-*.exe | head -1)
+          if [ -z "${PULSE_SIGNING_KEY:-}" ]; then
+            echo "::warning::PULSE_SIGNING_KEY isn't set: this installer is unsigned, so Pulse won't install it by itself."
+            exit 0
+          fi
+          # OpenSSL 3 signs Ed25519 over the whole file (-rawin). Git for Windows has it.
+          openssl=""
+          for o in /mingw64/bin/openssl /usr/bin/openssl openssl; do
+            if "$o" version 2>/dev/null | grep -q '^OpenSSL 3'; then openssl="$o"; break; fi
+          done
+          [ -n "$openssl" ] || { echo "::error::OpenSSL 3 not found"; exit 1; }
+          umask 077
+          key="$RUNNER_TEMP/pulse-signing-key.pem"
+          trap 'rm -f "$key"' EXIT
+          printf '%s\n' "$PULSE_SIGNING_KEY" | tr -d '\r' > "$key"
+          "$openssl" pkeyutl -sign -inkey "$key" -rawin -in "$setup" -out "$RUNNER_TEMP/setup.sig"
+          # The signature must check out with the key Pulse has, or nothing is published.
+          "$openssl" pkeyutl -verify -pubin -inkey installer/update-key.pub.pem -rawin -in "$setup" -sigfile "$RUNNER_TEMP/setup.sig"
+          base64 -w0 "$RUNNER_TEMP/setup.sig" > target/installer/signature.b64
+
       - uses: actions/upload-artifact@v4
         with:
           name: pulse-windows
@@ -76,7 +105,15 @@ jobs:
           gh release view $tag *> $null
           if ($LASTEXITCODE -eq 0) { Write-Output "Release $tag already exists, nothing to publish."; exit 0 }
           $setup = Get-ChildItem target/installer/PulseSetup-*.exe | Select-Object -First 1
-          gh release create $tag $setup.FullName --target $env:GITHUB_SHA --title "Pulse $tag" --notes-file .github/release-notes.md
+          # The signature goes in the notes as a comment: hidden on the page, read by Pulse.
+          $notes = Get-Content .github/release-notes.md -Raw
+          if (Test-Path target/installer/signature.b64) {
+            $sig = (Get-Content target/installer/signature.b64 -Raw).Trim()
+            $notes = $notes.TrimEnd() + "`n`n<!-- pulse-signature ed25519:$sig -->`n"
+          }
+          $notesFile = Join-Path $env:RUNNER_TEMP "notes.md"
+          Set-Content -Path $notesFile -Value $notes -NoNewline -Encoding utf8
+          gh release create $tag $setup.FullName --target $env:GITHUB_SHA --title "Pulse $tag" --notes-file $notesFile
           exit $LASTEXITCODE
 
       # A release made by hand on GitHub also gets the installer attached.
@@ -86,5 +123,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         shell: pwsh
         run: |
+          $tag = "${{ github.event.release.tag_name }}"
           $setup = Get-ChildItem target/installer/PulseSetup-*.exe | Select-Object -First 1
-          gh release upload "${{ github.event.release.tag_name }}" $setup.FullName --clobber
+          gh release upload $tag $setup.FullName --clobber
+          if (Test-Path target/installer/signature.b64) {
+            $sig = (Get-Content target/installer/signature.b64 -Raw).Trim()
+            $body = (gh release view $tag --json body -q .body | Out-String)
+            $body = [regex]::Replace($body, '(?s)\s*<!-- pulse-signature ed25519:.*?-->', '').TrimEnd()
+            $notesFile = Join-Path $env:RUNNER_TEMP "notes.md"
+            Set-Content -Path $notesFile -Value ($body + "`n`n<!-- pulse-signature ed25519:$sig -->`n") -NoNewline -Encoding utf8
+            gh release edit $tag --notes-file $notesFile
+          }

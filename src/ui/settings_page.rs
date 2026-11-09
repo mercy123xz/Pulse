@@ -186,6 +186,9 @@ pub fn settings_page(app: &mut App, ui: &mut Ui) {
 
     your_data_section(app, ui, &ctx);
 
+    // ------------------------------------------------------------ Updates
+    updates_section(app, ui, &ctx);
+
     // ------------------------------------------------------------ Troubleshooting
     section(ui, tr("Troubleshooting"));
     row(ui, tr("Diagnostics"), tr("Versions, storage, a self-test and recent problems, for when something isn't working."), |ui| {
@@ -195,7 +198,6 @@ pub fn settings_page(app: &mut App, ui: &mut Ui) {
     });
 
     ui.add_space(30.0);
-    ui.label(RichText::new(format!("Pulse {}", env!("CARGO_PKG_VERSION"))).font(regular(12.0)).color(pal().text_faint));
 
     if clear {
         app.clear_cache(&ctx);
@@ -203,6 +205,44 @@ pub fn settings_page(app: &mut App, ui: &mut Ui) {
     if app.saved.settings != before || app.saved.autoplay != autoplay_before {
         app.apply_settings(&before, &ctx);
     }
+}
+
+/// Checking for and installing new versions.
+fn updates_section(app: &mut App, ui: &mut Ui, ctx: &egui::Context) {
+    use crate::update::Status;
+    section(ui, tr("Updates"));
+    row(
+        ui,
+        tr("Check for updates"),
+        tr("Once a day, Pulse asks GitHub whether there's a newer version. Nothing is installed until you choose Update now, and only if it's signed by Pulse."),
+        |ui| {
+            switch(ui, &mut app.saved.settings.check_updates, tr("Check for updates"));
+        },
+    );
+    let status = match &app.updater.status {
+        Status::Idle => String::new(),
+        Status::Checking => tr("Checking…").to_string(),
+        Status::UpToDate => tr("You have the newest version.").to_string(),
+        Status::Available(r) => format!("{} {} {}", tr("Pulse"), r.version, tr("is available.")),
+        Status::Downloading(_, p) => format!("{} {:.0}%", tr("Downloading…"), p.lock().map(|v| *v).unwrap_or(0.0) * 100.0),
+        Status::Installing => tr("Installing…").to_string(),
+        Status::Failed(e) | Status::InstallFailed(_, e) => e.clone(),
+    };
+    let body = if status.is_empty() { tr("Installed version").to_string() } else { status };
+    let available = matches!(app.updater.status, Status::Available(_) | Status::InstallFailed(..));
+    row(ui, &format!("Pulse {}", env!("CARGO_PKG_VERSION")), &body, |ui| {
+        if available {
+            if ui.add(egui::Button::new(RichText::new(tr("Update now")).color(Color32::WHITE)).fill(pal().accent).corner_radius(14)).clicked() {
+                app.start_update(ctx);
+            }
+        } else {
+            ui.add_enabled_ui(!app.updater.busy(), |ui| {
+                if ui.button(tr("Check now")).clicked() {
+                    app.updater.check(ctx);
+                }
+            });
+        }
+    });
 }
 
 /// The Windows save or open dialog for a backup file (none elsewhere).

@@ -54,6 +54,8 @@ Name: "{autodesktop}\Pulse"; Filename: "{app}\pulse.exe"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\pulse.exe"; Description: "{cm:LaunchProgram,Pulse}"; Flags: nowait postinstall skipifsilent
+; After an update from inside Pulse (a silent install), start the new version.
+Filename: "{app}\pulse.exe"; Flags: nowait runasoriginaluser; Check: WizardSilent
 
 ; Your likes, playlists and settings in %APPDATA%\pulse-player are kept when Pulse is uninstalled,
 ; so reinstalling picks up where you left off.

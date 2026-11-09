@@ -556,6 +556,8 @@ pub struct App {
     save_now: bool,
     /// The Diagnostics page's facts and self-test.
     pub diag: crate::diag::Diagnostics,
+    /// Checks for, downloads and installs new versions.
+    pub updater: crate::update::Updater,
     pub pending_restore: Option<(String, Box<Saved>)>,
     /// Lyrics looked up this session, by song id.
     pub lyrics: HashMap<String, LyricsState>,
@@ -684,6 +686,7 @@ impl App {
             backups_stale: false,
             save_now: false,
             diag: Default::default(),
+            updater: Default::default(),
             pending_restore: None,
             lyrics: HashMap::new(),
             lyrics_tx,
@@ -1145,6 +1148,41 @@ impl App {
                 _ => None,
             },
             _ => None,
+        }
+    }
+
+    /// The daily update check (a little after start, not in Gaming or Ultra-low mode),
+    /// and closing Pulse when an installer has been started.
+    fn updates(&mut self, ctx: &egui::Context) {
+        if self.updater.poll() {
+            self.save_now = true;
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            return;
+        }
+        let s = &mut self.saved.settings;
+        let idle = matches!(self.updater.status, crate::update::Status::Idle);
+        if s.check_updates && idle && crate::perf::on(crate::perf::Extra::Lookups) && ctx.input(|i| i.time) > 15.0 {
+            let now = crate::crash::now();
+            if now.saturating_sub(s.update_checked_at) >= 86_400 {
+                s.update_checked_at = now;
+                self.updater.check(ctx);
+            }
+        }
+    }
+
+    /// Starts the update: from the installer when this copy was installed, otherwise
+    /// by opening the release page (a copy run from elsewhere isn't replaced).
+    pub fn start_update(&mut self, ctx: &egui::Context) {
+        let release = match &self.updater.status {
+            crate::update::Status::Available(r) | crate::update::Status::InstallFailed(r, _) => r.clone(),
+            _ => return,
+        };
+        if crate::update::installed() && release.signed() {
+            self.updater.install(ctx);
+        } else {
+            ctx.open_url(egui::OpenUrl::new_tab(&release.page));
+            let msg = if release.signed() { "Download the installer from the release page" } else { "This update isn't signed, so download it from the release page" };
+            self.toast(crate::i18n::tr(msg), ctx);
         }
     }
 
@@ -2442,6 +2480,7 @@ impl eframe::App for App {
         if self.diag.gpu.is_none() {
             self.diag.gpu = Some(crate::diag::gpu(frame));
         }
+        self.updates(&ctx);
         // Developer check: PULSE_DEBUG_REPAINT=1 prints what asked for each redraw.
         static DEBUG_REPAINT: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
         if *DEBUG_REPAINT.get_or_init(|| std::env::var_os("PULSE_DEBUG_REPAINT").is_some()) {

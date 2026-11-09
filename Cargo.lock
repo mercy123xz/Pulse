@@ -3119,6 +3119,7 @@ dependencies = [
  "notify",
  "rand 0.9.5",
  "rfd",
+ "ring",
  "rodio",
  "serde",
  "serde_json",

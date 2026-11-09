@@ -156,6 +156,10 @@ pub struct Settings {
     pub mini_lyrics: bool,
     /// The lyrics panel beside the page is open.
     pub lyrics_panel: bool,
+    /// Ask GitHub once a day whether there's a newer Pulse.
+    pub check_updates: bool,
+    /// When that was last asked (seconds since 1970).
+    pub update_checked_at: u64,
     pub hardware_acceleration: bool,
     /// Theme name and its color scheme.
     pub theme: String,
@@ -192,6 +196,8 @@ impl Default for Settings {
             lyrics_center: true,
             mini_lyrics: false,
             lyrics_panel: false,
+            check_updates: true,
+            update_checked_at: 0,
             hardware_acceleration: true,
             theme: "Default".into(),
             scheme: String::new(),

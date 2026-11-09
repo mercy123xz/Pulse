@@ -109,7 +109,61 @@ fn paint_backdrop(app: &mut App, ui: &Ui, rect: Rect, radius: CornerRadius, outs
     app.backdrop.paint(ui, rect, radius, outside, moving);
 }
 
+/// A strip above the page while an update is ready, downloading or installing.
+fn update_banner(app: &mut App, ui: &mut Ui) {
+    use crate::update::Status;
+    let ctx = ui.ctx().clone();
+    let (text, progress, actions) = match &app.updater.status {
+        Status::Available(r) if !app.updater.banner_closed => (format!("{} {} {}", tr("Pulse"), r.version, tr("is available.")), None, true),
+        Status::Downloading(r, p) => {
+            let p = p.lock().map(|v| *v).unwrap_or(0.0);
+            (format!("{} {}… {:.0}%", tr("Downloading Pulse"), r.version, p * 100.0), Some(p), false)
+        }
+        Status::Installing => (tr("Installing the update. Pulse restarts in a moment.").to_string(), None, false),
+        Status::InstallFailed(_, e) if !app.updater.banner_closed => (e.clone(), None, true),
+        _ => return,
+    };
+    let failed = matches!(app.updater.status, Status::InstallFailed(..));
+    let frame = Frame::new()
+        .fill(pal().surface)
+        .stroke(Stroke::new(1.0, pal().accent.gamma_multiply(0.6)))
+        .corner_radius(r_md())
+        .inner_margin(Margin::symmetric(14, 8))
+        .outer_margin(Margin { left: 28, right: 28, top: 4, bottom: 6 });
+    frame.show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.allocate_ui_with_layout(vec2(ui.available_width(), 30.0), Layout::left_to_right(Align::Center), |ui| {
+            let glyph = if failed { egui_phosphor::regular::WARNING } else { egui_phosphor::regular::ARROW_CIRCLE_UP };
+            ui.label(RichText::new(glyph).size(18.0).color(pal().accent));
+            ui.label(RichText::new(text).font(med(13.5)).color(pal().text));
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if actions {
+                    if icon_button(ui, egui_phosphor::regular::X, 16.0, pal().text_muted, "Not now").clicked() {
+                        app.updater.banner_closed = true;
+                    }
+                    let label = if failed { tr("Try again") } else { tr("Update now") };
+                    if ui.add(egui::Button::new(RichText::new(label).color(Color32::WHITE)).fill(pal().accent).corner_radius(14)).clicked() {
+                        app.start_update(&ctx);
+                    }
+                    let page = match &app.updater.status {
+                        Status::Available(r) | Status::InstallFailed(r, _) => r.page.clone(),
+                        _ => String::new(),
+                    };
+                    if ui.add(egui::Button::new(tr("What's new")).frame_when_inactive(false).corner_radius(14)).clicked() {
+                        ctx.open_url(egui::OpenUrl::new_tab(page));
+                    }
+                } else if let Some(p) = progress {
+                    ui.add(egui::ProgressBar::new(p).desired_width(160.0).desired_height(6.0).fill(pal().accent));
+                } else {
+                    ui.add(egui::Spinner::new().size(16.0).color(pal().accent));
+                }
+            });
+        });
+    });
+}
+
 fn main_scroll(app: &mut App, ui: &mut Ui) {
+    update_banner(app, ui);
     egui::ScrollArea::vertical()
         .id_salt(("page", format!("{:?}", app.route)))
         .auto_shrink(false)
