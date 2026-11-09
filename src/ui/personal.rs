@@ -6,7 +6,7 @@ use crate::app::{App, Page, Place, Route, Visit, now_unix, top_artists};
 use crate::i18n::tr;
 use crate::theme::*;
 use crate::widgets::*;
-use egui::{Align, Align2, Color32, CornerRadius, Layout, Rect, RichText, Sense, Stroke, Ui, Vec2, pos2, vec2};
+use egui::{Align, Color32, CornerRadius, Layout, Rect, RichText, Sense, Stroke, Ui, Vec2, pos2, vec2};
 use egui_phosphor::regular as icon;
 
 /// "Good evening, tacent" by the time of day.
@@ -191,7 +191,7 @@ fn quick_tile(ui: &mut Ui, w: f32, art: Option<&str>, glyph: &str, title: &str, 
     } else {
         ui.painter().rect_filled(art_rect, r, pal().accent);
         vgradient(ui, art_rect, Color32::from_white_alpha(40), Color32::TRANSPARENT);
-        ui.painter().text(art_rect.center(), Align2::CENTER_CENTER, glyph, filled_icon(24.0), Color32::WHITE);
+        paint_icon(ui.painter(), art_rect.center(), glyph, filled_icon(24.0), Color32::WHITE);
     }
     let text_w = w - 56.0 - 64.0;
     paint_line(ui, pos2(art_rect.right() + 12.0, rect.center().y - 9.0), title, semi(13.5), pal().text, text_w);
@@ -203,7 +203,7 @@ fn quick_tile(ui: &mut Ui, w: f32, art: Option<&str>, glyph: &str, title: &str, 
         a11y(ui, &b, egui::WidgetType::Button, || format!("Play {title}"));
         let pb = &parts().play_button;
         ui.painter().circle_filled(c, 17.0, pb.fill.unwrap_or(pal().accent).gamma_multiply(t));
-        ui.painter().text(c + vec2(1.0, 0.0), Align2::CENTER_CENTER, icon::PLAY, filled_icon(14.0), pb.color.unwrap_or(Color32::WHITE).gamma_multiply(t));
+        paint_icon(ui.painter(), c, icon::PLAY, filled_icon(14.0), pb.color.unwrap_or(Color32::WHITE).gamma_multiply(t));
         if b.clicked() {
             out = CardClick::Play;
         }
@@ -246,7 +246,7 @@ pub fn avatar(ui: &Ui, rect: Rect, app: &App) {
             ui.painter().circle_filled(rect.center(), rect.width() / 2.0, pal().accent);
             let letter = p.name.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_else(|| icon::USER.to_string());
             let font = if p.name.is_empty() { regular(rect.width() * 0.5) } else { heavy(rect.width() * 0.45) };
-            ui.painter().text(rect.center(), Align2::CENTER_CENTER, letter, font, Color32::WHITE);
+            paint_icon(ui.painter(), rect.center(), letter, font, Color32::WHITE);
         }
     }
 }
@@ -264,7 +264,7 @@ pub fn profile_page(app: &mut App, ui: &mut Ui) {
     let edit = ui.interact(pic, egui::Id::new("profile_pic"), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
     if edit.hovered() {
         ui.painter().circle_filled(pic.center(), 92.0, Color32::from_black_alpha(140));
-        ui.painter().text(pic.center(), Align2::CENTER_CENTER, icon::PENCIL_SIMPLE, regular(40.0), Color32::WHITE);
+        paint_icon(ui.painter(), pic.center(), icon::PENCIL_SIMPLE, regular(40.0), Color32::WHITE);
     }
     let tx = pic.right() + 28.0;
     let tw = rect.right() - tx - 24.0;
@@ -396,7 +396,7 @@ pub fn profile_dialog(app: &mut App, ctx: &egui::Context) {
             ui.vertical_centered(|ui| {
                 let (r, _) = ui.allocate_exact_size(Vec2::splat(56.0), Sense::hover());
                 ui.painter().rect_filled(r, CornerRadius::same(14), pal().accent);
-                ui.painter().text(r.center(), Align2::CENTER_CENTER, icon::WAVEFORM, filled_icon(30.0), Color32::WHITE);
+                paint_icon(ui.painter(), r.center(), icon::WAVEFORM, filled_icon(30.0), Color32::WHITE);
                 ui.add_space(8.0);
                 ui.label(RichText::new(tr("Welcome to Pulse")).font(heavy(24.0)).color(pal().text));
                 ui.label(RichText::new(tr("Create your profile. It's saved on this computer only: no email or password.")).font(regular(13.0)).color(pal().text_muted));
@@ -413,7 +413,7 @@ pub fn profile_dialog(app: &mut App, ctx: &egui::Context) {
                 Some(p) => artwork(ui, r, Some(&crate::settings::file_uri(p)), CornerRadius::same(48)),
                 None => {
                     ui.painter().circle_filled(r.center(), 48.0, pal().surface_active);
-                    ui.painter().text(r.center(), Align2::CENTER_CENTER, icon::CAMERA, regular(30.0), pal().text_muted);
+                    paint_icon(ui.painter(), r.center(), icon::CAMERA, regular(30.0), pal().text_muted);
                 }
             }
             if resp.hovered() {

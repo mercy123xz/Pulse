@@ -3138,6 +3138,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "skrifa",
  "toml 0.9.12+spec-1.1.0",
  "ureq",
  "winresource",

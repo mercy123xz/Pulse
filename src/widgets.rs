@@ -60,13 +60,7 @@ pub fn artwork(ui: &Ui, rect: Rect, url: Option<&str>, radius: CornerRadius) {
         return;
     }
     ui.painter().rect_filled(rect, radius, pal().surface_active);
-    ui.painter().text(
-        rect.center(),
-        Align2::CENTER_CENTER,
-        icon::MUSIC_NOTES,
-        regular(rect.height() * 0.38),
-        pal().text_faint,
-    );
+    paint_icon(ui.painter(), rect.center(), icon::MUSIC_NOTES, regular(rect.height() * 0.38), pal().text_faint);
     if let Some(url) = url {
         let mut img = egui::Image::new(url).corner_radius(radius).show_loading_spinner(false);
         // YouTube video pictures are wide: show their middle square instead of squashing them.
@@ -103,7 +97,7 @@ fn liked_art(ui: &Ui, rect: Rect, radius: CornerRadius) {
         mesh.add_triangle(0, 1 + i, 1 + (i + 1) % n);
     }
     ui.painter().add(egui::Shape::mesh(mesh));
-    ui.painter().text(rect.center() + vec2(0.0, rect.height() * 0.02), Align2::CENTER_CENTER, icon::HEART, filled_icon(rect.height() * 0.42), Color32::WHITE);
+    paint_icon(ui.painter(), rect.center() + vec2(0.0, rect.height() * 0.02), icon::HEART, filled_icon(rect.height() * 0.42), Color32::WHITE);
 }
 
 /// Vertical gradient (used behind page headers).
@@ -179,7 +173,7 @@ pub fn labeled_button(ui: &mut Ui, glyph: &str, label: &str, active: bool) -> Re
     ui.painter().rect_filled(rect, CornerRadius::same(16), fill);
     let col = if active { pal().accent_soft } else if hovered { pal().text } else { pal().text_muted };
     let text_col = if active || hovered { pal().text } else { pal().text_muted };
-    ui.painter().text(pos2(rect.left() + 20.0, rect.center().y), Align2::CENTER_CENTER, glyph, regular(16.0), col);
+    paint_icon(ui.painter(), pos2(rect.left() + 20.0, rect.center().y), glyph, regular(16.0), col);
     ui.painter().galley(pos2(rect.left() + 34.0, rect.center().y - g.size().y / 2.0), g, text_col);
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
@@ -205,7 +199,7 @@ fn icon_button_impl(ui: &mut Ui, glyph: &str, size: f32, color: Color32, tip: &s
         ui.painter().circle_filled(rect.center(), rect.width() / 2.0, pal().surface_hover);
     }
     let c = if hovered && color == pal().text_muted { pal().text } else { color };
-    ui.painter().text(rect.center(), Align2::CENTER_CENTER, glyph, regular(size), c);
+    paint_icon(ui.painter(), rect.center(), glyph, regular(size), c);
     let resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand);
     if tip.is_empty() { resp } else { resp.on_hover_text(tip) }
 }
@@ -228,14 +222,7 @@ pub fn play_button(ui: &mut Ui, size: f32, playing: bool) -> Response {
         ui.painter().circle_stroke(rect.center(), r, b);
     }
     let glyph = if playing { icon::PAUSE } else { icon::PLAY };
-    let nudge = if playing { 0.0 } else { size * 0.04 };
-    ui.painter().text(
-        rect.center() + vec2(nudge, 0.0),
-        Align2::CENTER_CENTER,
-        glyph,
-        filled_icon(size * 0.42),
-        style.color.unwrap_or(Color32::WHITE),
-    );
+    paint_icon(ui.painter(), rect.center(), glyph, filled_icon(size * 0.42), style.color.unwrap_or(Color32::WHITE));
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
@@ -255,20 +242,28 @@ pub fn pill(ui: &mut Ui, label: &str, selected: bool) -> Response {
         (pal().surface_hover, pal().text)
     };
     ui.painter().rect_filled(rect, CornerRadius::same(15), fill);
-    ui.painter().text(rect.center(), Align2::CENTER_CENTER, label, med(12.5), fg);
+    paint_icon(ui.painter(), rect.center(), label, med(12.5), fg);
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
 /// Outline button with icon + label ("Shuffle", "See all", ...).
 pub fn ghost_button(ui: &mut Ui, glyph: &str, label: &str) -> Response {
     let label = tr(label);
-    let text = if glyph.is_empty() { label.to_owned() } else { format!("{glyph}  {label}") };
-    let g = ui.painter().layout_no_wrap(text.clone(), med(13.0), pal().text);
-    let (rect, resp) = ui.allocate_exact_size(vec2(g.size().x + 28.0, 34.0), Sense::click());
+    let g = ui.painter().layout_no_wrap(label.to_owned(), med(13.0), pal().text);
+    let icon_w = if glyph.is_empty() { 0.0 } else { 22.0 };
+    let (rect, resp) = ui.allocate_exact_size(vec2(g.size().x + icon_w + 28.0, 34.0), Sense::click());
     a11y(ui, &resp, WidgetType::Button, || label.to_owned());
-    let stroke = if resp.hovered() { Stroke::new(1.0, pal().text_muted) } else { Stroke::new(1.0, pal().border) };
-    ui.painter().rect(rect, CornerRadius::same(17), Color32::TRANSPARENT, stroke, egui::StrokeKind::Inside);
-    ui.painter().galley(rect.center() - g.size() / 2.0, g, pal().text);
+    focus_ring(ui, &resp);
+    let hovered = resp.hovered();
+    let stroke = if hovered { Stroke::new(1.0, pal().text_muted) } else { Stroke::new(1.0, pal().border) };
+    let fill = if hovered { pal().surface_hover } else { Color32::TRANSPARENT };
+    ui.painter().rect(rect, CornerRadius::same(17), fill, stroke, egui::StrokeKind::Inside);
+    // The icon is drawn on its own so it's centered by its drawing, like every other icon.
+    let left = rect.left() + 14.0;
+    if !glyph.is_empty() {
+        paint_icon(ui.painter(), pos2(left + 8.0, rect.center().y), glyph, regular(15.0), pal().text);
+    }
+    ui.painter().galley(pos2(left + icon_w, rect.center().y - g.size().y / 2.0), g, pal().text);
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
@@ -422,7 +417,7 @@ pub fn card(ui: &mut Ui, w: f32, info: &CardInfo) -> CardClick {
         ui.painter().circle_filled(c + vec2(0.0, 3.0), 22.0, Color32::from_black_alpha((90.0 * t) as u8));
         let pb = &parts().play_button;
         ui.painter().circle_filled(c, 21.0 * grow, pb.fill.unwrap_or(pal().accent).gamma_multiply(t));
-        ui.painter().text(c + vec2(1.5, 0.0), Align2::CENTER_CENTER, icon::PLAY, filled_icon(17.0), pb.color.unwrap_or(Color32::WHITE).gamma_multiply(t));
+        paint_icon(ui.painter(), c, icon::PLAY, filled_icon(17.0), pb.color.unwrap_or(Color32::WHITE).gamma_multiply(t));
         if b.clicked() {
             out = CardClick::Play;
         }
@@ -506,19 +501,18 @@ pub struct MenuCtx<'a> {
 
 /// The right-click menu for a song. Used by every song list and the player bar.
 pub fn track_menu(ui: &mut Ui, t: &Track, cx: &MenuCtx, ev: &mut Vec<TrackEvent>) {
-    ui.set_min_width(220.0);
+    menu_begin(ui);
     if let Some(i) = cx.index
         && menu_item(ui, icon::PLAY, "Play")
     {
         ev.push(TrackEvent::Play(i));
     }
-    ui.menu_button(format!("{}   {}", icon::PLUS, tr("Add to playlist")), |ui| {
-        ui.set_min_width(180.0);
+    submenu(ui, icon::PLUS, "Add to playlist", |ui| {
         if menu_item(ui, icon::PLUS, "New playlist…") {
             ev.push(TrackEvent::NewPlaylistWith(t.clone()));
         }
         if !cx.playlists.is_empty() {
-            ui.separator();
+            menu_separator(ui);
         }
         for (pi, name) in cx.playlists.iter().enumerate() {
             if menu_item(ui, icon::PLAYLIST, name) {
@@ -538,7 +532,7 @@ pub fn track_menu(ui: &mut Ui, t: &Track, cx: &MenuCtx, ev: &mut Vec<TrackEvent>
             ev.push(TrackEvent::PlayNext(t.clone()));
         }
     }
-    ui.separator();
+    menu_separator(ui);
     if crate::deezer::is_deezer_id(&t.artist.id) && menu_item(ui, icon::USER, "Go to artist") {
         ev.push(TrackEvent::OpenArtist(t.clone()));
     }
@@ -562,9 +556,8 @@ pub fn track_menu(ui: &mut Ui, t: &Track, cx: &MenuCtx, ev: &mut Vec<TrackEvent>
     if menu_item(ui, icon::IDENTIFICATION_CARD, "View credits") {
         ev.push(TrackEvent::ShowCredits(t.clone()));
     }
-    ui.separator();
-    ui.menu_button(format!("{}   {}", icon::SHARE_FAT, tr("Share")), |ui| {
-        ui.set_min_width(200.0);
+    menu_separator(ui);
+    submenu(ui, icon::SHARE_FAT, "Share", |ui| {
         for (glyph, label, target) in [
             (icon::YOUTUBE_LOGO, "Copy YouTube link", ShareTarget::YouTube),
             (icon::SPOTIFY_LOGO, "Copy Spotify link", ShareTarget::Spotify),
@@ -579,7 +572,7 @@ pub fn track_menu(ui: &mut Ui, t: &Track, cx: &MenuCtx, ev: &mut Vec<TrackEvent>
         }
     });
     if cx.removable {
-        ui.separator();
+        menu_separator(ui);
         if menu_item(ui, icon::TRASH, "Remove from this playlist")
             && let Some(i) = cx.index
         {
@@ -587,7 +580,7 @@ pub fn track_menu(ui: &mut Ui, t: &Track, cx: &MenuCtx, ev: &mut Vec<TrackEvent>
         }
     }
     if cx.queue_mode {
-        ui.separator();
+        menu_separator(ui);
         if menu_item(ui, icon::X, "Remove from queue")
             && let Some(i) = cx.index
         {
@@ -696,7 +689,7 @@ pub fn track_table_header(ui: &mut Ui, with_date: bool, with_views: bool) {
     let c = columns(rect, with_date, with_views);
     let f = med(11.5);
     let p = ui.painter();
-    p.text(c.num.center(), Align2::CENTER_CENTER, "#", f.clone(), pal().text_faint);
+    paint_icon(p, c.num.center(), "#", f.clone(), pal().text_faint);
     p.text(c.title.left_center(), Align2::LEFT_CENTER, tr("Title").to_uppercase(), f.clone(), pal().text_faint);
     if let Some(a) = c.album {
         p.text(a.left_center(), Align2::LEFT_CENTER, tr("Album").to_uppercase(), f.clone(), pal().text_faint);
@@ -750,20 +743,19 @@ pub fn track_table(ui: &mut Ui, id_salt: &str, tracks: &[Track], cx: &TableCtx, 
 
 /// The right-click menu for several selected songs at once.
 fn group_menu(ui: &mut Ui, rows: &[usize], tracks: &[Track], cx: &TableCtx, ev: &mut Vec<TrackEvent>) {
-    ui.set_min_width(220.0);
+    menu_begin(ui);
     let picked: Vec<Track> = rows.iter().filter_map(|i| tracks.get(*i).cloned()).collect();
-    ui.label(egui::RichText::new(format!("{} {}", picked.len(), tr("songs selected"))).font(semi(12.0)).color(pal().text_muted));
-    ui.separator();
+    menu_header(ui, &format!("{} {}", picked.len(), tr("songs selected")));
+    menu_separator(ui);
     if menu_item(ui, icon::PLAY, "Play") {
         ev.push(TrackEvent::Play(rows[0]));
     }
-    ui.menu_button(format!("{}   {}", icon::PLUS, tr("Add to playlist")), |ui| {
-        ui.set_min_width(180.0);
+    submenu(ui, icon::PLUS, "Add to playlist", |ui| {
         if menu_item(ui, icon::PLUS, "New playlist…") {
             ev.push(TrackEvent::NewPlaylistWithMany(picked.clone()));
         }
         if !cx.playlists.is_empty() {
-            ui.separator();
+            menu_separator(ui);
         }
         for (pi, name) in cx.playlists.iter().enumerate() {
             if menu_item(ui, icon::PLAYLIST, name) {
@@ -781,7 +773,7 @@ fn group_menu(ui: &mut Ui, rows: &[usize], tracks: &[Track], cx: &TableCtx, ev: 
         ev.extend(picked.iter().map(|t| TrackEvent::Download(t.clone())));
     }
     if cx.removable || cx.queue_mode {
-        ui.separator();
+        menu_separator(ui);
         let label = if cx.queue_mode { "Remove from queue" } else { "Remove from this playlist" };
         if menu_item(ui, icon::TRASH, label) {
             let mut desc = rows.to_vec();
@@ -840,12 +832,12 @@ fn track_row(ui: &mut Ui, id: egui::Id, list: &str, i: usize, t: &Track, tracks:
     // Number / play icon / "now playing" bars
     if hovered {
         let glyph = if is_current && cx.is_playing { icon::PAUSE } else { icon::PLAY };
-        ui.painter().text(c.num.center(), Align2::CENTER_CENTER, glyph, filled_icon(15.0), pal().text);
+        paint_icon(ui.painter(), c.num.center(), glyph, filled_icon(15.0), pal().text);
     } else if is_current && cx.is_playing {
         equalizer(ui, c.num.center());
     } else {
         let col = if is_current { pal().accent_soft } else { pal().text_muted };
-        ui.painter().text(c.num.center(), Align2::CENTER_CENTER, (i + 1 + cx.index_offset).to_string(), med(13.0), col);
+        paint_icon(ui.painter(), c.num.center(), (i + 1 + cx.index_offset).to_string(), med(13.0), col);
     }
 
     // Art + title + artist
@@ -857,14 +849,14 @@ fn track_row(ui: &mut Ui, id: egui::Id, list: &str, i: usize, t: &Track, tracks:
     let title_link = link_text(ui, id.with("title"), pos2(tx, rect.center().y - 17.0), &t.title, med(13.5), title_col, tw);
     let mut artist_x = tx;
     if cx.downloads.contains_key(&t.id) {
-        ui.painter().text(pos2(tx + 7.0, rect.center().y + 11.0), Align2::CENTER_CENTER, icon::ARROW_CIRCLE_DOWN, filled_icon(14.0), pal().accent_soft);
+        paint_icon(ui.painter(), pos2(tx + 7.0, rect.center().y + 11.0), icon::ARROW_CIRCLE_DOWN, filled_icon(14.0), pal().accent_soft);
         artist_x += 19.0;
     }
     if t.explicit {
         // "E" badge for explicit lyrics, like other music apps.
         let badge = Rect::from_min_size(pos2(artist_x, rect.center().y + 4.0), vec2(14.0, 14.0));
         ui.painter().rect_filled(badge, CornerRadius::same(3), pal().text_muted);
-        ui.painter().text(badge.center(), Align2::CENTER_CENTER, "E", semi(9.5), pal().bg);
+        paint_icon(ui.painter(), badge.center(), "E", semi(9.5), pal().bg);
         artist_x += 19.0;
     }
     let (artist, featured_click) = artist_links(ui, id, pos2(artist_x, rect.center().y + 3.0), t, regular(12.5), pal().text_muted, tw - (artist_x - tx));
@@ -903,7 +895,7 @@ fn track_row(ui: &mut Ui, id: egui::Id, list: &str, i: usize, t: &Track, tracks:
         } else {
             (regular(16.0), if heart.hovered() { pal().text } else { pal().text_muted })
         };
-        ui.painter().text(c.like.center(), Align2::CENTER_CENTER, icon::HEART, font, col);
+        paint_icon(ui.painter(), c.like.center(), icon::HEART, font, col);
     }
     ui.painter().text(c.time.right_center(), Align2::RIGHT_CENTER, fmt_duration(t.duration), regular(12.5), pal().text_muted);
 
@@ -977,13 +969,106 @@ pub fn resp_selected(ui: &Ui, resp: &Response, on: bool, label: &str) {
     focus_ring(ui, resp);
 }
 
-pub fn menu_item(ui: &mut Ui, glyph: &str, label: &str) -> bool {
+// ---------------------------------------------------------------------------
+// Menus: rounded rows with a fixed icon column, soft hover, and a quick fade-in.
+// ---------------------------------------------------------------------------
+
+/// Call first inside every menu: tightens the spacing and fades the menu in.
+pub fn menu_begin(ui: &mut Ui) {
+    ui.spacing_mut().item_spacing.y = 1.0;
+    ui.set_min_width(210.0);
+    let id = ui.id().with("menu_fade");
+    let now = ui.input(|i| i.time);
+    let frame = ui.ctx().cumulative_frame_nr();
+    // A menu that wasn't drawn last frame has just opened.
+    let (start, last) = ui.data(|d| d.get_temp::<(f64, u64)>(id)).unwrap_or((now, 0));
+    let start = if last + 1 < frame { now } else { start };
+    ui.data_mut(|d| d.insert_temp(id, (start, frame)));
+    let t = ((now - start) / 0.12).clamp(0.0, 1.0) as f32;
+    if t < 1.0 && !crate::theme::reduce_motion() {
+        ui.multiply_opacity(1.0 - (1.0 - t).powi(3));
+        ui.ctx().request_repaint();
+    }
+}
+
+/// Words that mark an item as destructive (shown in red).
+fn is_danger(label: &str) -> bool {
+    ["Delete", "Remove"].iter().any(|w| label.starts_with(w))
+}
+
+/// One menu row. `trailing` is drawn at the right (a caret for submenus).
+fn menu_row(ui: &mut Ui, glyph: &str, label: &str, trailing: Option<&str>, open: bool) -> Response {
+    let danger = is_danger(label);
     let label = tr(label);
-    let clicked = ui.add(egui::Button::new(format!("{glyph}   {label}")).frame_when_inactive(false)).clicked();
+    let font = med(13.0);
+    let g = one_line(ui, label, font, pal().text, 360.0);
+    let min_w = 44.0 + g.size().x + if trailing.is_some() { 36.0 } else { 18.0 };
+    // In menus (justified), this fills the menu's width.
+    let resp = ui.allocate_response(vec2(min_w, 32.0), Sense::click());
+    let rect = resp.rect;
+    a11y(ui, &resp, WidgetType::Button, || label.to_owned());
+    let hot = resp.hovered() || resp.has_focus() || open;
+    let t = ui.ctx().animate_bool_with_time(resp.id.with("hover"), hot, 0.08);
+    if t > 0.0 {
+        let fill = if danger { Color32::from_rgb(220, 70, 70).gamma_multiply(0.16) } else { pal().surface_hover.lerp_to_gamma(pal().accent, 0.10) };
+        ui.painter().rect_filled(rect, r_sm().at_least(6), fill.gamma_multiply(t));
+    }
+    let base = if danger { Color32::from_rgb(235, 105, 105) } else { pal().text };
+    let icon_col = if danger { base } else if hot { pal().accent_soft } else { pal().text_muted };
+    // Icons sit in a fixed column, centered by their box, so they line up row to row.
+    paint_icon(ui.painter(), pos2(rect.left() + 20.0, rect.center().y), glyph, regular(16.0), icon_col);
+    let text_col = if hot || danger { base } else { pal().text.gamma_multiply(0.92) };
+    ui.painter().galley(pos2(rect.left() + 40.0, rect.center().y - g.size().y / 2.0), g, text_col);
+    if let Some(tr_glyph) = trailing {
+        paint_icon(ui.painter(), pos2(rect.right() - 14.0, rect.center().y), tr_glyph, regular(12.0), pal().text_muted);
+    }
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+pub fn menu_item(ui: &mut Ui, glyph: &str, label: &str) -> bool {
+    let clicked = menu_row(ui, glyph, label, None, false).clicked();
     if clicked {
         ui.close();
     }
     clicked
+}
+
+/// A row that opens a submenu to the right.
+pub fn submenu(ui: &mut Ui, glyph: &str, label: &str, add: impl FnOnce(&mut Ui)) {
+    let id = egui::containers::menu::SubMenu::id_from_widget_id(ui.next_auto_id());
+    let open = egui::Popup::is_id_open(ui.ctx(), id);
+    let resp = menu_row(ui, glyph, label, Some(icon::CARET_RIGHT), open);
+    egui::containers::menu::SubMenu::new().show(ui, &resp, |ui| {
+        menu_begin(ui);
+        add(ui);
+    });
+}
+
+/// A thin divider between groups of menu items.
+pub fn menu_separator(ui: &mut Ui) {
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width().max(1.0), 9.0), Sense::hover());
+    let w = ui.min_rect().width().max(rect.width());
+    let x = ui.min_rect().left();
+    ui.painter().hline(x + 8.0..=x + w - 8.0, rect.center().y, Stroke::new(1.0, pal().border));
+}
+
+/// A small heading at the top of a menu.
+pub fn menu_header(ui: &mut Ui, text: &str) {
+    ui.add_space(2.0);
+    ui.horizontal(|ui| {
+        ui.add_space(10.0);
+        ui.label(egui::RichText::new(tr(text)).font(semi(11.0)).color(pal().text_faint));
+    });
+    ui.add_space(2.0);
+}
+
+/// The "…" button that opens a menu below it.
+pub fn dots_menu(ui: &mut Ui, size: f32, tip: &str, add: impl FnOnce(&mut Ui)) {
+    let resp = icon_button(ui, icon::DOTS_THREE, size, pal().text_muted, tip);
+    egui::Popup::menu(&resp).show(|ui| {
+        menu_begin(ui);
+        add(ui);
+    });
 }
 
 /// Animated "now playing" bars.

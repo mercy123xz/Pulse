@@ -12,6 +12,8 @@ egui = "0.36"
 egui_extras = { version = "0.36", features = ["http", "image", "file"] }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
 egui-phosphor = { version = "0.14", features = ["regular", "fill"] }
+# Already used by egui for fonts: reads icon outlines so they can be centered exactly.
+skrifa = "0.44"
 
 # Audio playback (MP3 decoding via symphonia)
 rodio = { version = "0.23", default-features = false, features = ["playback", "mp3", "mp4", "flac", "wav", "vorbis", "symphonia-alac"] }

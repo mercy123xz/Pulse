@@ -136,6 +136,8 @@ pub struct Settings {
     /// Folder for downloaded songs (None = default).
     pub offline_dir: Option<PathBuf>,
     pub high_contrast: bool,
+    /// Turns off moving backgrounds and fades.
+    pub reduce_motion: bool,
     pub hardware_acceleration: bool,
     /// Theme name and its color scheme.
     pub theme: String,
@@ -160,6 +162,7 @@ impl Default for Settings {
             eq_custom: vec![],
             offline_dir: None,
             high_contrast: false,
+            reduce_motion: false,
             hardware_acceleration: true,
             theme: "Default".into(),
             scheme: String::new(),

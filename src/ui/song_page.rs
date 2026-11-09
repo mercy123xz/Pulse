@@ -79,7 +79,7 @@ fn draw(app: &mut App, ui: &mut Ui, t: &Track, credits: Option<&Credits>, album:
         let (font, col) = if liked { (filled_icon(26.0), pal().accent_soft) } else { (regular(26.0), pal().text_muted) };
         let (r, heart) = ui.allocate_exact_size(Vec2::splat(40.0), Sense::click());
         resp_selected(ui, &heart, liked, "Like");
-        ui.painter().text(r.center(), egui::Align2::CENTER_CENTER, icon::HEART, font, if heart.hovered() && !liked { pal().text } else { col });
+        paint_icon(ui.painter(), r.center(), icon::HEART, font, if heart.hovered() && !liked { pal().text } else { col });
         if heart.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
             app.toggle_like(t, &ctx);
         }
@@ -92,7 +92,7 @@ fn draw(app: &mut App, ui: &mut Ui, t: &Track, credits: Option<&Credits>, album:
             }
         }
         let names = app.playlist_names();
-        ui.menu_button(RichText::new(icon::DOTS_THREE).size(24.0).color(pal().text_muted), |ui| {
+        dots_menu(ui, 24.0, tr("More options"), |ui| {
             let mcx = MenuCtx { liked: app.liked_ids.contains(&t.id), playlists: &names, index: None, removable: false, queue_mode: false, downloaded: app.is_downloaded(&t.id) };
             track_menu(ui, t, &mcx, &mut events);
         });

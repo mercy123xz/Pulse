@@ -507,6 +507,7 @@ impl App {
         let saved: Saved = cc.storage.and_then(|s| eframe::get_value(s, STORAGE_KEY)).unwrap_or_default();
         let themes = crate::themes::list();
         crate::i18n::set_language(saved.settings.language);
+        crate::theme::set_reduce_motion(saved.settings.reduce_motion);
         let (tx, rx) = channel();
         let (views_tx, views_rx) = channel();
         let (prefetch_failed_tx, prefetch_failed_rx) = channel();
@@ -1102,6 +1103,7 @@ impl App {
     pub fn apply_settings(&mut self, before: &crate::settings::Settings, ctx: &egui::Context) {
         let s = self.saved.settings.clone();
         crate::i18n::set_language(s.language);
+        crate::theme::set_reduce_motion(s.reduce_motion);
         if s.high_contrast != before.high_contrast || s.theme != before.theme || s.scheme != before.scheme {
             self.apply_theme(ctx);
         }
