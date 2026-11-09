@@ -3,11 +3,12 @@
 
 mod app;
 mod artcache;
-mod crash;
 mod audio;
-mod backup;
 mod backdrop;
+mod backup;
+mod crash;
 mod deezer;
+mod diag;
 mod downloads;
 mod dsp;
 mod i18n;

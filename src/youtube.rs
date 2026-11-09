@@ -305,6 +305,27 @@ fn run(program: &Path, args: &[String], timeout: Duration) -> Result<String, Str
     }
 }
 
+/// The installed yt-dlp and Deno versions, for Diagnostics.
+pub fn tool_versions() -> (String, String) {
+    use crate::i18n::tr;
+    // While they're being installed or updated, running them could catch a half-written file.
+    let Ok(_guard) = SETUP.try_lock() else {
+        let busy = tr("Being set up or updated right now").to_string();
+        return (busy.clone(), busy);
+    };
+    let tools = installed_tools();
+    let version = |exe: &Path, prefix: &str| {
+        if !exe.is_file() {
+            return tr("Not installed yet (downloaded the first time you play a song)").to_string();
+        }
+        match run(exe, &["--version".into()], Duration::from_secs(30)) {
+            Ok(out) => out.lines().next().unwrap_or("").trim().trim_start_matches(prefix).to_string(),
+            Err(e) => format!("{} ({e})", tr("Installed, but it doesn't start")),
+        }
+    };
+    (version(&tools.ytdlp, ""), version(&tools.deno, "deno "))
+}
+
 /// Turns yt-dlp's error output into something a person can act on.
 fn explain_error(stderr: &str) -> String {
     let last = stderr.lines().rev().find(|l| l.contains("ERROR")).unwrap_or_else(|| stderr.lines().last().unwrap_or(""));

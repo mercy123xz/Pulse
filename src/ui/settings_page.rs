@@ -186,6 +186,14 @@ pub fn settings_page(app: &mut App, ui: &mut Ui) {
 
     your_data_section(app, ui, &ctx);
 
+    // ------------------------------------------------------------ Troubleshooting
+    section(ui, tr("Troubleshooting"));
+    row(ui, tr("Diagnostics"), tr("Versions, storage, a self-test and recent problems, for when something isn't working."), |ui| {
+        if ui.button(tr("Open")).clicked() {
+            app.navigate(crate::app::Route::Diagnostics, &ctx);
+        }
+    });
+
     ui.add_space(30.0);
     ui.label(RichText::new(format!("Pulse {}", env!("CARGO_PKG_VERSION"))).font(regular(12.0)).color(pal().text_faint));
 
@@ -255,7 +263,9 @@ fn your_data_section(app: &mut App, ui: &mut Ui, ctx: &egui::Context) {
     if list.is_empty() {
         ui.label(RichText::new(tr("No backups yet. The first one is made today.")).font(regular(12.5)).color(pal().text_faint));
     }
-    for b in list.iter().take(20) {
+    let all_id = egui::Id::new("backups_show_all");
+    let show_all = ui.data(|d| d.get_temp::<bool>(all_id).unwrap_or(false));
+    for b in list.iter().take(if show_all { usize::MAX } else { 6 }) {
         ui.horizontal(|ui| {
             let kind = match b.kind {
                 crate::backup::Kind::Daily => tr("Daily"),
@@ -273,6 +283,13 @@ fn your_data_section(app: &mut App, ui: &mut Ui, ctx: &egui::Context) {
                 }
             });
         });
+    }
+    if list.len() > 6 {
+        ui.add_space(4.0);
+        let label = if show_all { tr("Show fewer").to_string() } else { format!("{} ({})", tr("Show all"), list.len()) };
+        if ui.add(egui::Button::new(RichText::new(label).font(med(12.5)).color(pal().text_muted)).frame_when_inactive(false)).clicked() {
+            ui.data_mut(|d| d.insert_temp(all_id, !show_all));
+        }
     }
 }
 

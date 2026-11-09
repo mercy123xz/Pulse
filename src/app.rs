@@ -35,6 +35,8 @@ pub enum Route {
     Profile,
     /// The playing song's lyrics.
     Lyrics,
+    /// Versions, storage and a self-test, for when something isn't working.
+    Diagnostics,
 }
 
 /// A song's lyrics, as far as we know.
@@ -552,6 +554,8 @@ pub struct App {
     backups_stale: bool,
     /// Save at the end of this frame instead of waiting for the next autosave.
     save_now: bool,
+    /// The Diagnostics page's facts and self-test.
+    pub diag: crate::diag::Diagnostics,
     pub pending_restore: Option<(String, Box<Saved>)>,
     /// Lyrics looked up this session, by song id.
     pub lyrics: HashMap<String, LyricsState>,
@@ -679,6 +683,7 @@ impl App {
             backups_rx: None,
             backups_stale: false,
             save_now: false,
+            diag: Default::default(),
             pending_restore: None,
             lyrics: HashMap::new(),
             lyrics_tx,
@@ -858,7 +863,7 @@ impl App {
             Route::Mix(id) => format!("mix:{id}"),
             Route::Song(id) if deezer::is_deezer_id(id.trim_start_matches("dz:")) => format!("song:{id}"),
             Route::Song(_) => return None,
-            Route::Liked | Route::Recent | Route::Queue | Route::Local(_) | Route::LocalFiles | Route::Settings | Route::Profile | Route::Lyrics => return None,
+            Route::Liked | Route::Recent | Route::Queue | Route::Local(_) | Route::LocalFiles | Route::Settings | Route::Profile | Route::Lyrics | Route::Diagnostics => return None,
         })
     }
 
@@ -2434,6 +2439,9 @@ impl App {
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        if self.diag.gpu.is_none() {
+            self.diag.gpu = Some(crate::diag::gpu(frame));
+        }
         // Developer check: PULSE_DEBUG_REPAINT=1 prints what asked for each redraw.
         static DEBUG_REPAINT: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
         if *DEBUG_REPAINT.get_or_init(|| std::env::var_os("PULSE_DEBUG_REPAINT").is_some()) {

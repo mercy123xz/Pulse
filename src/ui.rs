@@ -7,6 +7,7 @@ use crate::theme::*;
 use crate::widgets::*;
 use crate::i18n::tr;
 
+mod diag_page;
 mod lyrics_page;
 pub mod mini;
 mod personal;
@@ -695,6 +696,7 @@ fn page(app: &mut App, ui: &mut Ui) {
         Route::Album(_) => album_page(app, ui),
         Route::Artist(_) => artist(app, ui),
         Route::Settings => settings_page::settings_page(app, ui),
+        Route::Diagnostics => diag_page::diagnostics_page(app, ui),
         Route::Mix(id) => personal::mix_page(app, ui, &id),
         Route::Song(id) => song_page::song_page(app, ui, &id),
         Route::Profile => personal::profile_page(app, ui),
