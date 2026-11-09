@@ -72,6 +72,17 @@ impl Mode {
 /// Bits of the extras switched off right now.
 static OFF: AtomicU8 = AtomicU8::new(0);
 static MODE: AtomicU8 = AtomicU8::new(0);
+/// Pulse is drawn without the graphics card (hardware acceleration off, or no graphics
+/// driver). Every frame then costs the CPU, so animations and the moving background stay off.
+static SOFTWARE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn set_software(on: bool) {
+    SOFTWARE.store(on, Ordering::Relaxed);
+}
+
+pub fn software() -> bool {
+    SOFTWARE.load(Ordering::Relaxed)
+}
 
 /// Puts a mode into effect. `keep` holds the extras you asked to keep on.
 pub fn apply(mode: Mode, keep: &[String]) {
@@ -97,6 +108,9 @@ pub fn key(e: Extra) -> &'static str {
 }
 
 pub fn on(e: Extra) -> bool {
+    if e == Extra::Animations && software() {
+        return false;
+    }
     OFF.load(Ordering::Relaxed) & e.bit() == 0
 }
 
@@ -133,5 +147,14 @@ mod tests {
         apply(Mode::UltraLow, &[]);
         assert_eq!(switched_off().len(), Extra::ALL.len());
         apply(Mode::Normal, &[]);
+    }
+
+    #[test]
+    fn software_drawing_stops_animations() {
+        apply(Mode::Normal, &[]);
+        set_software(true);
+        assert!(!on(Extra::Animations) && on(Extra::ListArtwork));
+        set_software(false);
+        assert!(on(Extra::Animations));
     }
 }

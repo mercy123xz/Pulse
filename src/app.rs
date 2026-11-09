@@ -2509,6 +2509,7 @@ impl eframe::App for App {
         let ctx = ui.ctx().clone();
         if self.diag.gpu.is_none() {
             self.diag.gpu = Some(crate::diag::gpu(frame));
+            crate::perf::set_software(crate::diag::software(frame));
         }
         self.updates(&ctx);
         self.discord_status(&ctx);

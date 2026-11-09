@@ -197,6 +197,16 @@ fn os_name() -> String {
     format!("{}, {}", std::env::consts::OS, std::env::consts::ARCH)
 }
 
+/// True when the window is drawn without the graphics card.
+pub fn software(frame: &eframe::Frame) -> bool {
+    #[cfg(windows)]
+    if let Some(rs) = frame.wgpu_render_state() {
+        return rs.adapter.get_info().device_type == eframe::egui_wgpu::wgpu::DeviceType::Cpu;
+    }
+    let _ = frame;
+    false
+}
+
 /// The graphics adapter drawing the window, and how.
 pub fn gpu(frame: &eframe::Frame) -> String {
     #[cfg(windows)]

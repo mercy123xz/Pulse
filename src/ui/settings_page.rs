@@ -180,7 +180,7 @@ pub fn settings_page(app: &mut App, ui: &mut Ui) {
     row(ui, tr("Reduce motion"), tr("Turns off moving backgrounds and menu fades."), |ui| {
         switch(ui, &mut s.reduce_motion, tr("Reduce motion"));
     });
-    row(ui, tr("Enable hardware acceleration"), tr("Uses your graphics card to draw Pulse. Turn off if the window flickers or stays blank. Restart Pulse to apply."), |ui| {
+    row(ui, tr("Enable hardware acceleration"), tr("Uses your graphics card to draw Pulse. Leave it on: without it Pulse is slower and some effects are off. Turn off only if the window flickers or stays blank. Restart Pulse to apply."), |ui| {
         switch(ui, &mut s.hardware_acceleration, tr("Enable hardware acceleration"));
     });
 

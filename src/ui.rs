@@ -99,7 +99,7 @@ fn loading_text(msg: &str) -> String {
 
 /// The song-colored glows behind the main area, for themes that ask for them.
 fn paint_backdrop(app: &mut App, ui: &Ui, rect: Rect, radius: CornerRadius, outside: Option<Color32>) {
-    if !layout().backdrop || !crate::perf::on(crate::perf::Extra::ListArtwork) {
+    if !layout().backdrop || !crate::perf::on(crate::perf::Extra::ListArtwork) || crate::perf::software() {
         return;
     }
     let cover = app.current.as_ref().and_then(|t| t.art_small()).map(str::to_owned);
