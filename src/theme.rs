@@ -2,10 +2,12 @@
 
 use egui::{Color32, CornerRadius, FontData, FontDefinitions, FontFamily, FontId, Stroke, Visuals};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicPtr, Ordering};
+
 
 /// All UI colors. Every text color meets WCAG AA (4.5:1) on the backgrounds it is drawn on,
 /// and white on `accent` is 5.7:1.
+#[derive(Debug, Clone, PartialEq)]
 pub struct Palette {
     pub bg: Color32,
     pub sidebar: Color32,
@@ -19,6 +21,8 @@ pub struct Palette {
     pub accent: Color32,
     /// Accent used for text and icons (lighter in dark mode, darker in light mode).
     pub accent_soft: Color32,
+    /// Background of the player bar.
+    pub player: Color32,
 }
 
 const fn rgb(r: u8, g: u8, b: u8) -> Color32 {
@@ -37,6 +41,7 @@ pub const DARK: Palette = Palette {
     text_faint: rgb(128, 128, 142),
     accent: rgb(124, 58, 237),
     accent_soft: rgb(167, 139, 250),
+    player: rgb(15, 15, 19),
 };
 
 pub const LIGHT: Palette = Palette {
@@ -51,22 +56,188 @@ pub const LIGHT: Palette = Palette {
     text_faint: rgb(100, 100, 114),
     accent: rgb(124, 58, 237),
     accent_soft: rgb(109, 40, 217),
+    player: rgb(243, 243, 247),
 };
 
 /// Text drawn on the always-dark banners (home greeting, page headers).
 pub const ON_DARK: Color32 = rgb(245, 245, 250);
 pub const ON_DARK_MUTED: Color32 = rgb(205, 205, 218);
 
-static LIGHT_MODE: AtomicBool = AtomicBool::new(false);
+/// High-contrast version of the dark palette: black background, white text,
+/// bright accent and visible borders.
+pub const HIGH_CONTRAST: Palette = Palette {
+    bg: rgb(0, 0, 0),
+    sidebar: rgb(0, 0, 0),
+    surface: rgb(10, 10, 10),
+    surface_hover: rgb(38, 38, 38),
+    surface_active: rgb(56, 56, 56),
+    border: rgb(160, 160, 160),
+    text: rgb(255, 255, 255),
+    text_muted: rgb(220, 220, 220),
+    text_faint: rgb(200, 200, 200),
+    accent: rgb(110, 40, 230),
+    accent_soft: rgb(255, 214, 10),
+    player: rgb(0, 0, 0),
+};
+
+/// High-contrast version of the light palette.
+pub const HIGH_CONTRAST_LIGHT: Palette = Palette {
+    bg: rgb(255, 255, 255),
+    sidebar: rgb(255, 255, 255),
+    surface: rgb(255, 255, 255),
+    surface_hover: rgb(225, 225, 225),
+    surface_active: rgb(205, 205, 205),
+    border: rgb(60, 60, 60),
+    text: rgb(0, 0, 0),
+    text_muted: rgb(30, 30, 30),
+    text_faint: rgb(50, 50, 50),
+    accent: rgb(90, 20, 200),
+    accent_soft: rgb(75, 0, 170),
+    player: rgb(255, 255, 255),
+};
+
+/// The look of one named part of the screen, from a theme's user.css.
+/// `None` means "use Pulse's normal look".
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct PartStyle {
+    pub fill: Option<Color32>,
+    pub border: Option<Stroke>,
+    pub radius: Option<u8>,
+    pub padding: Option<f32>,
+    pub font_size: Option<f32>,
+    pub bold: Option<bool>,
+    pub uppercase: Option<bool>,
+    pub color: Option<Color32>,
+}
+
+impl PartStyle {
+    pub const NONE: PartStyle = PartStyle { fill: None, border: None, radius: None, padding: None, font_size: None, bold: None, uppercase: None, color: None };
+}
+
+/// The styleable parts. Each matches the function that draws it.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct Parts {
+    pub sidebar: PartStyle,
+    pub header: PartStyle,
+    pub hero: PartStyle,
+    pub player_bar: PartStyle,
+    pub card: PartStyle,
+    pub track_row: PartStyle,
+    pub play_button: PartStyle,
+}
+
+impl Parts {
+    pub const NONE: Parts = Parts {
+        sidebar: PartStyle::NONE,
+        header: PartStyle::NONE,
+        hero: PartStyle::NONE,
+        player_bar: PartStyle::NONE,
+        card: PartStyle::NONE,
+        track_row: PartStyle::NONE,
+        play_button: PartStyle::NONE,
+    };
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SidebarStyle {
+    #[default]
+    Full,
+    Icons,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum HeroStyle {
+    #[default]
+    Banner,
+    FullBleed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PlayerStyle {
+    #[default]
+    Centered,
+    ControlsLeft,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum NowPlayingArt {
+    #[default]
+    Bar,
+    SidebarLarge,
+}
+
+/// Layout choices a theme makes in theme.toml.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct LayoutOpts {
+    pub sidebar: SidebarStyle,
+    pub hero: HeroStyle,
+    pub player: PlayerStyle,
+    pub now_playing_art: NowPlayingArt,
+    /// Main area drawn as a rounded panel set in from the window edges.
+    pub inset: bool,
+}
+
+impl LayoutOpts {
+    pub const DEFAULT: LayoutOpts = LayoutOpts {
+        sidebar: SidebarStyle::Full,
+        hero: HeroStyle::Banner,
+        player: PlayerStyle::Centered,
+        now_playing_art: NowPlayingArt::Bar,
+        inset: false,
+    };
+}
+
+/// Everything the drawing code reads from the current theme.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Active {
+    pub palette: Palette,
+    pub parts: Parts,
+    pub layout: LayoutOpts,
+    /// Small, medium and large corner radius.
+    pub radius: [u8; 3],
+}
+
+static DEFAULT_ACTIVE: Active = Active { palette: DARK, parts: Parts::NONE, layout: LayoutOpts::DEFAULT, radius: [6, 8, 12] };
+
+/// The theme in use. Swapped whole when the theme changes; each switch keeps the
+/// old one alive (about a kilobyte), so reads never need a lock.
+static ACTIVE: AtomicPtr<Active> = AtomicPtr::new(&DEFAULT_ACTIVE as *const Active as *mut Active);
+
+pub fn active() -> &'static Active {
+    // SAFETY: ACTIVE only ever holds pointers to `'static` values (a static or leaked boxes).
+    unsafe { &*ACTIVE.load(Ordering::Relaxed) }
+}
 
 /// The active palette.
 pub fn pal() -> &'static Palette {
-    if LIGHT_MODE.load(Ordering::Relaxed) { &LIGHT } else { &DARK }
+    &active().palette
 }
 
-pub const R_SM: CornerRadius = CornerRadius::same(6);
-pub const R_MD: CornerRadius = CornerRadius::same(8);
-pub const R_LG: CornerRadius = CornerRadius::same(12);
+/// The active theme's styled parts.
+pub fn parts() -> &'static Parts {
+    &active().parts
+}
+
+/// The active theme's layout choices.
+pub fn layout() -> &'static LayoutOpts {
+    &active().layout
+}
+
+pub fn r_sm() -> CornerRadius {
+    CornerRadius::same(active().radius[0])
+}
+pub fn r_md() -> CornerRadius {
+    CornerRadius::same(active().radius[1])
+}
+pub fn r_lg() -> CornerRadius {
+    CornerRadius::same(active().radius[2])
+}
+
+fn is_light(p: &Palette) -> bool {
+    let c = p.bg;
+    (c.r() as u32 + c.g() as u32 + c.b() as u32) > 384
+}
+
 
 pub fn medium() -> FontFamily {
     FontFamily::Name("medium".into())
@@ -144,10 +315,14 @@ pub fn install(ctx: &egui::Context) {
     });
 }
 
-/// Switches between the dark and light palette and restyles egui's built-in widgets.
-pub fn set_light(ctx: &egui::Context, light: bool) {
-    LIGHT_MODE.store(light, Ordering::Relaxed);
+/// Makes `a` the active theme and restyles egui's built-in widgets to match.
+pub fn set_active(ctx: &egui::Context, a: Active) {
+    if *active() == a {
+        return;
+    }
+    ACTIVE.store(Box::into_raw(Box::new(a)), Ordering::Relaxed);
     let p = pal();
+    let light = is_light(p);
     let mut v = if light { Visuals::light() } else { Visuals::dark() };
     v.panel_fill = p.bg;
     v.window_fill = p.surface;
@@ -158,8 +333,8 @@ pub fn set_light(ctx: &egui::Context, light: bool) {
     v.selection.bg_fill = p.accent.gamma_multiply(0.45);
     v.selection.stroke = Stroke::new(1.0, p.accent_soft);
     v.window_stroke = Stroke::new(1.0, p.border);
-    v.window_corner_radius = R_LG;
-    v.menu_corner_radius = R_MD;
+    v.window_corner_radius = r_lg();
+    v.menu_corner_radius = r_md();
     let shadow_a = if light { 40 } else { 140 };
     v.popup_shadow = egui::Shadow { offset: [0, 8], blur: 24, spread: 0, color: Color32::from_black_alpha(shadow_a) };
     v.window_shadow = v.popup_shadow;
@@ -176,7 +351,7 @@ pub fn set_light(ctx: &egui::Context, light: bool) {
     ] {
         state.bg_fill = fill;
         state.weak_bg_fill = fill;
-        state.corner_radius = R_SM;
+        state.corner_radius = r_sm();
         state.bg_stroke = Stroke::NONE;
         state.expansion = 0.0;
     }
@@ -189,43 +364,55 @@ pub fn set_light(ctx: &egui::Context, light: bool) {
     ctx.set_visuals_of(egui::Theme::Light, v);
 }
 
+/// WCAG relative luminance of an sRGB color.
+fn luminance(c: Color32) -> f64 {
+    let ch = |v: u8| {
+        let v = v as f64 / 255.0;
+        if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
+    };
+    0.2126 * ch(c.r()) + 0.7152 * ch(c.g()) + 0.0722 * ch(c.b())
+}
+
+/// WCAG contrast ratio between two colors (1 to 21).
+pub fn contrast(a: Color32, b: Color32) -> f64 {
+    let (la, lb) = (luminance(a), luminance(b));
+    (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
+}
+
+/// Text that would be hard to read with this palette (WCAG AA needs 4.5:1).
+pub fn readability_problems(p: &Palette) -> Vec<String> {
+    let mut checks = vec![];
+    for (bg_name, bg) in [("background", p.bg), ("sidebar", p.sidebar), ("cards", p.surface), ("hovered rows", p.surface_hover), ("selected rows", p.surface_active)] {
+        checks.push(("text", p.text, bg_name, bg));
+        checks.push(("secondary text", p.text_muted, bg_name, bg));
+    }
+    for (bg_name, bg) in [("background", p.bg), ("sidebar", p.sidebar), ("cards", p.surface), ("player bar", p.player)] {
+        checks.push(("faint text", p.text_faint, bg_name, bg));
+        checks.push(("accent text", p.accent_soft, bg_name, bg));
+    }
+    checks.push(("text", p.text, "player bar", p.player));
+    checks.push(("white text", Color32::WHITE, "accent", p.accent));
+    checks
+        .into_iter()
+        .filter_map(|(what, fg, on, bg)| {
+            let r = contrast(fg, bg);
+            (r < 4.5).then(|| format!("{what} on {on} is {r:.1}:1 (needs 4.5:1)"))
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// WCAG relative luminance of an sRGB color.
-    fn luminance(c: Color32) -> f64 {
-        let ch = |v: u8| {
-            let v = v as f64 / 255.0;
-            if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
-        };
-        0.2126 * ch(c.r()) + 0.7152 * ch(c.g()) + 0.0722 * ch(c.b())
-    }
 
-    fn contrast(a: Color32, b: Color32) -> f64 {
-        let (la, lb) = (luminance(a), luminance(b));
-        (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
-    }
 
     /// Every text color must stay readable (WCAG AA, 4.5:1) on the backgrounds it is drawn on.
     #[test]
     fn text_colors_meet_wcag_aa() {
-        for (name, p) in [("DARK", &DARK), ("LIGHT", &LIGHT)] {
-            let mut checks = vec![];
-            // Body text on every surface, including hovered / selected rows.
-            for bg in [p.bg, p.sidebar, p.surface, p.surface_hover, p.surface_active] {
-                checks.push(("text", p.text, bg));
-                checks.push(("text_muted", p.text_muted, bg));
-            }
-            // Faint text is only used on plain backgrounds (incl. the search box).
-            for bg in [p.bg, p.sidebar, p.surface] {
-                checks.push(("text_faint", p.text_faint, bg));
-            }
-            checks.push(("white on accent", Color32::WHITE, p.accent));
-            for (what, fg, bg) in checks {
-                let ratio = contrast(fg, bg);
-                assert!(ratio >= 4.5, "{name}: {what} on {bg:?} is {ratio:.2}:1, needs 4.5:1");
-            }
+        for (name, p) in [("DARK", &DARK), ("LIGHT", &LIGHT), ("HIGH_CONTRAST", &HIGH_CONTRAST), ("HIGH_CONTRAST_LIGHT", &HIGH_CONTRAST_LIGHT)] {
+            let problems = readability_problems(p);
+            assert!(problems.is_empty(), "{name}: {problems:?}");
         }
     }
 }

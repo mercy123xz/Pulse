@@ -59,7 +59,11 @@ pub struct Track {
 }
 
 impl Track {
-    #[cfg(test)]
+    /// Deezer's number for this song, if it came from Deezer.
+    pub fn deezer_number(&self) -> Option<u64> {
+        self.deezer_id()
+    }
+
     pub fn deezer_id(&self) -> Option<u64> {
         self.id.strip_prefix("dz:").and_then(|s| s.parse().ok())
     }
@@ -384,18 +388,34 @@ fn get<T: for<'de> Deserialize<'de>>(path: &str, query: &[(&str, &str)]) -> Resu
         let text = std::fs::read_to_string(&file).map_err(|e| format!("{file}: {e}"))?;
         return parse(&text);
     }
-    let mut req = crate::net::api().get(format!("{BASE}{path}"));
-    for (k, v) in query {
-        req = req.query(*k, *v);
+    // Deezer allows 50 requests per 5 seconds. When it says it's busy, wait and try again
+    // (otherwise a busy moment looks like "song not found").
+    let mut wait = 700;
+    for attempt in 0..4 {
+        let mut req = crate::net::api().get(format!("{BASE}{path}"));
+        for (k, v) in query {
+            req = req.query(*k, *v);
+        }
+        let mut resp = req.call().map_err(crate::net::friendly_error)?;
+        let text = resp
+            .body_mut()
+            .with_config()
+            .limit(20 * 1024 * 1024)
+            .read_to_string()
+            .map_err(|e| format!("Couldn't read Deezer's reply ({e})"))?;
+        if attempt < 3 && is_busy_reply(&text) {
+            std::thread::sleep(std::time::Duration::from_millis(wait));
+            wait *= 2;
+            continue;
+        }
+        return parse(&text);
     }
-    let mut resp = req.call().map_err(crate::net::friendly_error)?;
-    let text = resp
-        .body_mut()
-        .with_config()
-        .limit(20 * 1024 * 1024)
-        .read_to_string()
-        .map_err(|e| format!("Couldn't read Deezer's reply ({e})"))?;
-    parse(&text)
+    unreachable!()
+}
+
+/// Deezer's "too many requests" reply (error code 4).
+fn is_busy_reply(text: &str) -> bool {
+    serde_json::from_str::<DzError>(text).is_ok_and(|e| e.error.code == 4)
 }
 
 fn tracks(list: List<DzTrack>) -> Vec<Track> {
@@ -416,6 +436,38 @@ pub fn chart() -> Result<Chart, String> {
 /// Top 100 songs, overall (genre 0) or in a genre.
 pub fn chart_tracks(genre: u32) -> Result<Vec<Track>, String> {
     get::<List<DzTrack>>(&format!("/chart/{genre}/tracks"), &[("limit", "100")]).map(tracks)
+}
+
+/// Finds the Deezer song that is `title` by `artist` (for imported playlists).
+/// `duration` (seconds, 0 if unknown) helps pick the right version.
+pub fn find_track(artist: &str, title: &str, duration: u32) -> Result<Option<Track>, String> {
+    use crate::youtube::{core_title, norm};
+    let want_title = norm(&core_title(title));
+    let want_artist = norm(artist);
+    let pick = |list: Vec<DzTrack>| -> Option<Track> {
+        list.into_iter()
+            .map(|t| track(t, None))
+            .filter(|t| {
+                let got_title = norm(&core_title(&t.title));
+                let title_ok = !want_title.is_empty() && (got_title == want_title || got_title.contains(&want_title) || want_title.contains(&got_title));
+                let artist_ok = want_artist.is_empty() || {
+                    let a = norm(&t.artist.name);
+                    !a.is_empty() && (want_artist.contains(&a) || a.contains(&want_artist))
+                };
+                let length_ok = duration == 0 || t.duration == 0 || t.duration.abs_diff(duration) <= 8;
+                title_ok && artist_ok && length_ok
+            })
+            .min_by_key(|t| if duration == 0 { 0 } else { t.duration.abs_diff(duration) })
+    };
+    // Deezer's precise search first, then a plain one.
+    let precise = format!("artist:\"{}\" track:\"{}\"", artist.replace('"', ""), core_title(title).replace('"', ""));
+    let first: List<DzTrack> = get("/search/track", &[("q", &precise), ("limit", "10")])?;
+    if let Some(t) = pick(first.data) {
+        return Ok(Some(t));
+    }
+    let plain = format!("{artist} {}", core_title(title));
+    let second: List<DzTrack> = get("/search/track", &[("q", &plain), ("limit", "10")])?;
+    Ok(pick(second.data))
 }
 
 pub fn search(q: &str) -> Result<SearchResults, String> {
@@ -452,6 +504,120 @@ pub fn sort_newest_first(releases: &mut [AlbumInfo]) {
     releases.sort_by(|a, b| b.release_date.cmp(&a.release_date));
 }
 
+/// Who made a song, from Deezer.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Credits {
+    /// (name, role) — role is e.g. "Main artist" or "Featured".
+    pub people: Vec<(String, String)>,
+    pub album: Option<String>,
+    pub label: Option<String>,
+    pub release_date: Option<String>,
+    pub genres: Vec<String>,
+    pub isrc: Option<String>,
+    pub bpm: Option<f32>,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct DzContributor {
+    name: String,
+    role: String,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct DzTrackCredits {
+    contributors: Vec<DzContributor>,
+    isrc: Option<String>,
+    bpm: Option<f32>,
+    release_date: Option<String>,
+    album: Option<DzAlbum>,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct DzGenre {
+    name: String,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct DzGenres {
+    data: Vec<DzGenre>,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct DzAlbumLabel {
+    label: Option<String>,
+    genres: DzGenres,
+}
+
+/// One song by its Deezer number.
+pub fn track_by_id(id: u64) -> Result<Track, String> {
+    get::<DzTrack>(&format!("/track/{id}"), &[]).map(|t| track(t, None))
+}
+
+/// An artist's most popular songs.
+pub fn artist_top(artist_id: &str, limit: usize) -> Result<Vec<Track>, String> {
+    let top: List<DzTrack> = get(&format!("/artist/{artist_id}/top"), &[("limit", &limit.to_string())])?;
+    Ok(tracks(top))
+}
+
+/// Everything on a song's page.
+#[derive(Debug, Clone)]
+pub struct SongPage {
+    pub track: Track,
+    pub credits: Credits,
+    pub album: Option<(AlbumInfo, Vec<Track>)>,
+    pub artist_top: Vec<Track>,
+}
+
+pub fn song_page(id: u64) -> Result<SongPage, String> {
+    let track = track_by_id(id)?;
+    let credits = credits(id).unwrap_or_default();
+    let album = track.album.as_ref().filter(|a| is_deezer_id(&a.id)).and_then(|a| album(&a.id).ok());
+    let artist_top = if is_deezer_id(&track.artist.id) { artist_top(&track.artist.id, 6).unwrap_or_default() } else { vec![] };
+    Ok(SongPage { track, credits, album, artist_top })
+}
+
+/// An album's genres.
+pub fn album_genres(id: &str) -> Result<Vec<String>, String> {
+    let a: DzAlbumLabel = get(&format!("/album/{id}"), &[])?;
+    Ok(a.genres.data.into_iter().map(|g| g.name).filter(|g| !g.is_empty()).collect())
+}
+
+/// Song credits: artists and their roles, label, release date, genres.
+pub fn credits(track_id: u64) -> Result<Credits, String> {
+    let t: DzTrackCredits = get(&format!("/track/{track_id}"), &[])?;
+    let mut c = Credits {
+        people: t
+            .contributors
+            .into_iter()
+            .map(|p| {
+                let role = match p.role.as_str() {
+                    "Main" | "" => "Main artist".to_string(),
+                    other => other.to_string(),
+                };
+                (p.name, role)
+            })
+            .collect(),
+        isrc: t.isrc.filter(|s| !s.is_empty()),
+        bpm: t.bpm.filter(|b| *b > 0.0),
+        release_date: t.release_date.filter(|s| !s.is_empty() && s != "0000-00-00"),
+        ..Default::default()
+    };
+    if let Some(al) = t.album {
+        c.album = Some(al.title.clone()).filter(|s| !s.is_empty());
+        // The label and genres live on the album; credits still show without them.
+        if let Ok(a) = get::<DzAlbumLabel>(&format!("/album/{}", al.id), &[]) {
+            c.label = a.label.filter(|s| !s.is_empty());
+            c.genres = a.genres.data.into_iter().map(|g| g.name).collect();
+        }
+    }
+    Ok(c)
+}
+
 pub fn album(id: &str) -> Result<(AlbumInfo, Vec<Track>), String> {
     let full: DzAlbumFull = get(&format!("/album/{id}"), &[])?;
     let list = full.tracks.unwrap_or_default();
@@ -469,6 +635,35 @@ pub fn playlist(id: &str) -> Result<(PlaylistInfo, Vec<Track>), String> {
 
 /// Songs similar to `t`, for autoplay: the artist's radio, or a search by name
 /// for songs saved by older versions of Pulse.
+/// A Daily Mix: songs like an artist's (their radio) mixed with their own hits,
+/// shuffled the same way all day so the mix stays put until tomorrow.
+pub fn mix(artist_id: &str) -> Result<Vec<Track>, String> {
+    let radio: List<DzTrack> = get(&format!("/artist/{artist_id}/radio"), &[("limit", "40")]).unwrap_or_default();
+    let top: List<DzTrack> = get(&format!("/artist/{artist_id}/top"), &[("limit", "10")])?;
+    let (radio, top) = (tracks(radio), tracks(top));
+    let mut out: Vec<Track> = vec![];
+    let mut top = top.into_iter();
+    for (i, t) in radio.into_iter().enumerate() {
+        if i % 4 == 0
+            && let Some(h) = top.next()
+        {
+            out.push(h);
+        }
+        out.push(t);
+    }
+    out.extend(top);
+    let mut seen = std::collections::HashSet::new();
+    out.retain(|t| seen.insert(t.id.clone()));
+    // Shuffle with today's date as the seed.
+    let day = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() / 86_400).unwrap_or(0);
+    let mut seed = day ^ artist_id.bytes().fold(0u64, |h, b| h.wrapping_mul(31).wrapping_add(b as u64));
+    for i in (1..out.len()).rev() {
+        seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        out.swap(i, (seed >> 33) as usize % (i + 1));
+    }
+    Ok(out)
+}
+
 pub fn similar_to(t: &Track) -> Result<Vec<Track>, String> {
     let artist_id = if t.has_artist_page() {
         t.artist.id.clone()

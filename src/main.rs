@@ -4,8 +4,17 @@
 mod app;
 mod audio;
 mod deezer;
+mod downloads;
+mod dsp;
+mod i18n;
+mod import;
+mod itunes;
+mod local;
 mod net;
+mod settings;
+mod share;
 mod theme;
+mod themes;
 mod ui;
 mod widgets;
 mod youtube;
@@ -38,40 +47,28 @@ fn use_directx(options: &mut eframe::NativeOptions) {
     setup.power_preference = wgpu::PowerPreference::LowPower;
     // The shader compiler built into Windows, so no extra DLL has to ship with the .exe.
     setup.instance_descriptor.backend_options.dx12.shader_compiler = wgpu::Dx12Compiler::Fxc;
+    if !crate::settings::hardware_acceleration_enabled() {
+        // "Hardware acceleration" off: draw with Windows' built-in software renderer (WARP).
+        setup.native_adapter_selector = Some(std::sync::Arc::new(|adapters: &[wgpu::Adapter], _surface: Option<&wgpu::Surface<'_>>| {
+            adapters
+                .iter()
+                .find(|a| a.get_info().device_type == wgpu::DeviceType::Cpu)
+                .or_else(|| adapters.first())
+                .cloned()
+                .ok_or_else(|| "No graphics adapter found".to_string())
+        }));
+    }
     options.wgpu_options.wgpu_setup = WgpuSetup::CreateNew(setup);
 }
 
-/// Draws the window icon in code: a violet rounded square with sound bars.
+/// The window and taskbar icon: the same picture as the .exe icon.
 fn app_icon() -> egui::IconData {
-    let n = 64usize;
-    let mut rgba = vec![0u8; n * n * 4];
-    let bars = [(14.0, 0.35), (24.0, 0.7), (34.0, 0.95), (44.0, 0.55), (54.0 - 4.0, 0.3)];
-    for y in 0..n {
-        for x in 0..n {
-            let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
-            // rounded square mask
-            let r = 14.0;
-            let cx = fx.clamp(r, n as f32 - r);
-            let cy = fy.clamp(r, n as f32 - r);
-            let inside = (fx - cx).powi(2) + (fy - cy).powi(2) <= r * r;
-            if !inside {
-                continue;
-            }
-            let t = fy / n as f32;
-            let mut c = [
-                (167.0 * (1.0 - t) + 124.0 * t) as u8,
-                (139.0 * (1.0 - t) + 58.0 * t) as u8,
-                (250.0 * (1.0 - t) + 237.0 * t) as u8,
-            ];
-            for (bx, h) in bars {
-                let half = h * 20.0;
-                if (fx - bx).abs() < 3.0 && (fy - 32.0).abs() < half {
-                    c = [255, 255, 255];
-                }
-            }
-            let i = (y * n + x) * 4;
-            rgba[i..i + 4].copy_from_slice(&[c[0], c[1], c[2], 255]);
+    let png = include_bytes!("../assets/icon/pulse-256.png");
+    match image::load_from_memory(png) {
+        Ok(img) => {
+            let img = img.into_rgba8();
+            egui::IconData { width: img.width(), height: img.height(), rgba: img.into_raw() }
         }
+        Err(_) => egui::IconData::default(),
     }
-    egui::IconData { rgba, width: n as u32, height: n as u32 }
 }

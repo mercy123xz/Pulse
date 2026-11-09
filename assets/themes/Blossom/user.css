@@ -1,0 +1,22 @@
+:root {
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+}
+
+.card {
+  border-radius: 18px;
+}
+
+.track-row {
+  border-radius: 12px;
+}
+
+.play-button {
+  background: var(--spice-button);
+}
+
+.hero {
+  background: var(--spice-highlight-elevated);
+  border-radius: 24px;
+}
