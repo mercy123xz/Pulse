@@ -140,6 +140,43 @@ figure.theme { margin: 0; }
 .mini .player { grid-column: 1 / -1; background: var(--t-side); border-top: 1px solid rgba(255, 255, 255, .05); display: grid; place-items: center; }
 .mini .player b { width: 16px; height: 16px; border-radius: 50%; background: var(--t-text); }
 
+/* What's new + system requirements, above the download box */
+.info { display: grid; gap: 1.1rem; margin-bottom: 1.4rem; text-align: left; }
+@media (min-width: 880px) { .info { grid-template-columns: 1.6fr 1fr; } }
+.panel { background: var(--surface); border: 1px solid var(--border); border-radius: 18px; padding: 1.5rem 1.6rem; }
+.panel h3 { margin: 0 0 1rem; font-size: 1.15rem; letter-spacing: -.01em; display: flex; align-items: center; gap: .55rem; }
+.panel h3 svg { color: var(--accent-soft); }
+.rel + .rel { border-top: 1px solid var(--border); margin-top: 1.1rem; padding-top: 1.1rem; }
+.rel header { display: flex; align-items: baseline; gap: .6rem; flex-wrap: wrap; margin-bottom: .45rem; }
+.rel header b { font-size: 1.02rem; }
+.rel header .tag { font-size: .75rem; font-weight: 600; color: #fff; background: var(--accent); border-radius: 999px; padding: .1rem .55rem; }
+.rel header time { color: var(--muted); font-size: .85rem; }
+.rel ul { margin: 0; padding-left: 1.1rem; color: var(--muted); font-size: .93rem; }
+.rel li { margin: .2rem 0; }
+.rel li b { color: var(--text); font-weight: 600; }
+.rel .more { display: inline-block; margin-top: .4rem; font-size: .88rem; }
+.panel .all { display: inline-block; margin-top: 1.1rem; font-size: .9rem; }
+.reqs { list-style: none; margin: 0; padding: 0; display: grid; gap: .85rem; }
+.reqs li { display: grid; grid-template-columns: 22px 1fr; gap: .7rem; align-items: start; font-size: .93rem; color: var(--muted); }
+.reqs li svg { color: var(--accent-soft); margin-top: 2px; }
+.reqs li b { display: block; color: var(--text); font-weight: 600; }
+
+/* Gallery: screenshots open full size */
+[data-zoom]:focus-visible { outline: 3px solid var(--accent-soft); outline-offset: 3px; }
+.lightbox { position: fixed; inset: 0; z-index: 60; display: grid; grid-template-rows: auto 1fr auto; background: rgba(6, 6, 9, .94); }
+.lightbox[hidden] { display: none; }
+@supports (backdrop-filter: blur(6px)) { .lightbox { background: rgba(6, 6, 9, .82); backdrop-filter: blur(6px); } }
+.lb-top { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; color: var(--muted); font-size: .9rem; }
+.lb-stage { display: grid; place-items: center; padding: 0 clamp(12px, 6vw, 80px); min-height: 0; }
+.lb-stage img { max-width: 100%; max-height: calc(100vh - 150px); width: auto; height: auto; border-radius: 12px; border: 1px solid var(--border); box-shadow: 0 30px 90px rgba(0, 0, 0, .7); background: var(--surface); }
+.lb-cap { text-align: center; color: var(--muted); padding: 12px 18px 20px; font-size: .92rem; max-width: 60rem; margin: 0 auto; }
+.lb-btn { background: rgba(29, 29, 36, .9); color: var(--text); border: 1px solid var(--border); border-radius: 999px; width: 44px; height: 44px; display: grid; place-items: center; font-size: 1.3rem; line-height: 1; }
+.lb-btn:hover { border-color: var(--accent-soft); }
+.lb-btn:focus-visible { outline: 3px solid var(--accent-soft); outline-offset: 2px; }
+.lb-prev, .lb-next { position: absolute; top: 50%; transform: translateY(-50%); }
+.lb-prev { left: 14px; } .lb-next { right: 14px; }
+@media (max-width: 600px) { .lb-prev, .lb-next { top: auto; bottom: 14px; transform: none; } }
+
 /* Download */
 .download { text-align: center; }
 .download .box { background: radial-gradient(120% 140% at 50% 0%, rgba(124, 58, 237, .28), rgba(22, 22, 27, 1) 60%); border: 1px solid var(--border); border-radius: 24px; padding: clamp(2.5rem, 6vw, 4rem) 1.5rem; }
@@ -165,7 +202,7 @@ footer a:hover { text-decoration: underline; }
    Native cursors (no script), only for mouse users. */
 @media (pointer: fine) {
   html { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 28 28'%3E%3Cpath d='M4 3v19.5l5.6-5.4 3.6 8.4 3.6-1.6-3.6-8.2H21z' fill='%230b0b0e' stroke='%23a78bfa' stroke-width='1.8' stroke-linejoin='round'/%3E%3C/svg%3E") 4 3, auto; }
-  a, button, summary, label, [role="button"] { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 28 28'%3E%3Cpath d='M4 3v19.5l5.6-5.4 3.6 8.4 3.6-1.6-3.6-8.2H21z' fill='%237c3aed' stroke='%23f5f3ff' stroke-width='1.8' stroke-linejoin='round'/%3E%3C/svg%3E") 4 3, pointer; }
+  a, button, summary, label, [role="button"], [data-zoom] { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 28 28'%3E%3Cpath d='M4 3v19.5l5.6-5.4 3.6 8.4 3.6-1.6-3.6-8.2H21z' fill='%237c3aed' stroke='%23f5f3ff' stroke-width='1.8' stroke-linejoin='round'/%3E%3C/svg%3E") 4 3, pointer; }
 }
 </style>
 </head>
@@ -376,6 +413,33 @@ footer a:hover { text-decoration: underline; }
 
   <section id="download" class="download" aria-labelledby="download-title" style="padding-top: 0">
     <div class="wrap">
+    <div class="info">
+      <div class="panel" aria-labelledby="new-title">
+        <h3 id="new-title"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l2.4 5.2 5.6.6-4.2 3.8 1.2 5.5L12 15.3 7 18.1l1.2-5.5L4 8.8l5.6-.6z"/></svg>What's new</h3>
+        <div class="js-releases">
+          <article class="rel">
+            <header><b>Pulse 0.3.3</b><span class="tag">Latest</span></header>
+            <ul>
+              <li>New experimental theme <b>Aurora</b>, with a background that glows in the colors of the song that's playing</li>
+              <li>Artist pages show the 10 most popular songs; featured artists are shown and clickable everywhere</li>
+              <li>Daily Mixes are now <b>Orbits</b>, and menus are redesigned</li>
+              <li>Pages open faster: Pulse loads a page when you point at its card</li>
+            </ul>
+          </article>
+        </div>
+        <a class="all" href="https://github.com/mercy123xz/Pulse/releases">All releases and full notes</a>
+      </div>
+      <div class="panel" aria-labelledby="reqs-title">
+        <h3 id="reqs-title"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>System requirements</h3>
+        <ul class="reqs">
+          <li><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7"/></svg><span><b>Windows 10 or 11</b>64-bit (x64)</span></li>
+          <li><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7"/></svg><span><b>About 100 MB of space</b>A small app, plus about 70 MB of playback tools it sets up the first time you play a song</span></li>
+          <li><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7"/></svg><span><b>An internet connection</b>To stream music. Songs you download play offline.</span></li>
+          <li><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7"/></svg><span><b>Any graphics</b>Uses DirectX 12, or Windows' built-in renderer on PCs without a working driver</span></li>
+          <li><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7"/></svg><span><b>No administrator password</b>Installs just for you</span></li>
+        </ul>
+      </div>
+    </div>
       <div class="box">
         <h2 id="download-title">Ready when you are.</h2>
         <p class="section-lede" style="margin-inline:auto">Download the installer, run it, and press play. It installs just for you, adds Pulse to the Start menu, and uninstalls cleanly from Windows Settings.</p>
@@ -404,28 +468,138 @@ footer a:hover { text-decoration: underline; }
   </div>
 </footer>
 <script>
-// Point the download buttons straight at the newest installer, so one click downloads it.
-// Without this (or if GitHub can't be reached), they go to download/, which does the same.
+// One call to GitHub's release list feeds the download buttons (straight to the newest
+// installer) and "What's new". If GitHub can't be reached, the buttons go to download/,
+// which does the same, and "What's new" keeps the notes written into the page.
 (function () {
-  var KEY = "pulse-latest";
-  function apply(r) {
-    document.querySelectorAll(".js-download").forEach(function (a) { a.href = r.url; });
-    document.querySelectorAll(".js-version").forEach(function (s) { s.textContent = r.version; });
+  var KEY = "pulse-releases";
+  var esc = function (t) { return String(t).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); };
+  // Release notes are Markdown: keep the bullet points, with **bold** and `code`.
+  function bullets(body) {
+    return String(body || "").replace(/<!--[\s\S]*?-->/g, "").split(/\r?\n/)
+      .filter(function (l) { return /^\s*[-*]\s+/.test(l); })
+      .map(function (l) {
+        return esc(l.replace(/^\s*[-*]\s+/, "")).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/`(.+?)`/g, "<code>$1</code>").replace(/\[(.+?)\]\((https:\/\/[^)\s]+)\)/g, '<a href="$2">$1</a>');
+      });
+  }
+  function apply(list) {
+    var latest = list[0];
+    if (!latest) return;
+    if (latest.url) {
+      document.querySelectorAll(".js-download").forEach(function (a) { a.href = latest.url; });
+      document.querySelectorAll(".js-version").forEach(function (s) { s.textContent = latest.version; });
+    }
+    var box = document.querySelector(".js-releases");
+    if (!box) return;
+    var html = list.slice(0, 3).map(function (r, i) {
+      var items = r.items.slice(0, 4).map(function (t) { return "<li>" + t + "</li>"; }).join("");
+      var extra = r.items.length - 4;
+      var date = r.date ? new Date(r.date).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }) : "";
+      return '<article class="rel"><header><b>Pulse ' + esc(r.version) + "</b>" + (i === 0 ? '<span class="tag">Latest</span>' : "") +
+        (date ? '<time datetime="' + esc(r.date) + '">' + esc(date) + "</time>" : "") + "</header>" +
+        (items ? "<ul>" + items + "</ul>" : "") +
+        '<a class="more" href="' + esc(r.page) + '">' + (extra > 0 ? "See all " + r.items.length + " changes" : "Release notes") + "</a></article>";
+    }).join("");
+    if (html) box.innerHTML = html;
   }
   try {
     var saved = JSON.parse(sessionStorage.getItem(KEY) || "null");
-    if (saved && Date.now() - saved.at < 6e5) { apply(saved); return; }
+    if (saved && Date.now() - saved.at < 6e5) { apply(saved.list); return; }
   } catch (e) {}
-  fetch("https://api.github.com/repos/mercy123xz/Pulse/releases/latest", { headers: { Accept: "application/vnd.github+json" } })
+  fetch("https://api.github.com/repos/mercy123xz/Pulse/releases?per_page=6", { headers: { Accept: "application/vnd.github+json" } })
     .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
-    .then(function (rel) {
-      var exe = (rel.assets || []).find(function (a) { return /\.exe$/i.test(a.name); });
-      if (!exe) return;
-      var r = { url: exe.browser_download_url, version: String(rel.tag_name || "").replace(/^v/, ""), at: Date.now() };
-      apply(r);
-      try { sessionStorage.setItem(KEY, JSON.stringify(r)); } catch (e) {}
+    .then(function (rels) {
+      var list = rels.filter(function (r) { return !r.draft && !r.prerelease; }).map(function (r) {
+        var exe = (r.assets || []).find(function (a) { return /\.exe$/i.test(a.name); });
+        return { version: String(r.tag_name || "").replace(/^v/, ""), date: r.published_at, page: r.html_url, url: exe ? exe.browser_download_url : "", items: bullets(r.body) };
+      });
+      apply(list);
+      try { sessionStorage.setItem(KEY, JSON.stringify({ at: Date.now(), list: list })); } catch (e) {}
     })
     .catch(function () {});
+})();
+
+// Gallery: any screenshot opens full size; arrows or swipe go through the rest.
+(function () {
+  var imgs = Array.prototype.slice.call(document.querySelectorAll(".shot img, .hero .window img"));
+  if (!imgs.length) return;
+  var lb = document.createElement("div");
+  lb.className = "lightbox";
+  lb.hidden = true;
+  lb.setAttribute("role", "dialog");
+  lb.setAttribute("aria-modal", "true");
+  lb.setAttribute("aria-label", "Screenshot");
+  lb.innerHTML = '<div class="lb-top"><span class="lb-count"></span><button class="lb-btn lb-close" type="button" aria-label="Close">×</button></div>' +
+    '<div class="lb-stage"><img alt=""></div><p class="lb-cap"></p>' +
+    '<button class="lb-btn lb-prev" type="button" aria-label="Previous screenshot">‹</button><button class="lb-btn lb-next" type="button" aria-label="Next screenshot">›</button>';
+  document.body.appendChild(lb);
+  var big = lb.querySelector(".lb-stage img"), cap = lb.querySelector(".lb-cap"), count = lb.querySelector(".lb-count");
+  var at = 0, opener = null;
+  // The biggest version of a screenshot: the largest WebP in its picture (every browser
+  // that runs this shows WebP).
+  function largest(img) {
+    var best = img.currentSrc || img.src, bestW = 0;
+    var pic = img.closest("picture");
+    (pic ? pic.querySelectorAll("source") : []).forEach(function (src) {
+      (src.getAttribute("srcset") || "").split(",").forEach(function (part) {
+        var bits = part.trim().split(/\s+/), w = parseInt(bits[1], 10) || 1;
+        if (bits[0] && w >= bestW && !/\.avif$/.test(bits[0])) { best = bits[0]; bestW = w; }
+      });
+    });
+    return best;
+  }
+  function show(i) {
+    at = (i + imgs.length) % imgs.length;
+    var img = imgs[at];
+    big.src = largest(img);
+    big.alt = img.alt;
+    cap.textContent = img.alt;
+    count.textContent = (at + 1) + " / " + imgs.length;
+  }
+  function open(i) {
+    opener = document.activeElement;
+    show(i);
+    lb.hidden = false;
+    document.documentElement.style.overflow = "hidden";
+    lb.querySelector(".lb-close").focus();
+  }
+  function close() {
+    lb.hidden = true;
+    document.documentElement.style.overflow = "";
+    if (opener && opener.focus) opener.focus();
+  }
+  imgs.forEach(function (img, i) {
+    img.setAttribute("data-zoom", "");
+    img.setAttribute("tabindex", "0");
+    img.setAttribute("role", "button");
+    img.setAttribute("aria-label", "View larger: " + img.alt);
+    img.addEventListener("click", function () { open(i); });
+    img.addEventListener("keydown", function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(i); } });
+  });
+  lb.querySelector(".lb-close").addEventListener("click", close);
+  lb.querySelector(".lb-prev").addEventListener("click", function () { show(at - 1); });
+  lb.querySelector(".lb-next").addEventListener("click", function () { show(at + 1); });
+  lb.addEventListener("click", function (e) { if (e.target === lb || e.target.classList.contains("lb-stage")) close(); });
+  document.addEventListener("keydown", function (e) {
+    if (lb.hidden) return;
+    if (e.key === "Escape") close();
+    else if (e.key === "ArrowLeft") show(at - 1);
+    else if (e.key === "ArrowRight") show(at + 1);
+    else if (e.key === "Tab") {
+      // Keep the keyboard inside the viewer while it's open.
+      var f = lb.querySelectorAll("button"), first = f[0], last = f[f.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    }
+  });
+  var x0 = null;
+  lb.addEventListener("touchstart", function (e) { x0 = e.touches[0].clientX; }, { passive: true });
+  lb.addEventListener("touchend", function (e) {
+    if (x0 === null) return;
+    var dx = e.changedTouches[0].clientX - x0;
+    if (Math.abs(dx) > 50) show(at + (dx < 0 ? 1 : -1));
+    x0 = null;
+  });
 })();
 </script>
 <script>
