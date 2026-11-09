@@ -1,0 +1,78 @@
+/* Shared by every page: the floating menu (with its phone version), the light theme,
+   and the scroll-in motion. The theme is set on <html data-theme> before the page
+   draws (a small script in each page's <head>), so there's no flash. */
+
+/* ---------- Floating menu ---------- */
+header.top { position: sticky; top: 0; z-index: 10; padding: .8rem 0; pointer-events: none; background: none; border: 0; backdrop-filter: none; }
+.nav { position: relative; pointer-events: auto; display: flex; align-items: center; gap: 1rem; width: min(100% - 1.5rem, 980px); height: auto; margin-inline: auto; padding: .45rem .45rem .45rem 1rem; background: rgba(19, 19, 24, .86); border: 1px solid var(--border); border-radius: 999px; box-shadow: 0 10px 40px rgba(0, 0, 0, .35); }
+@supports (backdrop-filter: blur(10px)) { .nav { background: rgba(19, 19, 24, .66); backdrop-filter: blur(10px) saturate(140%); } }
+.brand { display: flex; align-items: center; gap: .55rem; color: var(--text); text-decoration: none; font-weight: 700; font-size: 1.08rem; letter-spacing: -.01em; }
+.brand svg { width: 26px; height: 26px; }
+.brand small { color: var(--muted); font-weight: 500; font-size: .92rem; }
+html { scroll-padding-top: 90px; }
+.nav nav { margin-inline: auto; }
+.nav ul { display: flex; gap: .2rem; list-style: none; margin: 0; padding: 0; }
+.nav ul a { display: block; padding: .45rem .8rem; border-radius: 999px; color: var(--muted); text-decoration: none; font-size: .93rem; }
+.nav ul a:hover, .nav ul a[aria-current] { color: var(--text); background: var(--surface-2); }
+.nav .btn { padding: .6rem 1.05rem; font-size: .9rem; margin: 0; box-shadow: none; }
+
+/* Round icon buttons in the menu: theme switch and (on phones) the menu */
+.nav-icon { flex: none; display: grid; place-items: center; width: 38px; height: 38px; border-radius: 50%; border: 1px solid transparent; background: none; color: var(--muted); }
+.nav-icon:hover { color: var(--text); background: var(--surface-2); }
+.nav-icon:focus-visible { outline: 3px solid var(--accent-soft); outline-offset: 2px; }
+.nav-icon svg { width: 19px; height: 19px; }
+.nav-icon .sun { display: none; }
+[data-theme="light"] .nav-icon .sun { display: block; }
+[data-theme="light"] .nav-icon .moon { display: none; }
+.menu-btn { display: none; }
+.menu-btn .i-close, .menu-btn[aria-expanded="true"] .i-open { display: none; }
+.menu-btn[aria-expanded="true"] .i-close { display: inline; }
+
+/* Phone: the links move into a panel under the menu */
+.menu-panel { position: absolute; left: 0; right: 0; top: calc(100% + .5rem); display: grid; gap: .2rem; padding: .5rem; background: var(--surface); border: 1px solid var(--border); border-radius: 20px; box-shadow: 0 24px 60px rgba(0, 0, 0, .45); }
+.menu-panel[hidden] { display: none; }
+.menu-panel a { display: block; padding: .8rem 1rem; border-radius: 12px; color: var(--text); text-decoration: none; font-size: 1rem; }
+.menu-panel a:hover, .menu-panel a:focus-visible { background: var(--surface-2); outline: none; }
+.menu-panel .btn { justify-content: center; margin-top: .3rem; color: #fff; }
+@media (max-width: 760px) {
+  .nav nav { display: none; }
+  .menu-btn { display: grid; }
+  .nav .theme-btn { margin-left: auto; }
+  .nav > .btn { padding: .55rem .9rem; }
+}
+@media (max-width: 380px) { .nav > .btn { display: none; } }
+@media (prefers-reduced-motion: no-preference) {
+  .menu-panel:not([hidden]) { animation: menu-in .18s ease-out; }
+  @keyframes menu-in { from { opacity: 0; transform: translateY(-6px); } }
+}
+
+/* ---------- Light theme (Pulse's own Default Light colors) ---------- */
+html[data-theme="light"] {
+  --bg: #fafafc; --bg-2: #f3f3f7; --surface: #ffffff; --surface-2: #ececf2; --border: #d9d9e2;
+  --text: #14141a; --muted: #4e4e5c; --accent: #7c3aed; --accent-soft: #6d28d9;
+  color-scheme: light;
+}
+[data-theme="light"] .nav { background: rgba(255, 255, 255, .82); box-shadow: 0 10px 40px rgba(20, 20, 40, .1); }
+@supports (backdrop-filter: blur(10px)) { [data-theme="light"] .nav { background: rgba(255, 255, 255, .7); } }
+[data-theme="light"] .menu-panel { box-shadow: 0 24px 60px rgba(20, 20, 40, .16); }
+[data-theme="light"] h1 span { background-image: linear-gradient(90deg, #6d28d9, #7c3aed 45%, #9333ea); }
+[data-theme="light"] .window { box-shadow: 0 30px 80px rgba(30, 20, 60, .18); }
+[data-theme="light"] .window-bar i { background: #cfcfd8; }
+[data-theme="light"] .download .box { background: radial-gradient(120% 140% at 50% 0%, rgba(124, 58, 237, .14), #ffffff 60%); }
+[data-theme="light"] .meter, [data-theme="light"] .d-app { box-shadow: 0 40px 100px -30px rgba(30, 20, 60, .25); }
+[data-theme="light"] .spark { background-image: linear-gradient(rgba(20, 20, 40, .08) 1px, transparent 1px); }
+[data-theme="light"] .perf .copy small, [data-theme="light"] .d-hint, [data-theme="light"] .metric h3, [data-theme="light"] .spark .axis { color: #646472; }
+[data-theme="light"] .ask-fab { box-shadow: 0 10px 30px rgba(124, 58, 237, .3); }
+@media (min-width: 1100px) { [data-theme="light"] .hero .window { box-shadow: -40px 40px 90px rgba(30, 20, 60, .18), -10px 0 60px rgba(124, 58, 237, .12); } }
+/* Docs */
+[data-theme="light"] article p, [data-theme="light"] article li, [data-theme="light"] td { color: #33333d; }
+[data-theme="light"] .callout { background: linear-gradient(135deg, rgba(124, 58, 237, .08), rgba(255, 255, 255, .6)); }
+[data-theme="light"] .flow li::before { background: rgba(124, 58, 237, .12); }
+/* Switching themes fades instead of snapping */
+html.theme-fade, html.theme-fade * { transition: background-color .3s ease, color .3s ease, border-color .3s ease !important; }
+
+/* ---------- Scroll-in motion ---------- */
+@media (prefers-reduced-motion: no-preference) {
+  html.motion .reveal { opacity: 0; transform: translateY(22px); transition: opacity .7s cubic-bezier(.2, .7, .2, 1) var(--d, 0s), transform .7s cubic-bezier(.2, .7, .2, 1) var(--d, 0s); }
+  html.motion .reveal.in { opacity: 1; transform: none; }
+}

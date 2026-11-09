@@ -2,6 +2,8 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<script>try{var t=localStorage.getItem("pulse-theme");document.documentElement.dataset.theme=t||(matchMedia("(prefers-color-scheme: light)").matches?"light":"dark")}catch(e){document.documentElement.dataset.theme="dark"}</script>
+
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Pulse — a fast, native music player for Windows</title>
 <meta name="description" content="Pulse is a free, open-source music player for Windows, written in Rust. Search any artist, play full songs, import playlists, and make it yours with themes. No account needed.">
@@ -48,18 +50,6 @@ a:focus-visible, .btn:focus-visible { outline: 3px solid var(--accent-soft); out
 .skip { position: absolute; left: -9999px; top: 0; background: var(--text); color: var(--bg); padding: .6rem 1rem; z-index: 10; }
 .skip:focus { left: 1rem; top: 1rem; }
 
-/* Header: a floating pill */
-header.top { position: sticky; top: 0; z-index: 10; padding: .8rem 0; pointer-events: none; }
-.nav { pointer-events: auto; display: flex; align-items: center; gap: 1rem; width: min(100% - 1.5rem, 980px); margin-inline: auto; padding: .45rem .45rem .45rem 1rem; background: rgba(19, 19, 24, .86); border: 1px solid var(--border); border-radius: 999px; box-shadow: 0 10px 40px rgba(0, 0, 0, .35); }
-@supports (backdrop-filter: blur(10px)) { .nav { background: rgba(19, 19, 24, .66); backdrop-filter: blur(10px) saturate(140%); } }
-.brand { display: flex; align-items: center; gap: .55rem; color: var(--text); text-decoration: none; font-weight: 700; font-size: 1.08rem; letter-spacing: -.01em; }
-.brand svg { width: 26px; height: 26px; }
-.nav nav { margin-inline: auto; }
-.nav ul { display: flex; gap: .2rem; list-style: none; margin: 0; padding: 0; }
-.nav ul a { display: block; padding: .45rem .8rem; border-radius: 999px; color: var(--muted); text-decoration: none; font-size: .93rem; }
-.nav ul a:hover { color: var(--text); background: var(--surface-2); }
-.nav .btn { padding: .6rem 1.05rem; font-size: .9rem; }
-@media (max-width: 720px) { .nav nav { display: none; } .nav .btn { margin-left: auto; } }
 
 /* Buttons */
 .btn { display: inline-flex; align-items: center; gap: .55rem; padding: .85rem 1.35rem; border-radius: 999px; font-weight: 600; text-decoration: none; font-size: 1rem; line-height: 1; transition: transform .15s ease, background-color .15s ease; }
@@ -67,7 +57,6 @@ header.top { position: sticky; top: 0; z-index: 10; padding: .8rem 0; pointer-ev
 .btn-primary:hover { background: #6d28d9; transform: translateY(-1px); }
 .btn-ghost { color: var(--text); border: 1px solid var(--border); }
 .btn-ghost:hover { background: var(--surface); }
-.nav .btn { padding: .6rem 1rem; font-size: .9rem; }
 
 /* Hero */
 .hero { position: relative; overflow: hidden; padding: clamp(3rem, 8vw, 6rem) 0 clamp(3rem, 6vw, 5rem); }
@@ -126,6 +115,7 @@ h2 { font-size: clamp(1.8rem, 3.6vw, 2.6rem); line-height: 1.12; letter-spacing:
 .perf { display: grid; gap: 2.5rem; align-items: center; }
 @media (min-width: 960px) { .perf { grid-template-columns: .9fr 1.1fr; gap: 4rem; } }
 .perf .copy p { color: var(--muted); font-size: 1.08rem; margin: 0 0 1rem; }
+.perf .copy .kicker { color: var(--accent-soft); font-size: .9rem; margin: 0 0 .4rem; }
 .perf .copy small { display: block; color: #80808e; font-size: .86rem; }
 .meter { margin: 0; background: var(--surface); border: 1px solid var(--border); border-radius: 18px; overflow: hidden; box-shadow: 0 40px 100px -30px rgba(0, 0, 0, .7); }
 .meter-top { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .6rem; padding: .85rem 1.2rem; border-bottom: 1px solid var(--border); background: var(--bg-2); font-size: .85rem; color: var(--muted); }
@@ -354,6 +344,7 @@ footer a:hover { text-decoration: underline; }
   a, button, summary, label, [role="button"], [data-zoom] { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 28 28'%3E%3Cpath d='M4 3v19.5l5.6-5.4 3.6 8.4 3.6-1.6-3.6-8.2H21z' fill='%237c3aed' stroke='%23f5f3ff' stroke-width='1.8' stroke-linejoin='round'/%3E%3C/svg%3E") 4 3, pointer; }
 }
 </style>
+<link rel="stylesheet" href="site.css">
 </head>
 <body>
 <a class="skip" href="#main">Skip to content</a>
@@ -834,5 +825,6 @@ footer a:hover { text-decoration: underline; }
 </script>
 <script src="demo.js" defer></script>
 <script src="ask.js" defer></script>
+<script src="site.js" defer></script>
 </body>
 </html>
