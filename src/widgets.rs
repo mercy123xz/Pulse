@@ -392,6 +392,15 @@ pub enum TrackEvent {
     ToggleLike(Track),
     AddToPlaylist(usize, Track),
     NewPlaylistWith(Track),
+    NewPlaylistWithMany(Vec<Track>),
+    /// Add to Liked Songs (never removes, unlike ToggleLike).
+    Like(Track),
+    /// A row was clicked (Ctrl: add/remove it, Shift: select up to it).
+    Select { list: String, index: usize, ctrl: bool, shift: bool },
+    SelectAll { list: String, len: usize },
+    ClearSelection,
+    /// "Go to song": the song's own page.
+    OpenSongPage(Track),
     RemoveFromPlaylist(usize),
     RemoveFromQueue(usize),
     OpenArtist(Track),
@@ -475,6 +484,9 @@ pub fn track_menu(ui: &mut Ui, t: &Track, cx: &MenuCtx, ev: &mut Vec<TrackEvent>
             ev.push(TrackEvent::Download(t.clone()));
         }
     }
+    if menu_item(ui, icon::MUSIC_NOTE, "Go to song") {
+        ev.push(TrackEvent::OpenSongPage(t.clone()));
+    }
     if menu_item(ui, icon::IDENTIFICATION_CARD, "View credits") {
         ev.push(TrackEvent::ShowCredits(t.clone()));
     }
@@ -529,6 +541,8 @@ pub struct TableCtx<'a> {
     pub views: Option<&'a HashMap<String, (u64, u64)>>,
     /// A song to point out (opened by clicking its title somewhere else).
     pub highlight: Option<(&'a str, f64)>,
+    /// Selected rows, and the list they're in.
+    pub selection: (&'a str, &'a HashSet<usize>),
     /// Number shown for the first row (queue shows "next up" starting at 1).
     pub index_offset: usize,
 }
@@ -630,14 +644,86 @@ pub fn track_table_header(ui: &mut Ui, with_date: bool, with_views: bool) {
 pub fn track_table(ui: &mut Ui, id_salt: &str, tracks: &[Track], cx: &TableCtx, events: &mut Vec<TrackEvent>) {
     track_table_header(ui, cx.added.is_some(), cx.views.is_some());
     let base = ui.id().with(id_salt);
+    // This list's selected rows (selection belongs to one list at a time).
+    let empty = HashSet::new();
+    let selected = if cx.selection.0 == id_salt { cx.selection.1 } else { &empty };
     ui.spacing_mut().item_spacing.y = 0.0;
     for (i, t) in tracks.iter().enumerate() {
-        track_row(ui, base.with(i), i, t, cx, events);
+        track_row(ui, base.with(i), id_salt, i, t, tracks, selected, cx, events);
     }
     ui.spacing_mut().item_spacing.y = 6.0;
+
+    // Keyboard, while this list has a selection (and nothing is being typed).
+    if !selected.is_empty() && !ui.ctx().egui_wants_keyboard_input() {
+        if ui.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::A)) {
+            events.push(TrackEvent::SelectAll { list: id_salt.to_string(), len: tracks.len() });
+        }
+        if ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape)) {
+            events.push(TrackEvent::ClearSelection);
+        }
+        if cx.removable && ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Delete)) {
+            let mut rows: Vec<usize> = selected.iter().copied().collect();
+            rows.sort_unstable_by(|a, b| b.cmp(a));
+            events.extend(rows.into_iter().map(TrackEvent::RemoveFromPlaylist));
+            events.push(TrackEvent::ClearSelection);
+        }
+        let focused_row = ui.ctx().memory(|m| m.focused()).is_some();
+        if !focused_row && ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Enter))
+            && let Some(first) = selected.iter().min()
+        {
+            events.push(TrackEvent::Play(*first));
+        }
+    }
 }
 
-fn track_row(ui: &mut Ui, id: egui::Id, i: usize, t: &Track, cx: &TableCtx, ev: &mut Vec<TrackEvent>) {
+/// The right-click menu for several selected songs at once.
+fn group_menu(ui: &mut Ui, rows: &[usize], tracks: &[Track], cx: &TableCtx, ev: &mut Vec<TrackEvent>) {
+    ui.set_min_width(220.0);
+    let picked: Vec<Track> = rows.iter().filter_map(|i| tracks.get(*i).cloned()).collect();
+    ui.label(egui::RichText::new(format!("{} {}", picked.len(), tr("songs selected"))).font(semi(12.0)).color(pal().text_muted));
+    ui.separator();
+    if menu_item(ui, icon::PLAY, "Play") {
+        ev.push(TrackEvent::Play(rows[0]));
+    }
+    ui.menu_button(format!("{}   {}", icon::PLUS, tr("Add to playlist")), |ui| {
+        ui.set_min_width(180.0);
+        if menu_item(ui, icon::PLUS, "New playlist…") {
+            ev.push(TrackEvent::NewPlaylistWithMany(picked.clone()));
+        }
+        if !cx.playlists.is_empty() {
+            ui.separator();
+        }
+        for (pi, name) in cx.playlists.iter().enumerate() {
+            if menu_item(ui, icon::PLAYLIST, name) {
+                ev.extend(picked.iter().map(|t| TrackEvent::AddToPlaylist(pi, t.clone())));
+            }
+        }
+    });
+    if menu_item(ui, icon::HEART, "Save to Liked Songs") {
+        ev.extend(picked.iter().map(|t| TrackEvent::Like(t.clone())));
+    }
+    if !cx.queue_mode && menu_item(ui, icon::QUEUE, "Add to queue") {
+        ev.extend(picked.iter().map(|t| TrackEvent::AddToQueue(t.clone())));
+    }
+    if picked.iter().any(|t| !crate::local::is_local(&t.id) && !cx.downloads.contains_key(&t.id)) && menu_item(ui, icon::DOWNLOAD_SIMPLE, "Download") {
+        ev.extend(picked.iter().map(|t| TrackEvent::Download(t.clone())));
+    }
+    if cx.removable || cx.queue_mode {
+        ui.separator();
+        let label = if cx.queue_mode { "Remove from queue" } else { "Remove from this playlist" };
+        if menu_item(ui, icon::TRASH, label) {
+            let mut desc = rows.to_vec();
+            desc.sort_unstable_by(|a, b| b.cmp(a));
+            for i in desc {
+                ev.push(if cx.queue_mode { TrackEvent::RemoveFromQueue(i) } else { TrackEvent::RemoveFromPlaylist(i) });
+            }
+            ev.push(TrackEvent::ClearSelection);
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn track_row(ui: &mut Ui, id: egui::Id, list: &str, i: usize, t: &Track, tracks: &[Track], selected: &HashSet<usize>, cx: &TableCtx, ev: &mut Vec<TrackEvent>) {
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), ROW_H), Sense::hover());
     // Register the row even when it's scrolled out of view, so Tab can reach it
     // (focusing it then scrolls it into view, see `focus_ring`).
@@ -652,7 +738,13 @@ fn track_row(ui: &mut Ui, id: egui::Id, i: usize, t: &Track, cx: &TableCtx, ev: 
     let hovered = resp.hovered() || resp.context_menu_opened() || resp.has_focus() || ui.rect_contains_pointer(rect);
     let style = &parts().track_row;
     let radius = style.radius.map(CornerRadius::same).unwrap_or(r_md());
-    if hovered {
+    let is_selected = selected.contains(&i);
+    if is_selected {
+        ui.painter().rect_filled(rect, radius, pal().surface_active);
+        if hovered {
+            ui.painter().rect_filled(rect, radius, Color32::from_white_alpha(6));
+        }
+    } else if hovered {
         ui.painter().rect_filled(rect, radius, style.fill.unwrap_or(pal().surface_hover));
     } else if is_current {
         ui.painter().rect_filled(rect, radius, pal().accent.gamma_multiply(0.08));
@@ -757,9 +849,21 @@ fn track_row(ui: &mut Ui, id: egui::Id, i: usize, t: &Track, cx: &TableCtx, ev: 
         ev.push(TrackEvent::OpenArtist(t.clone()));
     } else if album_link.as_ref().is_some_and(|r| r.clicked()) {
         ev.push(TrackEvent::OpenAlbum(t.album.as_ref().map(|a| a.id.clone()).unwrap_or_default()));
-    } else if resp.double_clicked() || resp.clicked() && (resp.has_focus() || pointer_in(ui, c.num)) {
-        // Single click plays only on the number column; Enter plays when the row has keyboard focus.
+    } else if resp.double_clicked() {
         ev.push(TrackEvent::Play(i));
+    } else if resp.clicked() {
+        let (enter, mods) = ui.input(|inp| (inp.key_pressed(Key::Enter), inp.modifiers));
+        if enter || pointer_in(ui, c.num) {
+            // Enter on a focused row, or the play icon in the number column.
+            ev.push(TrackEvent::Play(i));
+        } else {
+            // A click selects, like Spotify (Ctrl: add/remove, Shift: a range).
+            ev.push(TrackEvent::Select { list: list.to_string(), index: i, ctrl: mods.command, shift: mods.shift });
+        }
+    }
+    if resp.secondary_clicked() && !is_selected {
+        // Right-clicking a song outside the selection selects just that song.
+        ev.push(TrackEvent::Select { list: list.to_string(), index: i, ctrl: false, shift: false });
     }
     // Keyboard equivalents of the right-click menu for the focused row.
     if resp.has_focus() && !cx.queue_mode {
@@ -772,7 +876,18 @@ fn track_row(ui: &mut Ui, id: egui::Id, i: usize, t: &Track, cx: &TableCtx, ev: 
         }
     }
 
+    let group: Vec<usize> = if is_selected && selected.len() > 1 {
+        let mut v: Vec<usize> = selected.iter().copied().collect();
+        v.sort_unstable();
+        v
+    } else {
+        vec![]
+    };
     resp.context_menu(|ui| {
+        if !group.is_empty() {
+            group_menu(ui, &group, tracks, cx, ev);
+            return;
+        }
         let mcx = MenuCtx {
             liked,
             playlists: cx.playlists,

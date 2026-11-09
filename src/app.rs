@@ -412,7 +412,10 @@ pub struct App {
 
     // overlays
     pub toast: Option<(String, f64)>,
-    pub new_playlist: Option<(String, Option<Track>)>,
+    /// The "New playlist" window: its name so far and the songs to put in it.
+    pub new_playlist: Option<(String, Vec<Track>)>,
+    /// Selected songs: which list (its name), the rows, and where a Shift+click range starts.
+    pub selection: (String, HashSet<usize>, Option<usize>),
     pub rename_playlist: Option<(usize, String)>,
     /// Playlist waiting for "are you sure?" before it is deleted.
     pub confirm_delete: Option<usize>,
@@ -518,6 +521,7 @@ impl App {
             autoplay_ids: HashSet::new(),
             toast: None,
             new_playlist: None,
+            selection: (String::new(), HashSet::new(), None),
             rename_playlist: None,
             confirm_delete: None,
             credits: None,
@@ -598,6 +602,7 @@ impl App {
         self.forward.clear();
         self.list_view = ListView::default();
         self.highlight = None;
+        self.selection.1.clear();
         // Lookups for the page we left aren't needed any more.
         for t in self.views_queue.drain(..) {
             self.views_pending.remove(&t.id);
@@ -1550,14 +1555,16 @@ impl App {
         }
     }
 
-    pub fn create_playlist(&mut self, name: String, first: Option<Track>, ctx: &egui::Context) {
+    pub fn create_playlist(&mut self, name: String, first: Vec<Track>, ctx: &egui::Context) {
         let name = if name.trim().is_empty() {
             format!("My Playlist #{}", self.saved.playlists.len() + 1)
         } else {
             name.trim().to_string()
         };
         let added = first.iter().map(|t| (t.id.clone(), now_unix())).collect();
-        self.saved.playlists.push(LocalPlaylist { name: name.clone(), tracks: first.into_iter().collect(), cover: None, added });
+        let mut seen = HashSet::new();
+        let tracks = first.into_iter().filter(|t| seen.insert(t.id.clone())).collect();
+        self.saved.playlists.push(LocalPlaylist { name: name.clone(), tracks, cover: None, added });
         self.toast(&format!("Created “{name}”"), ctx);
         self.navigate(Route::Local(self.saved.playlists.len() - 1), ctx);
     }
@@ -1735,11 +1742,17 @@ impl App {
     }
 
     /// Applies what the user did in a track list. `list` is the list that was shown.
-    /// Opens a song's own page (like Spotify's).
+    /// A song's title was clicked: like Spotify, open its album with the song highlighted
+    /// (songs without an album open their own page).
     pub fn open_song(&mut self, t: &Track, ctx: &egui::Context) {
-        self.song_tracks.insert(t.id.clone(), t.clone());
-        self.navigate(Route::Song(t.id.clone()), ctx);
-        self.highlight = Some((t.id.clone(), ctx.input(|i| i.time)));
+        let now = ctx.input(|i| i.time);
+        if let Some(al) = t.album.as_ref().filter(|a| deezer::is_deezer_id(&a.id)) {
+            self.navigate(Route::Album(al.id.clone()), ctx);
+        } else {
+            self.song_tracks.insert(t.id.clone(), t.clone());
+            self.navigate(Route::Song(t.id.clone()), ctx);
+        }
+        self.highlight = Some((t.id.clone(), now));
     }
 
     /// Opens the credits window and loads the credits in the background.
@@ -1825,7 +1838,50 @@ impl App {
                         }
                     }
                 }
-                TrackEvent::NewPlaylistWith(t) => self.new_playlist = Some((String::new(), Some(t))),
+                TrackEvent::NewPlaylistWith(t) => self.new_playlist = Some((String::new(), vec![t])),
+                TrackEvent::NewPlaylistWithMany(list) => self.new_playlist = Some((String::new(), list)),
+                TrackEvent::Like(t) => {
+                    if !self.liked_ids.contains(&t.id) {
+                        self.liked_ids.insert(t.id.clone());
+                        self.saved.liked_added.insert(t.id.clone(), now_unix());
+                        self.saved.liked.insert(0, t);
+                    }
+                }
+                TrackEvent::Select { list, index, ctrl, shift } => {
+                    let (cur, rows, anchor) = &mut self.selection;
+                    if *cur != list {
+                        *cur = list;
+                        rows.clear();
+                        *anchor = None;
+                    }
+                    match (shift, *anchor) {
+                        (true, Some(a)) => {
+                            if !ctrl {
+                                rows.clear();
+                            }
+                            rows.extend(a.min(index)..=a.max(index));
+                        }
+                        _ if ctrl => {
+                            if !rows.remove(&index) {
+                                rows.insert(index);
+                            }
+                            *anchor = Some(index);
+                        }
+                        _ => {
+                            rows.clear();
+                            rows.insert(index);
+                            *anchor = Some(index);
+                        }
+                    }
+                }
+                TrackEvent::SelectAll { list, len } => {
+                    self.selection = (list, (0..len).collect(), Some(0));
+                }
+                TrackEvent::ClearSelection => self.selection.1.clear(),
+                TrackEvent::OpenSongPage(t) => {
+                    self.song_tracks.insert(t.id.clone(), t.clone());
+                    self.navigate(Route::Song(t.id.clone()), ctx);
+                }
                 TrackEvent::RemoveFromPlaylist(i) => {
                     if let Route::Local(pi) = self.route
                         && let Some(p) = self.saved.playlists.get_mut(pi)
