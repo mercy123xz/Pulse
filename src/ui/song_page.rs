@@ -28,7 +28,10 @@ fn draw(app: &mut App, ui: &mut Ui, t: &Track, credits: Option<&Credits>, album:
     app.ensure_views(std::slice::from_ref(t));
 
     // Header: "Artist · Album · 2024 · 3:21 · 1,234,567 views"
-    let mut parts = vec![t.artist.name.clone()];
+    // The artists are links; the rest follows them.
+    let artists: Vec<&crate::deezer::ArtistRef> = std::iter::once(&t.artist).chain(&t.featured).collect();
+    let names: Vec<&str> = artists.iter().map(|a| a.name.as_str()).collect();
+    let mut parts = vec![String::new()];
     if let Some((info, _)) = album {
         parts.push(info.title.clone());
         if let Some(y) = info.year() {
@@ -44,7 +47,15 @@ fn draw(app: &mut App, ui: &mut Ui, t: &Track, credits: Option<&Credits>, album:
         parts.push(format!("{} {}", fmt_thousands(*v), tr("views")));
     }
     let sub = parts.join(" · ");
-    hero(ui, &Hero { editable: false, kind: tr("Song"), title: &t.title, subtitle: &sub, art: t.art_big(), glyph: icon::MUSIC_NOTE, round: false, banner: None });
+    let clicks = hero(ui, &Hero { editable: false, kind: tr("Song"), title: &t.title, subtitle: &sub, art: t.art_big(), glyph: icon::MUSIC_NOTE, round: false, banner: None, links: &names });
+    if let Some(i) = clicks.link {
+        let a = artists[i];
+        if i == 0 {
+            app.open_artist(t, &ctx);
+        } else if crate::deezer::is_deezer_id(&a.id) {
+            app.navigate(crate::app::Route::Artist(a.id.clone()), &ctx);
+        }
+    }
 
     // Play (the album from this song, so the music carries on), like, download, more.
     let list: Vec<Track> = match album {

@@ -268,7 +268,7 @@ fn sidebar(app: &mut App, ui: &mut Ui) {
             let w = ui.available_width();
             let (r, resp) = ui.allocate_exact_size(Vec2::splat(w), Sense::click());
             artwork(ui, r, t.art_big(), r_lg());
-            a11y(ui, &resp, egui::WidgetType::Button, || format!("{}: {} by {}", tr("Now playing"), t.title, t.artist.name));
+            a11y(ui, &resp, egui::WidgetType::Button, || format!("{}: {} by {}", tr("Now playing"), t.title, t.all_artists()));
             if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                 app.navigate(Route::Queue, &ctx);
             }
@@ -480,7 +480,7 @@ fn page(app: &mut App, ui: &mut Ui) {
         }
         Route::Liked => {
             let tracks = app.saved.liked.clone();
-            let sub = format!("{} songs", tracks.len());
+            let sub = song_count(tracks.len());
             local_collection(app, ui, "Liked Songs", &sub, icon::HEART, &tracks, None);
         }
         Route::Recent => {
@@ -495,7 +495,7 @@ fn page(app: &mut App, ui: &mut Ui) {
         }
         Route::Local(i) => {
             if let Some(p) = app.saved.playlists.get(i).cloned() {
-                let sub = format!("Your playlist · {} songs · {}", p.tracks.len(), total_time(&p.tracks));
+                let sub = format!("Your playlist · {} · {}", song_count(p.tracks.len()), total_time(&p.tracks));
                 local_collection(app, ui, &p.name, &sub, icon::PLAYLIST, &p.tracks, Some(i));
             }
         }
@@ -552,6 +552,7 @@ fn table_ctx<'a>(app: &'a App, names: &'a [String]) -> TableCtx<'a> {
 /// Draws a track table and applies whatever the user clicked.
 fn tracks_block(app: &mut App, ui: &mut Ui, salt: &str, tracks: &[Track]) {
     app.ensure_views(tracks);
+    app.ensure_featured(tracks);
     let names = app.playlist_names();
     let mut ev = vec![];
     let mut cx = table_ctx(app, &names);
@@ -682,7 +683,7 @@ fn playlist_grid(app: &mut App, ui: &mut Ui, playlists: &[PlaylistInfo], rows: O
     let ctx = ui.ctx().clone();
     let mut action = None;
     card_grid(ui, playlists, rows, |ui, w, p| {
-        let sub = if p.creator.is_empty() { format!("{} songs", p.nb_tracks) } else { format!("Playlist · {}", p.creator) };
+        let sub = if !p.creator.is_empty() { format!("Playlist · {}", p.creator) } else if p.nb_tracks > 0 { song_count(p.nb_tracks as usize) } else { "Playlist".to_string() };
         let info = CardInfo { id: egui::Id::new(("pl", &p.id)), art: p.picture.as_deref(), title: &p.title, subtitle: sub, round: false, badge: None };
         match card(ui, w, &info) {
             CardClick::Open => action = Some((p.id.clone(), false)),
@@ -812,6 +813,8 @@ struct Hero<'a> {
     glyph: &'a str,
     round: bool,
     banner: Option<&'a str>,
+    /// Clickable names shown before the subtitle (the artists of an album or song).
+    links: &'a [&'a str],
 }
 
 /// What was clicked in an editable hero.
@@ -819,6 +822,8 @@ struct Hero<'a> {
 struct HeroClicks {
     title: bool,
     art: Option<egui::Response>,
+    /// Which of `links` was clicked.
+    link: Option<usize>,
 }
 
 fn hero(ui: &mut Ui, h: &Hero) -> HeroClicks {
@@ -893,7 +898,25 @@ fn hero(ui: &mut Ui, h: &Hero) -> HeroClicks {
         a11y(ui, &r, egui::WidgetType::Button, || format!("{}: {}", tr("Rename"), h.title));
         clicks.title = r.on_hover_text(tr("Rename")).clicked();
     }
-    paint_line(ui, pos2(tx, bottom - 20.0), h.subtitle, regular(13.5), on_muted, tw);
+    let mut sx = tx;
+    for (i, name) in h.links.iter().enumerate() {
+        if i > 0 {
+            let g = one_line(ui, ", ", regular(13.5), on_muted, tw);
+            let w = g.size().x;
+            ui.painter().galley(pos2(sx, bottom - 20.0), g, on_muted);
+            sx += w;
+        }
+        let room = (tx + tw - sx).max(0.0);
+        if room < 24.0 {
+            break;
+        }
+        let r = link_text(ui, ui.id().with(("hero_link", i)), pos2(sx, bottom - 20.0), name, semi(13.5), on, room);
+        if r.clicked() {
+            clicks.link = Some(i);
+        }
+        sx = r.rect.right();
+    }
+    paint_line(ui, pos2(sx, bottom - 20.0), h.subtitle, regular(13.5), on_muted, (tx + tw - sx).max(0.0));
     ui.add_space(18.0);
     clicks
 }
@@ -902,9 +925,29 @@ fn hero(ui: &mut Ui, h: &Hero) -> HeroClicks {
 fn hero_full_bleed(ui: &mut Ui, h: &Hero, radius: CornerRadius) -> HeroClicks {
     ui.add_space(8.0);
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 320.0), Sense::hover());
-    // Fill the banner without stretching: crop the (square) photo to the banner's shape,
-    // keeping a little more of the top, where faces usually are.
-    artwork_cover(ui, rect, h.art, radius, 0.35);
+    // Deezer's biggest artist photo is 1000 px square. Stretching it across a wide banner
+    // made it blurry, so it's never drawn wider than its own pixels: on wide windows it sits
+    // on the right and fades into a dark fill on the left.
+    let base = Color32::from_rgb(14, 13, 20).lerp_to_gamma(pal().accent, 0.10);
+    ui.painter().rect_filled(rect, radius, base);
+    let ppp = ui.ctx().pixels_per_point();
+    let photo_w = rect.width().min((1000.0 / ppp).max(rect.height()));
+    let photo = Rect::from_min_max(pos2(rect.right() - photo_w, rect.top()), rect.max);
+    let covers_all = photo_w >= rect.width() - 0.5;
+    let pr = if covers_all { radius } else { CornerRadius { nw: 0, sw: 0, ne: radius.ne, se: radius.se } };
+    // Crop to the banner's shape, keeping a little more of the top, where faces usually are.
+    artwork_cover(ui, photo, h.art, pr, 0.35);
+    if !covers_all {
+        let fade = Rect::from_min_size(photo.min, vec2(photo_w * 0.45, photo.height()));
+        let mut mesh = egui::Mesh::default();
+        mesh.colored_vertex(fade.left_top(), base);
+        mesh.colored_vertex(fade.right_top(), Color32::TRANSPARENT);
+        mesh.colored_vertex(fade.left_bottom(), base);
+        mesh.colored_vertex(fade.right_bottom(), Color32::TRANSPARENT);
+        mesh.add_triangle(0, 1, 2);
+        mesh.add_triangle(1, 3, 2);
+        ui.painter().add(egui::Shape::mesh(mesh));
+    }
     // Darken towards the bottom so the name stays readable.
     vgradient(ui, rect, Color32::from_black_alpha(20), Color32::from_black_alpha(200));
     let style = &parts().hero;
@@ -923,11 +966,11 @@ fn hero_full_bleed(ui: &mut Ui, h: &Hero, radius: CornerRadius) -> HeroClicks {
 fn remote_playlist(app: &mut App, ui: &mut Ui) {
     with_remote(app, ui, |app, ui, page| {
         let Page::Playlist { info, tracks } = page else { return };
-        let mut sub = format!("{} songs · {}", tracks.len(), total_time(tracks));
+        let mut sub = format!("{} · {}", song_count(tracks.len()), total_time(tracks));
         if !info.creator.is_empty() {
             sub = format!("{} · {sub}", info.creator);
         }
-        hero(ui, &Hero { editable: false, kind: "Playlist", title: &info.title, subtitle: &sub, art: info.picture.as_deref(), glyph: icon::PLAYLIST, round: false, banner: None });
+        hero(ui, &Hero { editable: false, kind: "Playlist", title: &info.title, subtitle: &sub, art: info.picture.as_deref(), glyph: icon::PLAYLIST, round: false, banner: None, links: &[] });
         app.note_visit(crate::app::Place::Playlist(info.id.clone()), &info.title, &format!("Playlist · {}", info.creator), info.picture.as_deref(), false);
         let ctx = ui.ctx().clone();
         autoplay_page(app, &ctx, tracks);
@@ -939,18 +982,25 @@ fn remote_playlist(app: &mut App, ui: &mut Ui) {
 fn album_page(app: &mut App, ui: &mut Ui) {
     with_remote(app, ui, |app, ui, page| {
         let Page::Album { info, tracks } = page else { return };
-        let mut sub = info.artist.name.clone();
+        let linked = crate::deezer::is_deezer_id(&info.artist.id);
+        let mut sub = if linked { String::new() } else { info.artist.name.clone() };
         if let Some(y) = info.year() {
             sub.push_str(&format!(" · {y}"));
         }
-        sub.push_str(&format!(" · {} songs, {}", tracks.len(), total_time(tracks)));
-        hero(ui, &Hero { editable: false, kind: info.kind(), title: &info.title, subtitle: &sub, art: info.cover.as_deref(), glyph: icon::VINYL_RECORD, round: false, banner: None });
+        sub.push_str(&format!(" · {}, {}", song_count(tracks.len()), total_time(tracks)));
+        let sub = if linked { sub } else { sub.trim_start_matches(" · ").to_string() };
+        let names = [info.artist.name.as_str()];
+        let links: &[&str] = if linked { &names } else { &[] };
+        let clicks = hero(ui, &Hero { editable: false, kind: info.kind(), title: &info.title, subtitle: &sub, art: info.cover.as_deref(), glyph: icon::VINYL_RECORD, round: false, banner: None, links });
         app.note_visit(crate::app::Place::Album(info.id.clone()), &info.title, &format!("{} · {}", info.kind(), info.artist.name), info.cover.as_deref(), false);
         let ctx = ui.ctx().clone();
+        if clicks.link.is_some() {
+            app.navigate(Route::Artist(info.artist.id.clone()), &ctx);
+        }
         autoplay_page(app, &ctx, tracks);
         ui.horizontal(|ui| {
             action_row(app, ui, tracks);
-            if crate::deezer::is_deezer_id(&info.artist.id) && ghost_button(ui, icon::USER, &info.artist.name).clicked() {
+            if linked && ghost_button(ui, icon::USER, &info.artist.name).clicked() {
                 app.navigate(Route::Artist(info.artist.id.clone()), &ctx);
             }
         });
@@ -986,7 +1036,7 @@ fn artist(app: &mut App, ui: &mut Ui) {
     with_remote(app, ui, |app, ui, page| {
         let Page::Artist(p) = page else { return };
         let sub = format!("{} fans · {} releases", fmt_count(p.artist.fans), p.artist.albums);
-        hero(ui, &Hero { editable: false, kind: "Artist", title: &p.artist.name, subtitle: &sub, art: p.artist.picture_xl.as_deref(), glyph: icon::USER, round: true, banner: None });
+        hero(ui, &Hero { editable: false, kind: "Artist", title: &p.artist.name, subtitle: &sub, art: p.artist.picture_xl.as_deref(), glyph: icon::USER, round: true, banner: None, links: &[] });
         app.note_visit(crate::app::Place::Artist(p.artist.id.clone()), &p.artist.name, "Artist", p.artist.picture.as_deref().or(p.artist.picture_xl.as_deref()), true);
         action_row(app, ui, &p.top);
         let ctx = ui.ctx().clone();
@@ -1002,22 +1052,8 @@ fn artist(app: &mut App, ui: &mut Ui) {
         if p.top.is_empty() {
             ui.label(RichText::new("No popular songs listed for this artist.").color(pal().text_muted));
         } else {
-            // Ten songs, with a button to show all of them.
-            let id = egui::Id::new(("artist_all", &p.artist.id));
-            let show_all = ui.ctx().data(|d| d.get_temp::<bool>(id).unwrap_or(false));
-            // Most-viewed first (songs whose views aren't known yet keep Deezer's order, after).
-            let mut top = p.top.clone();
-            app.ensure_views(&top);
-            top.sort_by_key(|t| std::cmp::Reverse(app.saved.views.get(&t.id).map(|(v, _)| *v).unwrap_or(0)));
-            let shown = if show_all { &top[..] } else { &top[..top.len().min(10)] };
-            tracks_block(app, ui, "artist_top", shown);
-            if p.top.len() > 10 {
-                ui.add_space(6.0);
-                let label = if show_all { "Show less".to_string() } else { format!("Show all {}", p.top.len()) };
-                if ghost_button(ui, "", &label).clicked() {
-                    ui.ctx().data_mut(|d| d.insert_temp(id, !show_all));
-                }
-            }
+            // Deezer's ten most popular, already sorted by popularity.
+            tracks_block(app, ui, "artist_top", &p.top);
         }
 
         if !p.releases.is_empty() {
@@ -1044,8 +1080,7 @@ fn latest_release_card(ui: &mut Ui, a: &AlbumInfo) -> bool {
     let date = a.release_date.as_deref().map(pretty_date).unwrap_or_default();
     paint_line(ui, pos2(tx, rect.top() + 26.0), &date.to_uppercase(), semi(11.0), pal().text_muted, tw);
     paint_line(ui, pos2(tx, rect.top() + 46.0), &a.title, heavy(20.0), pal().text, tw);
-    let songs = if a.nb_tracks == 1 { "1 song".to_string() } else { format!("{} songs", a.nb_tracks) };
-    paint_line(ui, pos2(tx, rect.top() + 80.0), &format!("{} · {songs}", a.kind()), regular(13.0), pal().text_muted, tw);
+    paint_line(ui, pos2(tx, rect.top() + 80.0), &release_line(a), regular(13.0), pal().text_muted, tw);
     resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
 }
 
@@ -1068,7 +1103,7 @@ fn local_collection(app: &mut App, ui: &mut Ui, title: &str, sub: &str, glyph: &
     // Cover: your own picture, else the first song's artwork.
     let custom = playlist.and_then(|i| app.saved.playlists.get(i)).and_then(|p| p.cover.as_ref()).map(|c| crate::settings::file_uri(c));
     let art = custom.clone().or_else(|| if playlist.is_some() { tracks.first().and_then(|t| t.art_big()).map(str::to_owned) } else { None });
-    let clicks = hero(ui, &Hero { editable: playlist.is_some(), kind: tr(kind), title: tr(title), subtitle: sub, art: art.as_deref(), glyph, round: false, banner: None });
+    let clicks = hero(ui, &Hero { editable: playlist.is_some(), kind: tr(kind), title: tr(title), subtitle: sub, art: art.as_deref(), glyph, round: false, banner: None, links: &[] });
     match (&app.route, playlist) {
         (_, Some(_)) => app.note_visit(crate::app::Place::Yours(title.to_string()), title, "Playlist", art.as_deref(), false),
         (Route::Liked, _) => app.note_visit(crate::app::Place::Liked, tr("Liked Songs"), "Playlist", None, false),
@@ -1119,6 +1154,7 @@ fn local_collection(app: &mut App, ui: &mut Ui, title: &str, sub: &str, glyph: &
         _ => None,
     };
     app.ensure_genres(tracks, &ctx);
+    app.ensure_featured(tracks);
     // Imported songs: look again on Deezer, and give coverless songs their video's picture.
     app.rematch_imports(tracks, &ctx);
     let coverless: Vec<Track> = tracks.iter().filter(|t| t.cover_small.is_none() && !crate::local::is_local(&t.id)).cloned().collect();
@@ -1365,7 +1401,7 @@ fn player_bar(app: &mut App, ui: &mut Ui) {
             artwork(ui, art, t.art_big(), CornerRadius::same(6));
         }
         let art_resp = ui.interact(art, egui::Id::new("np_art"), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
-        a11y(ui, &art_resp, egui::WidgetType::Button, || format!("Now playing: {} by {}. Open queue", t.title, t.artist.name));
+        a11y(ui, &art_resp, egui::WidgetType::Button, || format!("Now playing: {} by {}. Open queue", t.title, t.all_artists()));
         if art_resp.clicked() {
             app.navigate(Route::Queue, &ctx);
         }
@@ -1416,16 +1452,19 @@ fn player_bar(app: &mut App, ui: &mut Ui) {
             paint_line(ui, pos2(tx, left.center().y + 2.0), &loading_text(&msg), regular(12.0), pal().accent_soft, tw);
             ui.ctx().request_repaint_after(std::time::Duration::from_millis(200));
         } else {
-            let a = link_text(ui, egui::Id::new("np_artist"), pos2(tx, left.center().y + 2.0), &t.artist.name, regular(12.5), pal().text_muted, tw);
+            let (a, feat) = artist_links(ui, egui::Id::new("np_artist"), pos2(tx, left.center().y + 2.0), &t, regular(12.5), pal().text_muted, tw);
             if a.clicked() {
                 app.open_artist(&t, &ctx);
+            }
+            if let Some(id) = feat {
+                app.navigate(Route::Artist(id), &ctx);
             }
         }
         let liked = app.liked_ids.contains(&t.id);
         // The heart sits just after the song's title and artist, like Spotify.
         let second_line = match app.audio.load_state() {
             LoadState::Resolving(msg) => loading_text(&msg),
-            _ => t.artist.name.clone(),
+            _ => t.all_artists(),
         };
         let artist_w = one_line(ui, &second_line, regular(12.5), pal().text_muted, tw).size().x;
         let text_right = tx + title_rect.width().max(artist_w);
@@ -1786,6 +1825,9 @@ fn credits_dialog(app: &mut App, ctx: &egui::Context) {
                 };
                 if c.people.is_empty() {
                     row(ui, "Main artist", &t.artist.name);
+                    for a in &t.featured {
+                        row(ui, "Featured artist", &a.name);
+                    }
                 }
                 for (name, role) in &c.people {
                     row(ui, role, name);
@@ -1846,4 +1888,22 @@ fn toast(app: &App, ctx: &egui::Context) {
                 });
         });
     ctx.request_repaint_after(std::time::Duration::from_millis(30));
+}
+
+/// "1 song" / "12 songs".
+fn song_count(n: usize) -> String {
+    if n == 1 { "1 song".to_string() } else { format!("{n} songs") }
+}
+
+/// "Single · 2024 · 3 songs". The count is left out when Deezer didn't give one,
+/// rather than showing "0 songs".
+fn release_line(a: &crate::deezer::AlbumInfo) -> String {
+    let mut s = crate::i18n::tr(a.kind()).to_string();
+    if let Some(y) = a.year() {
+        s.push_str(&format!(" · {y}"));
+    }
+    if a.nb_tracks > 0 {
+        s.push_str(&format!(" · {}", song_count(a.nb_tracks as usize)));
+    }
+    s
 }

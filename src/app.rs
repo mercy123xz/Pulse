@@ -46,6 +46,26 @@ pub enum Page {
     Song(Box<deezer::SongPage>),
 }
 
+impl Page {
+    /// Every song on the page (for updating details that arrive later).
+    pub fn for_each_track(&mut self, mut f: impl FnMut(&mut Track)) {
+        match self {
+            Page::Home(c) => c.tracks.iter_mut().for_each(&mut f),
+            Page::Tracks(t) => t.iter_mut().for_each(&mut f),
+            Page::Search(r) => r.tracks.iter_mut().for_each(&mut f),
+            Page::Playlist { tracks, .. } | Page::Album { tracks, .. } => tracks.iter_mut().for_each(&mut f),
+            Page::Artist(p) => p.top.iter_mut().for_each(&mut f),
+            Page::Song(p) => {
+                f(&mut p.track);
+                p.artist_top.iter_mut().for_each(&mut f);
+                if let Some((_, t)) = &mut p.album {
+                    t.iter_mut().for_each(&mut f);
+                }
+            }
+        }
+    }
+}
+
 pub enum Remote {
     Loading,
     Ready(Box<Page>),
@@ -255,6 +275,8 @@ pub struct Saved {
     /// Pages you opened, most recent first ("Recents" on the home page).
     pub visits: Vec<Visit>,
     pub profile: Profile,
+    /// Songs whose featured artists were already looked up.
+    pub featured_checked: HashSet<String>,
 }
 
 /// Your profile, kept on this computer.
@@ -293,6 +315,7 @@ impl Default for Saved {
             played_albums: vec![],
             visits: vec![],
             profile: Profile::default(),
+            featured_checked: HashSet::new(),
         }
     }
 }
@@ -422,6 +445,11 @@ pub struct App {
     /// "View credits" window: the song and its credits once loaded.
     pub credits: Option<(Track, Option<Result<crate::deezer::Credits, String>>)>,
     credits_rx: Option<Receiver<Result<crate::deezer::Credits, String>>>,
+    /// Featured-artist lookups: waiting, and results coming back.
+    featured_queue: std::collections::VecDeque<u64>,
+    featured_busy: bool,
+    featured_tx: Sender<(String, Vec<deezer::ArtistRef>)>,
+    featured_rx: Receiver<(String, Vec<deezer::ArtistRef>)>,
     /// Imported songs that weren't found on Deezer, checked again this session.
     rematch_tried: HashSet<String>,
     rematch_rx: Option<Receiver<Rematch>>,
@@ -482,6 +510,7 @@ impl App {
         let (tx, rx) = channel();
         let (views_tx, views_rx) = channel();
         let (prefetch_failed_tx, prefetch_failed_rx) = channel();
+        let (featured_tx, featured_rx) = channel();
         let audio = AudioEngine::new();
         audio.set_volume(saved.volume);
 
@@ -530,6 +559,10 @@ impl App {
             highlight: None,
             song_tracks: HashMap::new(),
             rematch_tried: HashSet::new(),
+            featured_queue: Default::default(),
+            featured_busy: false,
+            featured_tx,
+            featured_rx,
             rematch_rx: None,
             told_next: None,
             themes,
@@ -603,6 +636,7 @@ impl App {
         self.list_view = ListView::default();
         self.highlight = None;
         self.selection.1.clear();
+        self.featured_queue.clear();
         // Lookups for the page we left aren't needed any more.
         for t in self.views_queue.drain(..) {
             self.views_pending.remove(&t.id);
@@ -695,6 +729,7 @@ impl App {
         self.receive_credits();
         self.receive_import(ctx);
         self.receive_rematches();
+        self.run_featured(ctx);
         self.run_views(ctx);
         while let Ok(id) = self.prefetch_failed_rx.try_recv() {
             self.prefetch_failed.insert(id);
@@ -773,7 +808,7 @@ impl App {
 
         // Window title shows the current song.
         let title = match &self.current {
-            Some(t) if self.is_playing() => format!("{} · {} — Pulse", t.title, t.artist.name),
+            Some(t) if self.is_playing() => format!("{} · {} — Pulse", t.title, t.all_artists()),
             _ => "Pulse".to_string(),
         };
         if title != self.last_title {
@@ -1233,13 +1268,59 @@ impl App {
         })
     }
 
-    /// Changes every saved copy of song `id` (playlists, likes, history, queue).
+    /// Changes every copy of song `id`: playlists, likes, history, queue and loaded pages.
     fn update_track(&mut self, id: &str, mut f: impl FnMut(&mut Track)) {
         let lists = self.saved.playlists.iter_mut().flat_map(|p| p.tracks.iter_mut());
         let others = self.saved.liked.iter_mut().chain(self.saved.recent.iter_mut()).chain(self.queue.iter_mut()).chain(self.current.iter_mut());
         for t in lists.chain(others).filter(|t| t.id == id) {
             f(t);
         }
+        for remote in self.cache.values_mut() {
+            if let Remote::Ready(page) = remote {
+                page.for_each_track(|t| {
+                    if t.id == id {
+                        f(t);
+                    }
+                });
+            }
+        }
+    }
+
+    /// Looks up featured artists for songs in a list (once per song, ever), one at a time.
+    pub fn ensure_featured(&mut self, tracks: &[Track]) {
+        for t in tracks.iter().take(80) {
+            if let Some(n) = t.deezer_number()
+                && t.featured.is_empty()
+                && !self.saved.featured_checked.contains(&t.id)
+                && !self.featured_queue.contains(&n)
+            {
+                self.featured_queue.push_back(n);
+            }
+        }
+    }
+
+    fn run_featured(&mut self, ctx: &egui::Context) {
+        while let Ok((id, featured)) = self.featured_rx.try_recv() {
+            self.featured_busy = false;
+            self.saved.featured_checked.insert(id.clone());
+            if !featured.is_empty() {
+                self.update_track(&id, |t| t.featured = featured.clone());
+            }
+        }
+        if self.featured_busy {
+            return;
+        }
+        let Some(n) = self.featured_queue.pop_front() else { return };
+        self.featured_busy = true;
+        let tx = self.featured_tx.clone();
+        let ctx = ctx.clone();
+        std::thread::spawn(move || {
+            // Paced well under Deezer's limit, since this runs alongside everything else.
+            std::thread::sleep(Duration::from_millis(250));
+            let featured = deezer::featured_artists(n).unwrap_or_default();
+            let _ = tx.send((format!("dz:{n}"), featured));
+            ctx.request_repaint();
+        });
     }
 
     /// Looks again for imported songs that weren't found on Deezer (e.g. because Deezer
@@ -1902,6 +1983,7 @@ impl App {
                     }
                 }
                 TrackEvent::OpenArtist(t) => self.open_artist(&t, ctx),
+                TrackEvent::OpenArtistById(id) => self.navigate(Route::Artist(id), ctx),
                 TrackEvent::OpenAlbum(id) => self.navigate(Route::Album(id), ctx),
                 TrackEvent::ShowCredits(t) => self.show_credits(t, ctx),
                 TrackEvent::OpenSong(t) => self.open_song(&t, ctx),
