@@ -10,8 +10,8 @@
   "use strict";
 
   // The Worker's address and the Turnstile site key (both public). Empty: not set up yet.
-  var ENDPOINT = "";
-  var TURNSTILE_SITE_KEY = "";
+  var ENDPOINT = "https://pulse-questions.y0hyotuube.workers.dev/";
+  var TURNSTILE_SITE_KEY = "0x4AAAAAAF6OITIxlZXDQjk2";
   var REPO = "https://github.com/mercy123xz/Pulse";
   var root = document.currentScript && document.currentScript.src ? new URL(".", document.currentScript.src).href : "./";
 
