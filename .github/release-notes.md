@@ -1,4 +1,4 @@
-**Download `PulseSetup` below and run it** to install Pulse (no administrator password needed). Prefer no installer? Download **pulse.exe** instead and just double-click it.
+**Download `PulseSetup` below and run it** to install Pulse (no administrator password needed).
 Works on any 64-bit Windows 10 or 11 PC.
 
 **New in this version**
