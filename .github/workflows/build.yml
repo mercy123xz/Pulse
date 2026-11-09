@@ -3,7 +3,7 @@ name: Build Windows app
 on:
   push:
   workflow_dispatch:
-  # Publishing a release on GitHub builds pulse.exe and attaches it to that release.
+  # Publishing a release on GitHub builds the installer and attaches it to that release.
   release:
     types: [published]
 
@@ -62,7 +62,7 @@ jobs:
             target/installer/PulseSetup-*.exe
 
       # When main is built and the version in Cargo.toml (e.g. 0.1.0) has no release yet,
-      # publish one (tag v0.1.0) with the installer and pulse.exe attached. To ship a new version later,
+      # publish one (tag v0.1.0) with the installer attached. To ship a new version later,
       # bump `version` in Cargo.toml and push.
       - name: Publish a release for a new version
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -76,15 +76,15 @@ jobs:
           gh release view $tag *> $null
           if ($LASTEXITCODE -eq 0) { Write-Output "Release $tag already exists, nothing to publish."; exit 0 }
           $setup = Get-ChildItem target/installer/PulseSetup-*.exe | Select-Object -First 1
-          gh release create $tag $setup.FullName target/release/pulse.exe --target $env:GITHUB_SHA --title "Pulse $tag" --notes-file .github/release-notes.md
+          gh release create $tag $setup.FullName --target $env:GITHUB_SHA --title "Pulse $tag" --notes-file .github/release-notes.md
           exit $LASTEXITCODE
 
-      # A release made by hand on GitHub also gets the installer and pulse.exe attached.
-      - name: Attach pulse.exe to the release
+      # A release made by hand on GitHub also gets the installer attached.
+      - name: Attach the installer to the release
         if: github.event_name == 'release'
         env:
           GH_TOKEN: ${{ github.token }}
         shell: pwsh
         run: |
           $setup = Get-ChildItem target/installer/PulseSetup-*.exe | Select-Object -First 1
-          gh release upload "${{ github.event.release.tag_name }}" $setup.FullName target/release/pulse.exe --clobber
+          gh release upload "${{ github.event.release.tag_name }}" $setup.FullName --clobber

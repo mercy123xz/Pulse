@@ -8,7 +8,7 @@
 <p align="center">
   <b>A fast, native music player for Windows, written in Rust.</b><br>
   Search any artist and play full songs, with autoplay when your queue runs out.<br>
-  A small installer (or a single <code>.exe</code>), no account.
+  A small installer, no account.
 </p>
 
 <p align="center">
@@ -67,9 +67,7 @@
 2. Run it. It installs Pulse for your user account (no administrator password), adds it to the
    Start menu, and can add a desktop shortcut. Uninstall it from Windows Settings → Apps.
 
-Prefer no installer? Download **`pulse.exe`** from the same page and just double-click it.
-
-The first time you run either one, Windows may show **"Windows protected your PC"**. It does that for any
+The first time you run it, Windows may show **"Windows protected your PC"**. It does that for any
 new app that isn't signed with a paid certificate. Click **More info → Run anyway**.
 
 The first time you play a song, Pulse downloads two free tools it needs for YouTube playback,
