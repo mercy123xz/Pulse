@@ -15,7 +15,7 @@
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image">
-<link rel="preload" as="image" type="image/avif" imagesrcset="img/chart-page-800.avif 800w, img/chart-page.avif 1600w" imagesizes="(min-width: 1100px) 760px, 92vw" fetchpriority="high">
+<link rel="preload" as="image" type="image/avif" imagesrcset="img/chart-page-half.avif 823w, img/chart-page.avif 1647w" imagesizes="(min-width: 1100px) 760px, 92vw" fetchpriority="high">
 <style>
 :root {
   --bg: #0b0b0e;
@@ -121,7 +121,7 @@ h2 { font-size: clamp(1.8rem, 3.6vw, 2.6rem); line-height: 1.12; letter-spacing:
 .card p { margin: 0; color: var(--muted); font-size: .95rem; }
 
 /* Themes: mini app windows drawn in CSS with each theme's real colors */
-.themes { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1.2rem; }
+.themes { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 1.1rem; }
 .theme figcaption { margin-top: .7rem; }
 .theme figcaption strong { display: block; }
 .theme figcaption span { color: var(--muted); font-size: .9rem; }
@@ -166,6 +166,7 @@ footer a:hover { text-decoration: underline; }
       <ul>
         <li><a href="#features">Features</a></li>
         <li><a href="#themes">Themes</a></li>
+        <li><a href="docs/">Docs</a></li>
         <li><a href="https://github.com/mercy123xz/Pulse">GitHub</a></li>
       </ul>
     </nav>
@@ -181,20 +182,20 @@ footer a:hover { text-decoration: underline; }
         <h1 id="hero-title">Your music, <span>without the weight.</span></h1>
         <p class="lede">Pulse is a small, native music player written in Rust. Search any artist, press play, and hear the whole song. No account, no browser inside, nothing to sign up for.</p>
         <div class="cta">
-          <a class="btn btn-primary" href="https://github.com/mercy123xz/Pulse/releases/latest">
+          <a class="btn btn-primary js-download" href="download/">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 19h16"/></svg>
             Download for Windows
           </a>
           <a class="btn btn-ghost" href="https://github.com/mercy123xz/Pulse">View on GitHub</a>
         </div>
-        <p class="meta">Version 0.3.3 · under 10 MB installer · no administrator password needed</p>
+        <p class="meta">Version <span class="js-version">0.3.3</span> · under 10 MB installer · no administrator password needed</p>
       </div>
       <div class="window">
         <div class="window-bar" aria-hidden="true"><i></i><i></i><i></i></div>
         <picture>
-          <source type="image/avif" srcset="img/chart-page-800.avif 800w, img/chart-page.avif 1600w" sizes="(min-width: 1100px) 760px, 92vw">
-          <source type="image/webp" srcset="img/chart-page-800.webp 800w, img/chart-page.webp 1600w" sizes="(min-width: 1100px) 760px, 92vw">
-          <img src="img/chart-page.webp" width="1600" height="768" fetchpriority="high" decoding="async" alt="Pulse's Charts page: the 100 most popular songs, each with its cover, artist, album, YouTube view count and length.">
+          <source type="image/avif" srcset="img/chart-page-half.avif 823w, img/chart-page.avif 1647w" sizes="(min-width: 1100px) 760px, 92vw">
+          <source type="image/webp" srcset="img/chart-page-half.webp 823w, img/chart-page.webp 1647w" sizes="(min-width: 1100px) 760px, 92vw">
+          <img src="img/chart-page.webp" width="1647" height="791" fetchpriority="high" decoding="async" alt="Pulse's Charts page: the 100 most popular songs, each with its cover, artist, album, YouTube view count and length.">
         </picture>
       </div>
     </div>
@@ -204,7 +205,7 @@ footer a:hover { text-decoration: underline; }
     <ul class="wrap">
       <li><strong>&lt; 10 MB</strong><span>installer</span></li>
       <li><strong>Native</strong><span>Rust + DirectX 12, no web browser inside</span></li>
-      <li><strong>4 themes</strong><span>or make your own</span></li>
+      <li><strong>5 themes</strong><span>or make your own</span></li>
       <li><strong>5 languages</strong><span>English, Español, Português, Français, Deutsch</span></li>
       <li><strong>0 accounts</strong><span>everything stays on your PC</span></li>
     </ul>
@@ -224,9 +225,9 @@ footer a:hover { text-decoration: underline; }
       </div>
       <div class="shot">
         <picture>
-          <source type="image/avif" srcset="img/charts-800.avif 800w, img/charts.avif 1600w" sizes="(min-width: 960px) 680px, 92vw">
-          <source type="image/webp" srcset="img/charts-800.webp 800w, img/charts.webp 1600w" sizes="(min-width: 960px) 680px, 92vw">
-          <img src="img/charts.webp" width="1600" height="740" loading="lazy" decoding="async" alt="The Discover section of Pulse's home page: genre buttons from Pop to Folk, above a table of today's top songs.">
+          <source type="image/avif" srcset="img/charts-half.avif 831w, img/charts.avif 1663w" sizes="(min-width: 960px) 680px, 92vw">
+          <source type="image/webp" srcset="img/charts-half.webp 831w, img/charts.webp 1663w" sizes="(min-width: 960px) 680px, 92vw">
+          <img src="img/charts.webp" width="1663" height="769" loading="lazy" decoding="async" alt="The Discover section of Pulse's home page: genre buttons from Pop to Folk, above a table of today's top songs.">
         </picture>
       </div>
     </div>
@@ -241,27 +242,27 @@ footer a:hover { text-decoration: underline; }
       </div>
       <div class="shot">
         <picture>
-          <source type="image/avif" srcset="img/albums-800.avif 800w, img/albums.avif 1600w" sizes="(min-width: 960px) 680px, 92vw">
-          <source type="image/webp" srcset="img/albums-800.webp 800w, img/albums.webp 1600w" sizes="(min-width: 960px) 680px, 92vw">
-          <img src="img/albums.webp" width="1600" height="569" loading="lazy" decoding="async" alt="A grid of popular albums in Pulse, each with its cover, title and artist.">
+          <source type="image/avif" srcset="img/albums-half.avif 820w, img/albums.avif 1641w" sizes="(min-width: 960px) 680px, 92vw">
+          <source type="image/webp" srcset="img/albums-half.webp 820w, img/albums.webp 1641w" sizes="(min-width: 960px) 680px, 92vw">
+          <img src="img/albums.webp" width="1641" height="584" loading="lazy" decoding="async" alt="A grid of popular albums in Pulse, each with its cover, title and artist.">
         </picture>
       </div>
     </div>
     <div class="wrap strip">
       <div class="shot">
         <picture>
-          <source type="image/avif" srcset="img/artists-800.avif 800w, img/artists.avif 1600w" sizes="(min-width: 1180px) 1180px, (max-width: 700px) 820px, 100vw">
-          <source type="image/webp" srcset="img/artists-800.webp 800w, img/artists.webp 1600w" sizes="(min-width: 1180px) 1180px, (max-width: 700px) 820px, 100vw">
-          <img src="img/artists.webp" width="1600" height="318" loading="lazy" decoding="async" alt="A row of popular artists in Pulse, shown as round portraits with their names.">
+          <source type="image/avif" srcset="img/artists-half.avif 821w, img/artists.avif 1642w" sizes="(min-width: 1180px) 1180px, (max-width: 700px) 820px, 100vw">
+          <source type="image/webp" srcset="img/artists-half.webp 821w, img/artists.webp 1642w" sizes="(min-width: 1180px) 1180px, (max-width: 700px) 820px, 100vw">
+          <img src="img/artists.webp" width="1642" height="326" loading="lazy" decoding="async" alt="A row of popular artists in Pulse, shown as round portraits with their names.">
         </picture>
       </div>
     </div>
     <div class="wrap strip">
       <div class="shot">
         <picture>
-          <source type="image/avif" srcset="img/playlists-800.avif 800w, img/playlists.avif 1600w" sizes="(min-width: 1180px) 1180px, (max-width: 700px) 820px, 100vw">
-          <source type="image/webp" srcset="img/playlists-800.webp 800w, img/playlists.webp 1600w" sizes="(min-width: 1180px) 1180px, (max-width: 700px) 820px, 100vw">
-          <img src="img/playlists.webp" width="1600" height="318" loading="lazy" decoding="async" alt="A row of popular playlists in Pulse, from Christmas Hits to Lofi beats.">
+          <source type="image/avif" srcset="img/playlists-half.avif 823w, img/playlists.avif 1647w" sizes="(min-width: 1180px) 1180px, (max-width: 700px) 820px, 100vw">
+          <source type="image/webp" srcset="img/playlists-half.webp 823w, img/playlists.webp 1647w" sizes="(min-width: 1180px) 1180px, (max-width: 700px) 820px, 100vw">
+          <img src="img/playlists.webp" width="1647" height="327" loading="lazy" decoding="async" alt="A row of popular playlists in Pulse, from Christmas Hits to Lofi beats.">
         </picture>
       </div>
     </div>
@@ -311,7 +312,7 @@ footer a:hover { text-decoration: underline; }
     <div class="wrap">
       <p class="kicker">Themes</p>
       <h2 id="themes-title">Make it look like yours.</h2>
-      <p class="section-lede">Four themes come built in, each with a dark and a light version. Or make your own with a color file, a little CSS and a layout file. Spicetify color schemes work as they are, and Pulse reloads your theme the moment you save it.</p>
+      <p class="section-lede">Five themes come built in, each with a dark and a light version. Some glow softly in the colors of the song that's playing. Or make your own with a color file, a little CSS and a layout file. Spicetify color schemes work as they are, and Pulse reloads your theme the moment you save it.</p>
       <div class="themes">
         <figure class="theme">
           <div class="mini" role="img" aria-label="Preview of the Default theme: near-black with violet accents." style="--t-bg:#0b0b0e;--t-side:#0f0f13;--t-card:#1d1d24;--t-text:#ededf1;--t-sub:#9696a4;--t-accent:#7c3aed;--t-soft:#a78bfa;--r:10px">
@@ -345,6 +346,14 @@ footer a:hover { text-decoration: underline; }
           </div>
           <figcaption><strong>Lunar</strong><span>Night blues, icon sidebar, full-width artist photos</span></figcaption>
         </figure>
+        <figure class="theme">
+          <div class="mini" role="img" aria-label="Preview of the Aurora theme: near-black green with teal accents and very round corners." style="--t-bg:#07100f;--t-side:#0a1514;--t-card:#15302e;--t-text:#e6f7f4;--t-sub:#8fb8b2;--t-accent:#0f766e;--t-soft:#5eead4;--r:22px">
+            <div class="side"><i></i><i></i><i></i></div>
+            <div class="main"><div class="cover"></div><div class="rows"><i></i><i></i><i></i><i></i></div></div>
+            <div class="player"><b></b></div>
+          </div>
+          <figcaption><strong>Aurora</strong><span>Northern-light greens that glow with the music</span></figcaption>
+        </figure>
       </div>
     </div>
   </section>
@@ -355,11 +364,11 @@ footer a:hover { text-decoration: underline; }
         <h2 id="download-title">Ready when you are.</h2>
         <p class="section-lede" style="margin-inline:auto">Download the installer, run it, and press play. It installs just for you, adds Pulse to the Start menu, and uninstalls cleanly from Windows Settings.</p>
         <div class="cta">
-          <a class="btn btn-primary" href="https://github.com/mercy123xz/Pulse/releases/latest">
+          <a class="btn btn-primary js-download" href="download/">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 19h16"/></svg>
-            Download Pulse 0.3.3
+            Download Pulse <span class="js-version">0.3.3</span>
           </a>
-          <a class="btn btn-ghost" href="https://github.com/mercy123xz/Pulse#readme">Read the docs</a>
+          <a class="btn btn-ghost" href="docs/">Read the docs</a>
         </div>
         <small>Windows may show "Windows protected your PC" the first time, as it does for any new app without a paid signing certificate. Click <em>More info</em>, then <em>Run anyway</em>. The first song you play takes a moment longer while Pulse sets up YouTube playback (about 70 MB, once).</small>
       </div>
@@ -370,6 +379,7 @@ footer a:hover { text-decoration: underline; }
 <footer>
   <div class="wrap">
     <nav aria-label="Footer">
+      <a href="docs/">Docs</a>
       <a href="https://github.com/mercy123xz/Pulse">Source code</a>
       <a href="https://github.com/mercy123xz/Pulse/releases">All releases</a>
       <a href="https://github.com/mercy123xz/Pulse/issues">Report a problem</a>
@@ -377,5 +387,30 @@ footer a:hover { text-decoration: underline; }
     <p style="margin:0">Pulse is a free, non-commercial side project for personal listening. Song info and artwork come from Deezer; audio is streamed from YouTube with yt-dlp. Pulse isn't affiliated with or endorsed by Deezer, YouTube, Google, Spotify or SoundCloud. Screenshots show the artwork and artists of their respective owners.</p>
   </div>
 </footer>
+<script>
+// Point the download buttons straight at the newest installer, so one click downloads it.
+// Without this (or if GitHub can't be reached), they go to download/, which does the same.
+(function () {
+  var KEY = "pulse-latest";
+  function apply(r) {
+    document.querySelectorAll(".js-download").forEach(function (a) { a.href = r.url; });
+    document.querySelectorAll(".js-version").forEach(function (s) { s.textContent = r.version; });
+  }
+  try {
+    var saved = JSON.parse(sessionStorage.getItem(KEY) || "null");
+    if (saved && Date.now() - saved.at < 6e5) { apply(saved); return; }
+  } catch (e) {}
+  fetch("https://api.github.com/repos/mercy123xz/Pulse/releases/latest", { headers: { Accept: "application/vnd.github+json" } })
+    .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
+    .then(function (rel) {
+      var exe = (rel.assets || []).find(function (a) { return /\.exe$/i.test(a.name); });
+      if (!exe) return;
+      var r = { url: exe.browser_download_url, version: String(rel.tag_name || "").replace(/^v/, ""), at: Date.now() };
+      apply(r);
+      try { sessionStorage.setItem(KEY, JSON.stringify(r)); } catch (e) {}
+    })
+    .catch(function () {});
+})();
+</script>
 </body>
 </html>
