@@ -226,6 +226,11 @@ const STRINGS: &[(&str, [&str; 4])] = &[
     ("Use letters, numbers, spaces, _ . or -", ["Usa letras, números, espacios, _ . o -", "Use letras, números, espaços, _ . ou -", "Utilisez des lettres, chiffres, espaces, _ . ou -", "Nutze Buchstaben, Zahlen, Leerzeichen, _ . oder -"]),
     ("Getting songs…", ["Obteniendo canciones…", "Buscando músicas…", "Récupération des titres…", "Songs werden geladen…"]),
     ("Loading…", ["Cargando…", "Carregando…", "Chargement…", "Wird geladen…"]),
+    ("Song", ["Canción", "Música", "Titre", "Song"]),
+    ("views", ["vistas", "visualizações", "vues", "Aufrufe"]),
+    ("Popular tracks by", ["Canciones populares de", "Músicas populares de", "Titres populaires de", "Beliebte Songs von"]),
+    ("Song not found", ["Canción no encontrada", "Música não encontrada", "Titre introuvable", "Song nicht gefunden"]),
+    ("Open it again from a list.", ["Ábrela de nuevo desde una lista.", "Abra de novo a partir de uma lista.", "Rouvrez-le depuis une liste.", "Öffne ihn erneut aus einer Liste."]),
     ("Open themes folder", ["Abrir carpeta de temas", "Abrir pasta de temas", "Ouvrir le dossier des thèmes", "Design-Ordner öffnen"]),
 ];
 

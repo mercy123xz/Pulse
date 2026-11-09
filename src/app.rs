@@ -30,6 +30,8 @@ pub enum Route {
     Settings,
     /// A Daily Mix built around one of your most-played artists (Deezer artist id).
     Mix(String),
+    /// A song's own page (its id, "dz:…" or an imported song's id).
+    Song(String),
     Profile,
 }
 
@@ -41,6 +43,7 @@ pub enum Page {
     Playlist { info: PlaylistInfo, tracks: Vec<Track> },
     Album { info: AlbumInfo, tracks: Vec<Track> },
     Artist(ArtistPage),
+    Song(Box<deezer::SongPage>),
 }
 
 pub enum Remote {
@@ -312,6 +315,10 @@ fn offline_source(track: &Track, downloaded: Option<&std::path::Path>) -> Option
     }))
 }
 
+/// Result of checking an imported song again: (its id, the Deezer song if found now,
+/// else a cover from iTunes if there is one).
+type Rematch = (String, Option<Track>, Option<String>);
+
 /// A finished download: the song, and its file and YouTube video id (or what went wrong).
 type DownloadResult = (Track, Result<(std::path::PathBuf, String), String>);
 
@@ -412,6 +419,11 @@ pub struct App {
     /// "View credits" window: the song and its credits once loaded.
     pub credits: Option<(Track, Option<Result<crate::deezer::Credits, String>>)>,
     credits_rx: Option<Receiver<Result<crate::deezer::Credits, String>>>,
+    /// Imported songs that weren't found on Deezer, checked again this session.
+    rematch_tried: HashSet<String>,
+    rematch_rx: Option<Receiver<Rematch>>,
+    /// Songs whose page was opened, for songs that aren't on Deezer (drawn from what Pulse has).
+    pub song_tracks: HashMap<String, Track>,
     /// A song to point out on the page it was opened on (id, when).
     pub highlight: Option<(String, f64)>,
     /// Size of the cache folders, measured when Settings opens.
@@ -448,6 +460,8 @@ pub struct App {
     // YouTube view counts
     views_queue: std::collections::VecDeque<Track>,
     views_pending: HashSet<String>,
+    /// Songs whose lookup found nothing this session (not asked again until restart).
+    views_failed: HashSet<String>,
     views_tx: Sender<(String, Option<(String, u64)>)>,
     views_rx: Receiver<(String, Option<(String, u64)>)>,
     genre_rx: Option<Receiver<(String, Vec<String>)>>,
@@ -510,6 +524,9 @@ impl App {
             credits_rx: None,
             cache_size: None,
             highlight: None,
+            song_tracks: HashMap::new(),
+            rematch_tried: HashSet::new(),
+            rematch_rx: None,
             told_next: None,
             themes,
             theme_watch: crate::themes::watch(&cc.egui_ctx),
@@ -527,6 +544,7 @@ impl App {
             profile_editing: None,
             views_queue: Default::default(),
             views_pending: HashSet::new(),
+            views_failed: HashSet::new(),
             views_tx,
             views_rx,
             genre_rx: None,
@@ -619,6 +637,8 @@ impl App {
             Route::Album(id) => format!("album:{id}"),
             Route::Artist(id) => format!("artist:{id}"),
             Route::Mix(id) => format!("mix:{id}"),
+            Route::Song(id) if deezer::is_deezer_id(id.trim_start_matches("dz:")) => format!("song:{id}"),
+            Route::Song(_) => return None,
             Route::Liked | Route::Recent | Route::Queue | Route::Local(_) | Route::LocalFiles | Route::Settings | Route::Profile => return None,
         })
     }
@@ -641,6 +661,10 @@ impl App {
             Route::Album(id) => Box::new(move || deezer::album(&id).map(|(info, tracks)| Page::Album { info, tracks })),
             Route::Artist(id) => Box::new(move || deezer::artist_page(&id).map(Page::Artist)),
             Route::Mix(id) => Box::new(move || deezer::mix(&id).map(Page::Tracks)),
+            Route::Song(id) => {
+                let Some(n) = id.strip_prefix("dz:").and_then(|n| n.parse::<u64>().ok()) else { return };
+                Box::new(move || deezer::song_page(n).map(|p| Page::Song(Box::new(p))))
+            }
             _ => return,
         };
         let tx = self.tx.clone();
@@ -665,6 +689,7 @@ impl App {
     pub fn tick(&mut self, ctx: &egui::Context) {
         self.receive_credits();
         self.receive_import(ctx);
+        self.receive_rematches();
         self.run_views(ctx);
         while let Ok(id) = self.prefetch_failed_rx.try_recv() {
             self.prefetch_failed.insert(id);
@@ -1203,12 +1228,100 @@ impl App {
         })
     }
 
+    /// Changes every saved copy of song `id` (playlists, likes, history, queue).
+    fn update_track(&mut self, id: &str, mut f: impl FnMut(&mut Track)) {
+        let lists = self.saved.playlists.iter_mut().flat_map(|p| p.tracks.iter_mut());
+        let others = self.saved.liked.iter_mut().chain(self.saved.recent.iter_mut()).chain(self.queue.iter_mut()).chain(self.current.iter_mut());
+        for t in lists.chain(others).filter(|t| t.id == id) {
+            f(t);
+        }
+    }
+
+    /// Looks again for imported songs that weren't found on Deezer (e.g. because Deezer
+    /// was busy during the import), and fixes their covers. One batch at a time.
+    pub fn rematch_imports(&mut self, tracks: &[Track], ctx: &egui::Context) {
+        if self.rematch_rx.is_some() {
+            return;
+        }
+        let todo: Vec<Track> = tracks.iter().filter(|t| t.id.starts_with("imp:") && !self.rematch_tried.contains(&t.id)).take(25).cloned().collect();
+        if todo.is_empty() {
+            return;
+        }
+        self.rematch_tried.extend(todo.iter().map(|t| t.id.clone()));
+        let (tx, rx) = channel();
+        self.rematch_rx = Some(rx);
+        let ctx = ctx.clone();
+        std::thread::spawn(move || {
+            for t in todo {
+                let mut found = deezer::find_track(&t.artist.name, &t.title, t.duration).ok().flatten();
+                if found.is_none() {
+                    found = deezer::find_track(&t.title, &t.artist.name, t.duration).ok().flatten();
+                }
+                let cover = if found.is_none() { crate::itunes::cover(&t.artist.name, &t.title) } else { None };
+                if tx.send((t.id, found, cover)).is_err() {
+                    return;
+                }
+                ctx.request_repaint();
+                std::thread::sleep(Duration::from_millis(250));
+            }
+        });
+    }
+
+    fn receive_rematches(&mut self) {
+        let Some(rx) = &self.rematch_rx else { return };
+        let mut results = vec![];
+        let mut finished = false;
+        loop {
+            match rx.try_recv() {
+                Ok(r) => results.push(r),
+                Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    finished = true;
+                    break;
+                }
+            }
+        }
+        if finished {
+            self.rematch_rx = None;
+        }
+        for (old, found, cover) in results {
+            match found {
+                Some(new) => {
+                    // Swap in the Deezer song; keep its YouTube video and "date added".
+                    if let Some(v) = self.youtube_ids.lock().unwrap().get(&old).cloned() {
+                        self.youtube_ids.lock().unwrap().insert(new.id.clone(), v);
+                    }
+                    for p in &mut self.saved.playlists {
+                        if let Some(when) = p.added.remove(&old) {
+                            p.added.insert(new.id.clone(), when);
+                        }
+                    }
+                    let new2 = new.clone();
+                    self.update_track(&old, |t| *t = new2.clone());
+                    if self.liked_ids.remove(&old) {
+                        self.liked_ids.insert(new.id.clone());
+                    }
+                }
+                None => {
+                    // Songs imported from Spotify before this fix carry the playlist's cover.
+                    let spotify = old.starts_with("imp:spotify:");
+                    self.update_track(&old, |t| {
+                        if cover.is_some() || spotify {
+                            t.cover_small = cover.clone();
+                            t.cover_big = cover.clone();
+                        }
+                    });
+                }
+            }
+        }
+    }
+
     /// Asks for YouTube view counts of songs that don't have a recent one.
     pub fn ensure_views(&mut self, tracks: &[Track]) {
         const WEEK: u64 = 7 * 86_400;
         let now = now_unix();
         for t in tracks.iter().take(60) {
-            if crate::local::is_local(&t.id) || self.views_pending.contains(&t.id) {
+            if crate::local::is_local(&t.id) || self.views_pending.contains(&t.id) || self.views_failed.contains(&t.id) {
                 continue;
             }
             if self.saved.views.get(&t.id).is_some_and(|(_, at)| now.saturating_sub(*at) < WEEK) {
@@ -1223,8 +1336,19 @@ impl App {
     fn run_views(&mut self, ctx: &egui::Context) {
         while let Ok((id, found)) = self.views_rx.try_recv() {
             self.views_pending.remove(&id);
+            if found.is_none() && crate::youtube::tools_ready() {
+                self.views_failed.insert(id.clone());
+            }
             if let Some((video, n)) = found {
                 self.saved.views.insert(id.clone(), (n, now_unix()));
+                // Songs without any cover get their video's picture.
+                let thumb = crate::import::youtube_thumb(&video);
+                self.update_track(&id, |t| {
+                    if t.cover_small.is_none() {
+                        t.cover_small = Some(thumb.clone());
+                        t.cover_big = Some(thumb.clone());
+                    }
+                });
                 // Remember the video too, so playing the song skips the search.
                 self.youtube_ids.lock().unwrap().entry(id).or_insert(video);
             }
@@ -1611,17 +1735,11 @@ impl App {
     }
 
     /// Applies what the user did in a track list. `list` is the list that was shown.
-    /// Opens a song's album with the song highlighted (or its artist, for songs without one).
+    /// Opens a song's own page (like Spotify's).
     pub fn open_song(&mut self, t: &Track, ctx: &egui::Context) {
-        let now = ctx.input(|i| i.time);
-        if let Some(al) = t.album.as_ref().filter(|a| deezer::is_deezer_id(&a.id)) {
-            self.navigate(Route::Album(al.id.clone()), ctx);
-            self.highlight = Some((t.id.clone(), now));
-        } else if t.has_artist_page() {
-            self.open_artist(t, ctx);
-        } else {
-            self.toast("This song has no album page.", ctx);
-        }
+        self.song_tracks.insert(t.id.clone(), t.clone());
+        self.navigate(Route::Song(t.id.clone()), ctx);
+        self.highlight = Some((t.id.clone(), ctx.input(|i| i.time)));
     }
 
     /// Opens the credits window and loads the credits in the background.

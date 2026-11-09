@@ -61,10 +61,18 @@ pub fn artwork(ui: &Ui, rect: Rect, url: Option<&str>, radius: CornerRadius) {
         pal().text_faint,
     );
     if let Some(url) = url {
-        egui::Image::new(url)
-            .corner_radius(radius)
-            .show_loading_spinner(false)
-            .paint_at(ui, rect);
+        let mut img = egui::Image::new(url).corner_radius(radius).show_loading_spinner(false);
+        // YouTube video pictures are wide: show their middle square instead of squashing them.
+        if url.contains("i.ytimg.com/") {
+            let uv = if url.contains("hqdefault") {
+                // 4:3 with black bars above and below the 16:9 picture.
+                Rect::from_min_max(pos2(0.21875, 0.125), pos2(0.78125, 0.875))
+            } else {
+                Rect::from_min_max(pos2(0.21875, 0.0), pos2(0.78125, 1.0))
+            };
+            img = img.uv(uv);
+        }
+        img.paint_at(ui, rect);
     }
 }
 

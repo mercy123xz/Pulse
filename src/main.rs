@@ -8,6 +8,7 @@ mod downloads;
 mod dsp;
 mod i18n;
 mod import;
+mod itunes;
 mod local;
 mod net;
 mod settings;

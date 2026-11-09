@@ -9,6 +9,7 @@ use crate::i18n::tr;
 
 mod personal;
 mod settings_page;
+mod song_page;
 
 pub use personal::ProfileForm;
 use egui::{Align, Align2, Color32, CornerRadius, Frame, Key, Layout, Margin, Rect, RichText, Sense, Stroke, Ui, Vec2, pos2, vec2};
@@ -465,6 +466,7 @@ fn page(app: &mut App, ui: &mut Ui) {
         Route::Artist(_) => artist(app, ui),
         Route::Settings => settings_page::settings_page(app, ui),
         Route::Mix(id) => personal::mix_page(app, ui, &id),
+        Route::Song(id) => song_page::song_page(app, ui, &id),
         Route::Profile => personal::profile_page(app, ui),
         Route::LocalFiles => {
             if app.local_scanning && app.local_files.is_empty() {
@@ -1116,6 +1118,10 @@ fn local_collection(app: &mut App, ui: &mut Ui, title: &str, sub: &str, glyph: &
         _ => None,
     };
     app.ensure_genres(tracks, &ctx);
+    // Imported songs: look again on Deezer, and give coverless songs their video's picture.
+    app.rematch_imports(tracks, &ctx);
+    let coverless: Vec<Track> = tracks.iter().filter(|t| t.cover_small.is_none() && !crate::local::is_local(&t.id)).cloned().collect();
+    app.ensure_views(&coverless);
     list_toolbar(app, ui, tracks, playlist, title);
     let chips = crate::app::genre_chips(tracks, &app.saved.album_genres);
     if !chips.is_empty() {

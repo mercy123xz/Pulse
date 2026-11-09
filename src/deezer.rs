@@ -388,18 +388,34 @@ fn get<T: for<'de> Deserialize<'de>>(path: &str, query: &[(&str, &str)]) -> Resu
         let text = std::fs::read_to_string(&file).map_err(|e| format!("{file}: {e}"))?;
         return parse(&text);
     }
-    let mut req = crate::net::api().get(format!("{BASE}{path}"));
-    for (k, v) in query {
-        req = req.query(*k, *v);
+    // Deezer allows 50 requests per 5 seconds. When it says it's busy, wait and try again
+    // (otherwise a busy moment looks like "song not found").
+    let mut wait = 700;
+    for attempt in 0..4 {
+        let mut req = crate::net::api().get(format!("{BASE}{path}"));
+        for (k, v) in query {
+            req = req.query(*k, *v);
+        }
+        let mut resp = req.call().map_err(crate::net::friendly_error)?;
+        let text = resp
+            .body_mut()
+            .with_config()
+            .limit(20 * 1024 * 1024)
+            .read_to_string()
+            .map_err(|e| format!("Couldn't read Deezer's reply ({e})"))?;
+        if attempt < 3 && is_busy_reply(&text) {
+            std::thread::sleep(std::time::Duration::from_millis(wait));
+            wait *= 2;
+            continue;
+        }
+        return parse(&text);
     }
-    let mut resp = req.call().map_err(crate::net::friendly_error)?;
-    let text = resp
-        .body_mut()
-        .with_config()
-        .limit(20 * 1024 * 1024)
-        .read_to_string()
-        .map_err(|e| format!("Couldn't read Deezer's reply ({e})"))?;
-    parse(&text)
+    unreachable!()
+}
+
+/// Deezer's "too many requests" reply (error code 4).
+fn is_busy_reply(text: &str) -> bool {
+    serde_json::from_str::<DzError>(text).is_ok_and(|e| e.error.code == 4)
 }
 
 fn tracks(list: List<DzTrack>) -> Vec<Track> {
@@ -540,6 +556,29 @@ struct DzAlbumLabel {
 /// One song by its Deezer number.
 pub fn track_by_id(id: u64) -> Result<Track, String> {
     get::<DzTrack>(&format!("/track/{id}"), &[]).map(|t| track(t, None))
+}
+
+/// An artist's most popular songs.
+pub fn artist_top(artist_id: &str, limit: usize) -> Result<Vec<Track>, String> {
+    let top: List<DzTrack> = get(&format!("/artist/{artist_id}/top"), &[("limit", &limit.to_string())])?;
+    Ok(tracks(top))
+}
+
+/// Everything on a song's page.
+#[derive(Debug, Clone)]
+pub struct SongPage {
+    pub track: Track,
+    pub credits: Credits,
+    pub album: Option<(AlbumInfo, Vec<Track>)>,
+    pub artist_top: Vec<Track>,
+}
+
+pub fn song_page(id: u64) -> Result<SongPage, String> {
+    let track = track_by_id(id)?;
+    let credits = credits(id).unwrap_or_default();
+    let album = track.album.as_ref().filter(|a| is_deezer_id(&a.id)).and_then(|a| album(&a.id).ok());
+    let artist_top = if is_deezer_id(&track.artist.id) { artist_top(&track.artist.id, 6).unwrap_or_default() } else { vec![] };
+    Ok(SongPage { track, credits, album, artist_top })
 }
 
 /// An album's genres.
