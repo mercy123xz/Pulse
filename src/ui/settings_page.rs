@@ -129,6 +129,9 @@ pub fn settings_page(app: &mut App, ui: &mut Ui) {
     row(ui, tr("High contrast mode"), tr("Stronger colors and borders, easier to read."), |ui| {
         switch(ui, &mut s.high_contrast, tr("High contrast mode"));
     });
+    row(ui, tr("Reduce motion"), tr("Turns off moving backgrounds, the live waveform and fades."), |ui| {
+        switch(ui, &mut s.reduce_motion, tr("Reduce motion"));
+    });
     row(ui, tr("Enable hardware acceleration"), tr("Uses your graphics card to draw Pulse. Turn off if the window flickers or stays blank. Restart Pulse to apply."), |ui| {
         switch(ui, &mut s.hardware_acceleration, tr("Enable hardware acceleration"));
     });
@@ -373,7 +376,7 @@ fn eq_curve(ui: &mut Ui, gains: &mut [f32; 6]) -> bool {
     // Grid: one line per band, a centre line at 0 dB, and the dB labels.
     for (i, hz) in EQ_BANDS.iter().enumerate() {
         p.vline(x_of(i), plot.y_range(), Stroke::new(1.0, pal().border));
-        p.text(pos2(x_of(i), plot.bottom() + 16.0), Align2::CENTER_CENTER, band_label(*hz), med(11.5), pal().text_muted);
+        paint_icon(&p, pos2(x_of(i), plot.bottom() + 16.0), band_label(*hz), med(11.5), pal().text_muted);
     }
     p.hline(plot.x_range(), y_of(0.0), Stroke::new(1.0, pal().border));
     p.text(pos2(outer.left(), plot.top()), Align2::LEFT_CENTER, "+12dB", med(11.5), pal().text_muted);

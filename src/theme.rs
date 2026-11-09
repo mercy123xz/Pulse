@@ -252,6 +252,108 @@ pub fn icon_fill() -> FontFamily {
     FontFamily::Name("phosphor-fill".into())
 }
 
+fn icon_only(filled: bool) -> FontFamily {
+    FontFamily::Name(if filled { "icon-fill" } else { "icon-regular" }.into())
+}
+
+/// Where an icon's drawing sits inside its box, as a fraction of the font size (x right,
+/// y down, from the box's center). Most Phosphor icons are centered; some aren't.
+fn ink_offset(ch: char, filled: bool) -> egui::Vec2 {
+    use skrifa::MetadataProvider;
+    use skrifa::instance::{LocationRef, Size};
+    static CACHE: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<(char, bool), egui::Vec2>>> = std::sync::OnceLock::new();
+    let cache = CACHE.get_or_init(Default::default);
+    if let Some(v) = cache.lock().unwrap().get(&(ch, filled)) {
+        return *v;
+    }
+    let bytes = if filled { egui_phosphor::Variant::Fill.font_bytes() } else { egui_phosphor::Variant::Regular.font_bytes() };
+    let measured = (|| {
+        let font = skrifa::FontRef::new(bytes).ok()?;
+        let gid = font.charmap().map(ch)?;
+        let adv = font.glyph_metrics(Size::unscaled(), LocationRef::default()).advance_width(gid)?;
+        // The glyph's stored box covers the whole icon grid, so measure the outline itself.
+        let mut b = InkBounds::default();
+        let settings = skrifa::outline::DrawSettings::unhinted(Size::unscaled(), LocationRef::default());
+        font.outline_glyphs().get(gid)?.draw(settings, &mut b).ok()?;
+        if b.x_min > b.x_max {
+            return None;
+        }
+        let m = font.metrics(Size::unscaled(), LocationRef::default());
+        let em = (m.ascent - m.descent).max(1.0);
+        let dx = ((b.x_min + b.x_max) / 2.0 - adv / 2.0) / em;
+        // Font units go up from the baseline; the line box runs from ascent down to descent.
+        let dy = (m.ascent - (b.y_min + b.y_max) / 2.0) / em - 0.5;
+        Some(egui::vec2(dx, dy))
+    })()
+    .unwrap_or(egui::Vec2::ZERO);
+    cache.lock().unwrap().insert((ch, filled), measured);
+    measured
+}
+
+/// The box around an outline's points.
+struct InkBounds {
+    x_min: f32,
+    y_min: f32,
+    x_max: f32,
+    y_max: f32,
+}
+
+impl Default for InkBounds {
+    fn default() -> Self {
+        Self { x_min: f32::MAX, y_min: f32::MAX, x_max: f32::MIN, y_max: f32::MIN }
+    }
+}
+
+impl InkBounds {
+    fn add(&mut self, x: f32, y: f32) {
+        self.x_min = self.x_min.min(x);
+        self.y_min = self.y_min.min(y);
+        self.x_max = self.x_max.max(x);
+        self.y_max = self.y_max.max(y);
+    }
+}
+
+impl skrifa::outline::OutlinePen for InkBounds {
+    fn move_to(&mut self, x: f32, y: f32) {
+        self.add(x, y);
+    }
+    fn line_to(&mut self, x: f32, y: f32) {
+        self.add(x, y);
+    }
+    fn quad_to(&mut self, cx: f32, cy: f32, x: f32, y: f32) {
+        self.add(cx, cy);
+        self.add(x, y);
+    }
+    fn curve_to(&mut self, cx0: f32, cy0: f32, cx1: f32, cy1: f32, x: f32, y: f32) {
+        self.add(cx0, cy0);
+        self.add(cx1, cy1);
+        self.add(x, y);
+    }
+    fn close(&mut self) {}
+}
+
+/// Like `Painter::text` with `Align2::CENTER_CENTER`, but an icon's drawing (not its box)
+/// is centered on `center`. Anything that isn't a single icon is drawn as normal text.
+pub fn paint_icon(p: &egui::Painter, center: egui::Pos2, text: impl ToString, font: FontId, color: Color32) -> egui::Rect {
+    let text = text.to_string();
+    let mut chars = text.chars();
+    let (Some(ch), None) = (chars.next(), chars.next()) else {
+        return p.text(center, egui::Align2::CENTER_CENTER, text, font, color);
+    };
+    // Phosphor's icons live in the private-use area.
+    if !('\u{E000}'..='\u{F8FF}').contains(&ch) {
+        return p.text(center, egui::Align2::CENTER_CENTER, text, font, color);
+    }
+    let filled = font.family == icon_fill();
+    let mut off = ink_offset(ch, filled);
+    // The play triangle's weight is toward its flat side; nudge it right so it looks centered.
+    if ch == egui_phosphor::regular::PLAY.chars().next().unwrap_or_default() {
+        off.x -= 0.05;
+    }
+    let pos = egui::pos2(center.x - off.x * font.size, center.y - off.y * font.size);
+    p.text(pos, egui::Align2::CENTER_CENTER, text, FontId::new(font.size, icon_only(filled)), color)
+}
+
 pub fn regular(size: f32) -> FontId {
     FontId::new(size, FontFamily::Proportional)
 }
@@ -298,6 +400,10 @@ pub fn install(ctx: &egui::Context) {
         }
     }
     egui_phosphor::add_font_bytes_as_family(&mut fonts, "phosphor-fill", egui_phosphor::Variant::Fill.font_bytes());
+    // Icon-only families: the line box is Phosphor's own, so icons line up the same in
+    // every theme instead of sitting on the text font's baseline.
+    fonts.families.insert(icon_only(false), vec!["phosphor".into()]);
+    fonts.families.insert(icon_only(true), vec!["phosphor-fill".into()]);
 
     ctx.set_fonts(fonts);
 
@@ -313,6 +419,17 @@ pub fn install(ctx: &egui::Context) {
         style.text_styles.insert(egui::TextStyle::Small, regular(11.5));
         style.text_styles.insert(egui::TextStyle::Heading, heavy(26.0));
     });
+}
+
+static REDUCE_MOTION: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// True when the "Reduce motion" setting is on: no moving backgrounds or fades.
+pub fn reduce_motion() -> bool {
+    REDUCE_MOTION.load(Ordering::Relaxed)
+}
+
+pub fn set_reduce_motion(on: bool) {
+    REDUCE_MOTION.store(on, Ordering::Relaxed);
 }
 
 /// Makes `a` the active theme and restyles egui's built-in widgets to match.
@@ -414,5 +531,26 @@ mod tests {
             let problems = readability_problems(p);
             assert!(problems.is_empty(), "{name}: {problems:?}");
         }
+    }
+}
+
+#[cfg(test)]
+mod icon_tests {
+    use super::*;
+
+    #[test]
+    fn icon_offsets_come_from_the_font() {
+        let first = |s: &str| s.chars().next().unwrap();
+        // The play triangle's drawing sits right of its box's center, by about a tenth.
+        let play = ink_offset(first(egui_phosphor::regular::PLAY), true);
+        assert!((play.x - 0.094).abs() < 0.01, "{play:?}");
+        assert!(play.y.abs() < 0.02, "{play:?}");
+        // Pause and repeat are centered.
+        for g in [egui_phosphor::regular::PAUSE, egui_phosphor::regular::REPEAT] {
+            let o = ink_offset(first(g), false);
+            assert!(o.x.abs() < 0.01 && o.y.abs() < 0.02, "{o:?}");
+        }
+        // The heart sits a little low.
+        assert!(ink_offset(first(egui_phosphor::regular::HEART), true).y > 0.02);
     }
 }

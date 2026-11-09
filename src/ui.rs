@@ -150,13 +150,13 @@ fn sidebar(app: &mut App, ui: &mut Ui) {
         let (row, _) = ui.allocate_exact_size(vec2(ui.available_width(), 30.0), Sense::hover());
         let r = Rect::from_center_size(row.center(), Vec2::splat(30.0));
         vgradient_rounded(ui, r, pal().accent_soft, pal().accent);
-        ui.painter().text(r.center(), Align2::CENTER_CENTER, icon::WAVEFORM, filled_icon(18.0), Color32::WHITE);
+        paint_icon(ui.painter(), r.center(), icon::WAVEFORM, filled_icon(18.0), Color32::WHITE);
     } else {
         ui.horizontal(|ui| {
             ui.add_space(6.0);
             let (r, _) = ui.allocate_exact_size(Vec2::splat(30.0), Sense::hover());
             vgradient_rounded(ui, r, pal().accent_soft, pal().accent);
-            ui.painter().text(r.center(), Align2::CENTER_CENTER, icon::WAVEFORM, filled_icon(18.0), Color32::WHITE);
+            paint_icon(ui.painter(), r.center(), icon::WAVEFORM, filled_icon(18.0), Color32::WHITE);
             ui.add_space(4.0);
             ui.label(RichText::new("Pulse").font(heavy(19.0)));
         });
@@ -248,12 +248,14 @@ fn sidebar(app: &mut App, ui: &mut Ui) {
                 app.navigate(Route::Local(i), &ctx);
             }
             resp.context_menu(|ui| {
+                menu_begin(ui);
                 if menu_item(ui, icon::PENCIL_SIMPLE, "Rename") {
                     app.rename_playlist = Some((i, name.clone()));
                 }
                 if menu_item(ui, icon::SHARE_FAT, "Copy share code") {
                     app.share_playlist(i, &ctx);
                 }
+                menu_separator(ui);
                 if menu_item(ui, icon::TRASH, "Delete") {
                     app.confirm_delete = Some(i);
                 }
@@ -328,7 +330,7 @@ fn nav_item_art(ui: &mut Ui, art: Option<&str>, glyph: &str, label: &str, select
             artwork(ui, Rect::from_center_size(top, Vec2::splat(24.0)), art, CornerRadius::same(5));
         } else {
             let (font, col) = if selected { (filled_icon(19.0), pal().accent_soft) } else { (regular(19.0), pal().text_muted) };
-            ui.painter().text(top, Align2::CENTER_CENTER, glyph, font, col);
+            paint_icon(ui.painter(), top, glyph, font, col);
         }
         let text_col = if selected || resp.hovered() { pal().text } else { pal().text_muted };
         let g = one_line(ui, short, med(9.5), text_col, rect.width() - 6.0);
@@ -357,7 +359,7 @@ fn nav_item_art(ui: &mut Ui, art: Option<&str>, glyph: &str, label: &str, select
     } else {
         let icon_col = if selected { pal().accent_soft } else { pal().text_muted };
         let font = if selected { filled_icon(17.0) } else { regular(17.0) };
-        ui.painter().text(icon_c, Align2::CENTER_CENTER, glyph, font, icon_col);
+        paint_icon(ui.painter(), icon_c, glyph, font, icon_col);
     }
     let text_col = if selected || resp.hovered() { pal().text } else { pal().text_muted };
     let max_w = rect.width() - 80.0;
@@ -401,7 +403,7 @@ fn top_bar(app: &mut App, ui: &mut Ui) {
             Stroke::new(1.0, if focused { pal().accent.gamma_multiply(0.8) } else { pal().border }),
             egui::StrokeKind::Inside,
         );
-        ui.painter().text(pos2(rect.left() + 18.0, rect.center().y), Align2::CENTER_CENTER, icon::MAGNIFYING_GLASS, regular(15.0), pal().text_muted);
+        paint_icon(ui.painter(), pos2(rect.left() + 18.0, rect.center().y), icon::MAGNIFYING_GLASS, regular(15.0), pal().text_muted);
 
         let edit_rect = Rect::from_min_max(pos2(rect.left() + 34.0, rect.top()), pos2(rect.right() - 60.0, rect.bottom()));
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(edit_rect).layout(Layout::left_to_right(Align::Center)));
@@ -431,14 +433,14 @@ fn top_bar(app: &mut App, ui: &mut Ui) {
             let r = Rect::from_center_size(right - vec2(8.0, 0.0), Vec2::splat(22.0));
             let c = ui.interact(r, id.with("clear"), Sense::click());
             a11y(ui, &c, egui::WidgetType::Button, || "Clear search".to_owned());
-            ui.painter().text(r.center(), Align2::CENTER_CENTER, icon::X, regular(14.0), if c.hovered() { pal().text } else { pal().text_muted });
+            paint_icon(ui.painter(), r.center(), icon::X, regular(14.0), if c.hovered() { pal().text } else { pal().text_muted });
             if c.clicked() {
                 app.search_text.clear();
             }
         } else {
             let hint = Rect::from_min_max(pos2(right.x - 42.0, right.y - 10.0), pos2(right.x, right.y + 10.0));
             ui.painter().rect(hint, CornerRadius::same(5), pal().surface_hover, Stroke::new(1.0, pal().border), egui::StrokeKind::Inside);
-            ui.painter().text(hint.center(), Align2::CENTER_CENTER, "Ctrl K", med(10.5), pal().text_muted);
+            paint_icon(ui.painter(), hint.center(), "Ctrl K", med(10.5), pal().text_muted);
         }
 
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -913,7 +915,7 @@ fn hero(ui: &mut Ui, h: &Hero) -> HeroClicks {
     } else {
         ui.painter().rect_filled(art_rect, radius, pal().accent.gamma_multiply(0.55));
         vgradient(ui, art_rect, Color32::from_white_alpha(18), Color32::TRANSPARENT);
-        ui.painter().text(art_rect.center(), Align2::CENTER_CENTER, h.glyph, filled_icon(72.0), Color32::WHITE);
+        paint_icon(ui.painter(), art_rect.center(), h.glyph, filled_icon(72.0), Color32::WHITE);
     }
     if h.editable {
         let r = ui.interact(art_rect, ui.id().with("hero_art"), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
@@ -921,8 +923,8 @@ fn hero(ui: &mut Ui, h: &Hero) -> HeroClicks {
         if r.hovered() {
             // Pencil overlay, like Spotify.
             ui.painter().rect_filled(art_rect, radius, Color32::from_black_alpha(140));
-            ui.painter().text(art_rect.center() - vec2(0.0, 10.0), Align2::CENTER_CENTER, icon::PENCIL_SIMPLE, regular(40.0), Color32::WHITE);
-            ui.painter().text(art_rect.center() + vec2(0.0, 26.0), Align2::CENTER_CENTER, tr("Change cover"), med(13.0), Color32::WHITE);
+            paint_icon(ui.painter(), art_rect.center() - vec2(0.0, 10.0), icon::PENCIL_SIMPLE, regular(40.0), Color32::WHITE);
+            paint_icon(ui.painter(), art_rect.center() + vec2(0.0, 26.0), tr("Change cover"), med(13.0), Color32::WHITE);
         }
         clicks.art = Some(r);
     }
@@ -1166,6 +1168,7 @@ fn local_collection(app: &mut App, ui: &mut Ui, title: &str, sub: &str, glyph: &
                 pick_cover(app, i, &ctx);
             }
             r.context_menu(|ui| {
+                menu_begin(ui);
                 if menu_item(ui, icon::IMAGE, "Change cover") {
                     pick_cover(app, i, &ctx);
                 }
@@ -1300,7 +1303,7 @@ fn list_toolbar(app: &mut App, ui: &mut Ui, tracks: &[Track], playlist: Option<u
             }
         }
         if let Some(i) = playlist {
-            ui.menu_button(RichText::new(icon::DOTS_THREE).size(22.0).color(pal().text_muted), |ui| {
+            dots_menu(ui, 22.0, tr("More options"), |ui| {
                 if menu_item(ui, icon::PENCIL_SIMPLE, "Rename") {
                     app.rename_playlist = Some((i, title.to_string()));
                 }
@@ -1310,6 +1313,7 @@ fn list_toolbar(app: &mut App, ui: &mut Ui, tracks: &[Track], playlist: Option<u
                 if menu_item(ui, icon::SHARE_FAT, "Copy share code") {
                     app.share_playlist(i, &ctx);
                 }
+                menu_separator(ui);
                 if menu_item(ui, icon::TRASH, "Delete playlist") {
                     app.confirm_delete = Some(i);
                 }
@@ -1319,10 +1323,12 @@ fn list_toolbar(app: &mut App, ui: &mut Ui, tracks: &[Track], playlist: Option<u
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             // Sort
             let sort = app.list_view.sort;
-            ui.menu_button(RichText::new(format!("{}  {}", tr(sort.label()), icon::LIST)).font(med(13.0)).color(pal().text_muted), |ui| {
-                ui.label(RichText::new(tr("Sort by")).font(semi(11.0)).color(pal().text_faint));
+            let sort_btn = labeled_button(ui, icon::SORT_ASCENDING, tr(sort.label()), false);
+            egui::Popup::menu(&sort_btn).show(|ui| {
+                menu_begin(ui);
+                menu_header(ui, "Sort by");
                 for s in crate::app::SortBy::ALL {
-                    let check = if s == sort { icon::CHECK } else { " " };
+                    let check = if s == sort { icon::CHECK } else { "" };
                     if menu_item(ui, check, s.label()) {
                         app.list_view.sort = s;
                     }
@@ -1520,7 +1526,7 @@ fn player_bar(app: &mut App, ui: &mut Ui) {
         let h = ui.interact(hr, egui::Id::new("np_like"), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
         resp_selected(ui, &h, liked, "Like current song");
         let (font, col) = if liked { (filled_icon(18.0), pal().accent_soft) } else { (regular(18.0), if h.hovered() { pal().text } else { pal().text_muted }) };
-        ui.painter().text(hr.center(), Align2::CENTER_CENTER, icon::HEART, font, col);
+        paint_icon(ui.painter(), hr.center(), icon::HEART, font, col);
         if h.clicked() {
             app.toggle_like(&t, &ctx);
         }
@@ -1575,8 +1581,7 @@ fn player_bar(app: &mut App, ui: &mut Ui) {
             ui.ctx().request_repaint();
         } else {
             let glyph = if app.is_playing() { icon::PAUSE } else { icon::PLAY };
-            let nudge = if app.is_playing() { 0.0 } else { 1.5 };
-            ui.painter().text(r.center() + vec2(nudge, 0.0), Align2::CENTER_CENTER, glyph, filled_icon(18.0), pal().bg);
+            paint_icon(ui.painter(), r.center(), glyph, filled_icon(18.0), pal().bg);
         }
         if resp.on_hover_text("Play / Pause (Space)").clicked() {
             app.toggle_play(&ctx);
