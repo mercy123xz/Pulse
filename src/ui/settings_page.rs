@@ -184,6 +184,8 @@ pub fn settings_page(app: &mut App, ui: &mut Ui) {
         switch(ui, &mut s.hardware_acceleration, tr("Enable hardware acceleration"));
     });
 
+    your_data_section(app, ui, &ctx);
+
     ui.add_space(30.0);
     ui.label(RichText::new(format!("Pulse {}", env!("CARGO_PKG_VERSION"))).font(regular(12.0)).color(pal().text_faint));
 
@@ -192,6 +194,85 @@ pub fn settings_page(app: &mut App, ui: &mut Ui) {
     }
     if app.saved.settings != before || app.saved.autoplay != autoplay_before {
         app.apply_settings(&before, &ctx);
+    }
+}
+
+/// The Windows save or open dialog for a backup file (none elsewhere).
+fn ask_backup_file(save: bool) -> Option<std::path::PathBuf> {
+    #[cfg(windows)]
+    {
+        let d = rfd::FileDialog::new().add_filter("Pulse backup", &["json"]);
+        if save { d.set_file_name("pulse-library.json").save_file() } else { d.pick_file() }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = save;
+        None
+    }
+}
+
+/// Backups of your library: automatic daily ones, plus making, exporting, importing
+/// and restoring them.
+fn your_data_section(app: &mut App, ui: &mut Ui, ctx: &egui::Context) {
+    section(ui, tr("Your data"));
+    ui.add(egui::Label::new(RichText::new(tr("Pulse backs up your likes, playlists and history once a day and keeps the last seven. Backups stay on this PC.")).color(pal().text_muted)).wrap());
+    ui.add_space(10.0);
+    ui.horizontal_wrapped(|ui| {
+        if ghost_button(ui, icon::FLOPPY_DISK, "Back up now").clicked() {
+            match crate::backup::write(&app.saved, crate::backup::Kind::Manual) {
+                Ok(_) => app.toast(tr("Library backed up"), ctx),
+                Err(e) => app.toast(&e, ctx),
+            }
+            app.refresh_backups();
+        }
+        if ghost_button(ui, icon::EXPORT, "Export…").clicked()
+            && let Some(path) = ask_backup_file(true)
+        {
+            match crate::backup::write_to(&app.saved, &path) {
+                Ok(()) => app.toast(tr("Library exported"), ctx),
+                Err(e) => app.toast(&e, ctx),
+            }
+        }
+        if ghost_button(ui, icon::DOWNLOAD_SIMPLE, "Import…").clicked()
+            && let Some(path) = ask_backup_file(false)
+        {
+            match crate::backup::read(&path) {
+                Ok(lib) => {
+                    let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+                    app.pending_restore = Some((name, Box::new(lib)));
+                }
+                Err(e) => app.toast(&e, ctx),
+            }
+        }
+        if ghost_button(ui, icon::FOLDER_OPEN, "Open folder").clicked() {
+            let _ = std::fs::create_dir_all(crate::backup::dir());
+            ctx.open_url(egui::OpenUrl::new_tab(crate::settings::file_uri(&crate::backup::dir())));
+        }
+    });
+    // The backups, read in the background when Settings opens (and after making one).
+    let Some(list) = app.backup_list(ctx).map(<[_]>::to_vec) else { return };
+    ui.add_space(10.0);
+    if list.is_empty() {
+        ui.label(RichText::new(tr("No backups yet. The first one is made today.")).font(regular(12.5)).color(pal().text_faint));
+    }
+    for b in list.iter().take(20) {
+        ui.horizontal(|ui| {
+            let kind = match b.kind {
+                crate::backup::Kind::Daily => tr("Daily"),
+                crate::backup::Kind::Manual => tr("Saved by you"),
+                crate::backup::Kind::BeforeRestore => tr("Before a restore"),
+            };
+            ui.label(RichText::new(crate::crash::utc(b.made)).font(med(13.0)).color(pal().text));
+            ui.label(RichText::new(format!("{kind} · {} {} · {} {}", b.liked, tr("liked"), b.playlists, tr("playlists"))).font(regular(12.5)).color(pal().text_muted));
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if ui.add(egui::Button::new(tr("Restore")).corner_radius(14)).clicked() {
+                    match crate::backup::read(&b.path) {
+                        Ok(lib) => app.pending_restore = Some((crate::crash::utc(b.made), Box::new(lib))),
+                        Err(e) => app.toast(&e, ctx),
+                    }
+                }
+            });
+        });
     }
 }
 

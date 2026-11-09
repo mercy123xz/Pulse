@@ -541,6 +541,18 @@ pub struct App {
     /// The song-colored background (themes with `backdrop = true`).
     pub backdrop: crate::backdrop::Backdrop,
     swept_at: f64,
+    /// A crash report from last time that you haven't seen: (file, text).
+    pub crash_notice: Option<(std::path::PathBuf, String)>,
+    /// The day (days since 1970) the daily backup was last checked.
+    backup_day: u64,
+    /// Backups listed in Settings (read when the page opens), and one waiting to be
+    /// confirmed before it replaces your library: (where it came from, the library).
+    backups: Option<Vec<crate::backup::Info>>,
+    backups_rx: Option<Receiver<Vec<crate::backup::Info>>>,
+    backups_stale: bool,
+    /// Save at the end of this frame instead of waiting for the next autosave.
+    save_now: bool,
+    pub pending_restore: Option<(String, Box<Saved>)>,
     /// Lyrics looked up this session, by song id.
     pub lyrics: HashMap<String, LyricsState>,
     lyrics_tx: Sender<(String, Result<Option<crate::lyrics::Lyrics>, String>)>,
@@ -661,6 +673,13 @@ impl App {
             highlight: None,
             backdrop: Default::default(),
             swept_at: 0.0,
+            crash_notice: crate::crash::unseen(),
+            backup_day: 0,
+            backups: None,
+            backups_rx: None,
+            backups_stale: false,
+            save_now: false,
+            pending_restore: None,
             lyrics: HashMap::new(),
             lyrics_tx,
             lyrics_rx,
@@ -739,6 +758,15 @@ impl App {
             _ => self.audio.position().as_secs_f32(),
         };
         self.trim_saved();
+        // Once a day, a backup of your library (in the background: it's a file write).
+        let day = crate::crash::now() / 86_400;
+        if day != self.backup_day {
+            self.backup_day = day;
+            let lib = self.saved.clone();
+            std::thread::spawn(move || {
+                crate::backup::daily(&lib);
+            });
+        }
         let mut ids = self.youtube_ids.lock().unwrap().clone();
         if ids.len() > 5000 {
             ids.clear(); // keep the saved file small; ids are found again when needed
@@ -1003,7 +1031,10 @@ impl App {
         while let Ok((key, result)) = self.rx.try_recv() {
             let value = match result {
                 Ok(page) => Remote::Ready(Box::new(page)),
-                Err(e) => Remote::Failed(e),
+                Err(e) => {
+                    crate::crash::note(&format!("Couldn't load {key}: {e}"));
+                    Remote::Failed(e)
+                }
             };
             self.cache.insert(key, value);
         }
@@ -1027,6 +1058,7 @@ impl App {
         }
         match self.audio.load_state() {
             LoadState::Failed(e) if self.current.is_some() && !self.needs_load => {
+                crate::crash::note(&format!("Couldn't play: {e}"));
                 self.failures_in_row += 1;
                 let name = self.current.as_ref().map(|t| t.title.clone()).unwrap_or_default();
                 self.toast(&format!("Couldn't play “{name}”: {e}"), ctx);
@@ -1109,6 +1141,59 @@ impl App {
             },
             _ => None,
         }
+    }
+
+    /// Reads the backups again (the old list shows until the new one is in).
+    pub fn refresh_backups(&mut self) {
+        self.backups_stale = true;
+    }
+
+    /// The backups in Settings, read in the background the first time they're asked for
+    /// and after `refresh_backups`.
+    pub fn backup_list(&mut self, ctx: &egui::Context) -> Option<&[crate::backup::Info]> {
+        if let Some(rx) = &self.backups_rx {
+            match rx.try_recv() {
+                Ok(list) => {
+                    self.backups = Some(list);
+                    self.backups_rx = None;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => self.backups_rx = None,
+            }
+        } else if self.backups.is_none() || self.backups_stale {
+            self.backups_stale = false;
+            let (tx, rx) = std::sync::mpsc::channel();
+            let ctx = ctx.clone();
+            std::thread::spawn(move || {
+                let _ = tx.send(crate::backup::list());
+                ctx.request_repaint();
+            });
+            self.backups_rx = Some(rx);
+        }
+        self.backups.as_deref()
+    }
+
+    /// Puts a backup in place of your library, after backing up the library as it is.
+    pub fn restore_library(&mut self, lib: Saved, ctx: &egui::Context) {
+        if let Err(e) = crate::backup::write(&self.saved, crate::backup::Kind::BeforeRestore) {
+            self.toast(&format!("{} ({e})", crate::i18n::tr("Couldn't back up your library first, so nothing was changed")), ctx);
+            return;
+        }
+        crate::backup::restore_into(&mut self.saved, lib);
+        self.liked_ids = self.saved.liked.iter().map(|t| t.id.clone()).collect();
+        // Playlist numbers may mean other playlists now, so drop anything that holds one.
+        let local = |r: &Route| matches!(r, Route::Local(_));
+        if local(&self.route) {
+            self.route = Route::Home;
+        }
+        self.back.retain(|r| !local(r));
+        self.forward.retain(|r| !local(r));
+        self.selection = Default::default();
+        self.rename_playlist = None;
+        self.confirm_delete = None;
+        self.refresh_backups();
+        self.save_now = true;
+        self.toast(crate::i18n::tr("Backup restored"), ctx);
     }
 
     pub fn toast(&mut self, msg: &str, ctx: &egui::Context) {
@@ -2347,7 +2432,7 @@ impl App {
 }
 
 impl eframe::App for App {
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         // Developer check: PULSE_DEBUG_REPAINT=1 prints what asked for each redraw.
         static DEBUG_REPAINT: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
@@ -2360,6 +2445,12 @@ impl eframe::App for App {
             crate::ui::draw(self, ui);
         }
         crate::ui::mini::show(self, &ctx);
+        if std::mem::take(&mut self.save_now)
+            && let Some(storage) = frame.storage_mut()
+        {
+            App::save(self, storage);
+            storage.flush();
+        }
     }
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {

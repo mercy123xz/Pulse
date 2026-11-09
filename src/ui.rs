@@ -1976,7 +1976,95 @@ fn player_bar(app: &mut App, ui: &mut Ui) {
 // Pop-ups
 // ---------------------------------------------------------------------------
 
+/// The frame every dialog uses.
+fn dialog_frame() -> Frame {
+    Frame::new().fill(pal().surface).corner_radius(r_lg()).inner_margin(24).stroke(Stroke::new(1.0, pal().border))
+}
+
+/// "Pulse closed unexpectedly last time", with the report to copy.
+fn crash_dialog(app: &mut App, ctx: &egui::Context) {
+    let Some((file, report)) = app.crash_notice.clone() else { return };
+    let mut close = false;
+    egui::Modal::new(egui::Id::new("crash_notice")).frame(dialog_frame()).show(ctx, |ui| {
+        ui.set_width(440.0);
+        ui.label(RichText::new(tr("Pulse closed unexpectedly last time")).font(heavy(19.0)));
+        ui.add_space(8.0);
+        ui.add(egui::Label::new(RichText::new(tr("Sorry about that. A report of what went wrong was saved on your PC. It isn't sent anywhere: if you'd like it fixed, copy it into an issue on GitHub.")).color(pal().text_muted)).wrap());
+        ui.add_space(10.0);
+        egui::ScrollArea::vertical().max_height(160.0).show(ui, |ui| {
+            ui.add(egui::Label::new(RichText::new(&report).font(egui::FontId::monospace(11.5)).color(pal().text_muted)).wrap());
+        });
+        ui.add_space(14.0);
+        ui.horizontal(|ui| {
+            if ghost_button(ui, icon::COPY, "Copy report").clicked() {
+                ctx.copy_text(report.clone());
+                app.toast(tr("Report copied"), ctx);
+            }
+            if ghost_button(ui, icon::GITHUB_LOGO, "Report on GitHub").clicked() {
+                ctx.copy_text(report.clone());
+                ctx.open_url(egui::OpenUrl::new_tab("https://github.com/mercy123xz/Pulse/issues/new"));
+            }
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if ui.add(egui::Button::new(RichText::new(tr("Close")).color(Color32::WHITE)).fill(pal().accent).corner_radius(16)).clicked() {
+                    close = true;
+                }
+            });
+        });
+        if ui.input(|i| i.key_pressed(Key::Escape)) {
+            close = true;
+        }
+    });
+    if close {
+        crate::crash::mark_seen(&file);
+        app.crash_notice = None;
+    }
+}
+
+/// Asks before a backup replaces your library.
+fn restore_dialog(app: &mut App, ctx: &egui::Context) {
+    let Some((label, lib)) = app.pending_restore.take() else { return };
+    let (mut keep, mut restore) = (true, false);
+    egui::Modal::new(egui::Id::new("confirm_restore")).frame(dialog_frame()).show(ctx, |ui| {
+        ui.set_width(400.0);
+        ui.label(RichText::new(tr("Restore this backup?")).font(heavy(20.0)));
+        ui.add_space(8.0);
+        let body = format!(
+            "{} ({}: {}, {}: {})\n\n{}",
+            label,
+            tr("Liked Songs"),
+            lib.liked.len(),
+            tr("Playlists"),
+            lib.playlists.len(),
+            tr("It replaces your likes, playlists and history. Your settings stay as they are, and your library as it is now is backed up first.")
+        );
+        ui.add(egui::Label::new(RichText::new(body).color(pal().text_muted)).wrap());
+        ui.add_space(16.0);
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            if ui.add(egui::Button::new(RichText::new(tr("Restore")).color(Color32::WHITE)).fill(pal().accent).corner_radius(16)).clicked() {
+                restore = true;
+            }
+            let cancel = ui.add(egui::Button::new(tr("Cancel")).frame_when_inactive(false).corner_radius(16));
+            if ui.memory(|m| m.focused().is_none()) {
+                cancel.request_focus();
+            }
+            if cancel.clicked() {
+                keep = false;
+            }
+        });
+        if ui.input(|i| i.key_pressed(Key::Escape)) {
+            keep = false;
+        }
+    });
+    if restore {
+        app.restore_library(*lib, ctx);
+    } else if keep {
+        app.pending_restore = Some((label, lib));
+    }
+}
+
 fn dialogs(app: &mut App, ctx: &egui::Context) {
+    crash_dialog(app, ctx);
+    restore_dialog(app, ctx);
     credits_dialog(app, ctx);
     import_dialog(app, ctx);
     personal::profile_dialog(app, ctx);

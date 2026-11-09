@@ -3,7 +3,9 @@
 
 mod app;
 mod artcache;
+mod crash;
 mod audio;
+mod backup;
 mod backdrop;
 mod deezer;
 mod downloads;
@@ -25,6 +27,8 @@ mod widgets;
 mod youtube;
 
 fn main() -> eframe::Result {
+    // A crash leaves a report (on this PC only) that Pulse offers to copy next time.
+    crash::install();
     // Already open: that window comes to the front instead.
     if !single::claim() {
         return Ok(());
