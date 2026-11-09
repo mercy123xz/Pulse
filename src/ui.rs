@@ -2232,7 +2232,7 @@ fn toast(app: &App, ctx: &egui::Context) {
     // starts (it used to redraw 33 times a second the whole time it showed).
     let next = if still {
         3.5 - age
-    } else if age < 0.15 || age > 3.0 {
+    } else if !(0.15..=3.0).contains(&age) {
         0.03
     } else {
         3.0 - age
