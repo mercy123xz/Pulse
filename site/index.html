@@ -1,0 +1,381 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pulse — a fast, native music player for Windows</title>
+<meta name="description" content="Pulse is a free, open-source music player for Windows, written in Rust. Search any artist, play full songs, import playlists, and make it yours with themes. No account needed.">
+<meta name="theme-color" content="#0b0b0e">
+<link rel="icon" href="img/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="img/apple-touch-icon.png">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Pulse — a fast, native music player for Windows">
+<meta property="og:description" content="Free and open source. Search any artist, play full songs, import playlists, and theme it your way.">
+<meta property="og:image" content="https://mercy123xz.github.io/Pulse/img/social.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="preload" as="image" type="image/avif" imagesrcset="img/chart-page-800.avif 800w, img/chart-page.avif 1600w" imagesizes="(min-width: 1100px) 760px, 92vw" fetchpriority="high">
+<style>
+:root {
+  --bg: #0b0b0e;
+  --bg-2: #0f0f13;
+  --surface: #16161b;
+  --surface-2: #1d1d24;
+  --border: #2c2c36;
+  --text: #ededf1;
+  --muted: #a3a3b0;
+  --accent: #7c3aed;
+  --accent-soft: #a78bfa;
+  --radius: 14px;
+  --wrap: 1180px;
+  color-scheme: dark;
+}
+*, *::before, *::after { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 400 1rem/1.6 "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+img { display: block; max-width: 100%; height: auto; }
+a { color: var(--accent-soft); }
+a:focus-visible, .btn:focus-visible { outline: 3px solid var(--accent-soft); outline-offset: 3px; border-radius: 8px; }
+.wrap { width: min(100% - 2.5rem, var(--wrap)); margin-inline: auto; }
+.skip { position: absolute; left: -9999px; top: 0; background: var(--text); color: var(--bg); padding: .6rem 1rem; z-index: 10; }
+.skip:focus { left: 1rem; top: 1rem; }
+
+/* Header */
+header.top { position: sticky; top: 0; z-index: 5; background: rgba(11, 11, 14, .86); border-bottom: 1px solid rgba(44, 44, 54, .6); }
+@supports (backdrop-filter: blur(8px)) { header.top { backdrop-filter: blur(8px); background: rgba(11, 11, 14, .72); } }
+.nav { display: flex; align-items: center; gap: 1.5rem; height: 64px; }
+.brand { display: flex; align-items: center; gap: .6rem; color: var(--text); text-decoration: none; font-weight: 700; font-size: 1.2rem; letter-spacing: -.01em; }
+.nav nav { margin-left: auto; }
+.nav ul { display: flex; gap: 1.4rem; list-style: none; margin: 0; padding: 0; }
+.nav ul a { color: var(--muted); text-decoration: none; font-size: .95rem; }
+.nav ul a:hover { color: var(--text); }
+@media (max-width: 720px) { .nav nav { display: none; } .nav .btn { margin-left: auto; } }
+
+/* Buttons */
+.btn { display: inline-flex; align-items: center; gap: .55rem; padding: .85rem 1.35rem; border-radius: 999px; font-weight: 600; text-decoration: none; font-size: 1rem; line-height: 1; transition: transform .15s ease, background-color .15s ease; }
+.btn-primary { background: var(--accent); color: #fff; box-shadow: 0 8px 28px rgba(124, 58, 237, .35); }
+.btn-primary:hover { background: #6d28d9; transform: translateY(-1px); }
+.btn-ghost { color: var(--text); border: 1px solid var(--border); }
+.btn-ghost:hover { background: var(--surface); }
+.nav .btn { padding: .6rem 1rem; font-size: .9rem; }
+
+/* Hero */
+.hero { position: relative; overflow: hidden; padding: clamp(3rem, 8vw, 6rem) 0 clamp(3rem, 6vw, 5rem); }
+.hero::before { content: ""; position: absolute; inset: -20% -10% auto 35%; height: 120%; background: radial-gradient(closest-side, rgba(124, 58, 237, .32), rgba(124, 58, 237, 0)); pointer-events: none; }
+.hero-grid { position: relative; display: grid; gap: clamp(2rem, 5vw, 3.5rem); align-items: center; }
+@media (min-width: 1100px) { .hero-grid { grid-template-columns: 1fr 1.25fr; } }
+.eyebrow { display: inline-flex; gap: .5rem; align-items: center; color: var(--accent-soft); font-weight: 600; font-size: .9rem; letter-spacing: .02em; }
+h1 { font-size: clamp(2.5rem, 6vw, 4.25rem); line-height: 1.04; letter-spacing: -.035em; margin: .7rem 0 1rem; font-weight: 800; }
+h1 span { background: linear-gradient(90deg, #c4b5fd, var(--accent-soft) 40%, #8b5cf6); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.lede { font-size: clamp(1.05rem, 1.6vw, 1.25rem); color: var(--muted); max-width: 34rem; margin: 0 0 1.8rem; }
+.cta { display: flex; flex-wrap: wrap; gap: .8rem; }
+.meta { margin: 1.2rem 0 0; color: var(--muted); font-size: .9rem; }
+
+/* App window frame around screenshots */
+.window { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); box-shadow: 0 30px 80px rgba(0, 0, 0, .55), 0 0 0 1px rgba(255, 255, 255, .02) inset; overflow: hidden; }
+.window-bar { display: flex; gap: 6px; padding: 10px 14px; border-bottom: 1px solid var(--border); background: var(--bg-2); }
+.window-bar i { width: 10px; height: 10px; border-radius: 50%; background: #3a3a46; }
+.window img { width: 100%; }
+@media (min-width: 1100px) { .hero .window { margin-right: calc((100vw - min(100vw - 2.5rem, var(--wrap))) / -2); border-top-right-radius: 0; border-bottom-right-radius: 0; } }
+
+/* Facts strip */
+.facts { border-block: 1px solid var(--border); background: var(--bg-2); }
+.facts ul { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 1rem; list-style: none; margin: 0 auto; padding: 1.6rem 0; }
+.facts strong { display: block; font-size: 1.4rem; letter-spacing: -.02em; }
+.facts span { color: var(--muted); font-size: .92rem; }
+
+/* Sections */
+section { padding: clamp(3.5rem, 8vw, 6rem) 0; }
+.kicker { color: var(--accent-soft); font-weight: 600; font-size: .9rem; margin: 0 0 .4rem; }
+h2 { font-size: clamp(1.8rem, 3.6vw, 2.6rem); line-height: 1.12; letter-spacing: -.03em; margin: 0 0 .9rem; }
+.section-lede { color: var(--muted); font-size: 1.1rem; max-width: 40rem; margin: 0 0 2.2rem; }
+.split { display: grid; gap: 2.2rem; align-items: center; }
+@media (min-width: 960px) { .split { grid-template-columns: .9fr 1.4fr; } .split.flip { grid-template-columns: 1.4fr .9fr; } .split.flip > :first-child { order: 2; } }
+.split ul { padding-left: 1.1rem; color: var(--muted); }
+.split li { margin: .4rem 0; }
+.split li strong { color: var(--text); font-weight: 600; }
+.shot { border-radius: var(--radius); border: 1px solid var(--border); overflow: hidden; background: var(--surface); }
+
+/* Wide strips (artists, playlists) */
+.strip { margin-top: 1.4rem; }
+.strip .shot { mask-image: linear-gradient(90deg, transparent, #000 4%, #000 96%, transparent); -webkit-mask-image: linear-gradient(90deg, transparent, #000 4%, #000 96%, transparent); }
+@media (max-width: 700px) {
+  .strip { overflow-x: auto; scroll-snap-type: x mandatory; }
+  .strip .shot { width: 820px; max-width: none; mask-image: none; -webkit-mask-image: none; }
+}
+
+/* Feature cards */
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1rem; }
+@media (max-width: 700px) { .cards { grid-template-columns: 1fr; } }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.4rem 1.4rem 1.2rem; }
+.card svg { width: 28px; height: 28px; color: var(--accent-soft); }
+.card h3 { margin: .8rem 0 .35rem; font-size: 1.08rem; letter-spacing: -.01em; }
+.card p { margin: 0; color: var(--muted); font-size: .95rem; }
+
+/* Themes: mini app windows drawn in CSS with each theme's real colors */
+.themes { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1.2rem; }
+.theme figcaption { margin-top: .7rem; }
+.theme figcaption strong { display: block; }
+.theme figcaption span { color: var(--muted); font-size: .9rem; }
+figure.theme { margin: 0; }
+.mini { aspect-ratio: 16 / 10; display: grid; grid-template-columns: 26% 1fr; grid-template-rows: 1fr 16%; border-radius: var(--r, 12px); overflow: hidden; background: var(--t-bg); border: 1px solid rgba(255, 255, 255, .06); }
+.mini .side { background: var(--t-side); padding: 12% 12%; display: grid; align-content: start; gap: 10px; }
+.mini .side i { display: block; height: 6px; border-radius: 3px; background: var(--t-sub); opacity: .8; }
+.mini .side i:first-child { background: var(--t-soft); opacity: 1; width: 80%; }
+.mini .main { padding: 8% 7%; display: grid; grid-template-columns: 38% 1fr; gap: 8%; align-content: start; }
+.mini .cover { aspect-ratio: 1; border-radius: calc(var(--r, 12px) * .6); background: linear-gradient(160deg, var(--t-soft), var(--t-accent)); }
+.mini .rows { display: grid; gap: 9px; align-content: start; padding-top: 4%; }
+.mini .rows i { display: block; height: 7px; border-radius: 4px; background: var(--t-text); opacity: .9; }
+.mini .rows i:nth-child(2) { width: 70%; background: var(--t-sub); }
+.mini .rows i:nth-child(3) { width: 85%; background: var(--t-card); height: 18px; border-radius: 5px; opacity: 1; }
+.mini .rows i:nth-child(4) { width: 60%; background: var(--t-card); height: 18px; border-radius: 5px; opacity: 1; }
+.mini .player { grid-column: 1 / -1; background: var(--t-side); border-top: 1px solid rgba(255, 255, 255, .05); display: grid; place-items: center; }
+.mini .player b { width: 16px; height: 16px; border-radius: 50%; background: var(--t-text); }
+
+/* Download */
+.download { text-align: center; }
+.download .box { background: radial-gradient(120% 140% at 50% 0%, rgba(124, 58, 237, .28), rgba(22, 22, 27, 1) 60%); border: 1px solid var(--border); border-radius: 24px; padding: clamp(2.5rem, 6vw, 4rem) 1.5rem; }
+.download .cta { justify-content: center; }
+.download small { display: block; color: var(--muted); max-width: 38rem; margin: 1.6rem auto 0; font-size: .9rem; }
+
+footer { border-top: 1px solid var(--border); padding: 2.2rem 0 3rem; color: var(--muted); font-size: .88rem; }
+footer .wrap { display: grid; gap: .8rem; }
+footer nav { display: flex; gap: 1.2rem; flex-wrap: wrap; }
+footer a { color: var(--text); text-decoration: none; }
+footer a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="top">
+  <div class="wrap nav">
+    <a class="brand" href="#" aria-label="Pulse home">
+      <svg width="30" height="30" viewBox="0 0 30 30" aria-hidden="true"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#a78bfa"/><stop offset="1" stop-color="#7c3aed"/></linearGradient></defs><rect width="30" height="30" rx="8" fill="url(#g)"/><g fill="#fff"><rect x="7" y="12" width="2.4" height="6" rx="1.2"/><rect x="11" y="8.5" width="2.4" height="13" rx="1.2"/><rect x="15" y="6" width="2.4" height="18" rx="1.2"/><rect x="19" y="10" width="2.4" height="10" rx="1.2"/><rect x="23" y="13" width="2.4" height="4" rx="1.2"/></g></svg>
+      Pulse
+    </a>
+    <nav aria-label="Main">
+      <ul>
+        <li><a href="#features">Features</a></li>
+        <li><a href="#themes">Themes</a></li>
+        <li><a href="https://github.com/mercy123xz/Pulse">GitHub</a></li>
+      </ul>
+    </nav>
+    <a class="btn btn-primary" href="#download">Download</a>
+  </div>
+</header>
+
+<main id="main">
+  <section class="hero" aria-labelledby="hero-title">
+    <div class="wrap hero-grid">
+      <div>
+        <span class="eyebrow">Free &amp; open source · Windows 10 and 11</span>
+        <h1 id="hero-title">Your music, <span>without the weight.</span></h1>
+        <p class="lede">Pulse is a small, native music player written in Rust. Search any artist, press play, and hear the whole song. No account, no browser inside, nothing to sign up for.</p>
+        <div class="cta">
+          <a class="btn btn-primary" href="https://github.com/mercy123xz/Pulse/releases/latest">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 19h16"/></svg>
+            Download for Windows
+          </a>
+          <a class="btn btn-ghost" href="https://github.com/mercy123xz/Pulse">View on GitHub</a>
+        </div>
+        <p class="meta">Version 0.3.0 · under 10 MB installer · no administrator password needed</p>
+      </div>
+      <div class="window">
+        <div class="window-bar" aria-hidden="true"><i></i><i></i><i></i></div>
+        <picture>
+          <source type="image/avif" srcset="img/chart-page-800.avif 800w, img/chart-page.avif 1600w" sizes="(min-width: 1100px) 760px, 92vw">
+          <source type="image/webp" srcset="img/chart-page-800.webp 800w, img/chart-page.webp 1600w" sizes="(min-width: 1100px) 760px, 92vw">
+          <img src="img/chart-page.webp" width="1600" height="768" fetchpriority="high" decoding="async" alt="Pulse's Charts page: the 100 most popular songs, each with its cover, artist, album, YouTube view count and length.">
+        </picture>
+      </div>
+    </div>
+  </section>
+
+  <div class="facts" aria-label="At a glance">
+    <ul class="wrap">
+      <li><strong>&lt; 10 MB</strong><span>installer</span></li>
+      <li><strong>Native</strong><span>Rust + DirectX 12, no web browser inside</span></li>
+      <li><strong>4 themes</strong><span>or make your own</span></li>
+      <li><strong>5 languages</strong><span>English, Español, Português, Français, Deutsch</span></li>
+      <li><strong>0 accounts</strong><span>everything stays on your PC</span></li>
+    </ul>
+  </div>
+
+  <section id="features" aria-labelledby="discover-title">
+    <div class="wrap split">
+      <div>
+        <p class="kicker">Discover</p>
+        <h2 id="discover-title">Any song. Any artist.</h2>
+        <p class="section-lede">Search as you type, browse the charts in 27 genres, and open any artist or album. Songs play in full, and when your queue runs out, Pulse keeps going with music like it.</p>
+        <ul>
+          <li><strong>Charts and genres</strong> updated every day</li>
+          <li><strong>Artist pages</strong> with their latest release and most-viewed songs</li>
+          <li><strong>Autoplay</strong> that picks up where your queue ends</li>
+        </ul>
+      </div>
+      <div class="shot">
+        <picture>
+          <source type="image/avif" srcset="img/charts-800.avif 800w, img/charts.avif 1600w" sizes="(min-width: 960px) 680px, 92vw">
+          <source type="image/webp" srcset="img/charts-800.webp 800w, img/charts.webp 1600w" sizes="(min-width: 960px) 680px, 92vw">
+          <img src="img/charts.webp" width="1600" height="740" loading="lazy" decoding="async" alt="The Discover section of Pulse's home page: genre buttons from Pop to Folk, above a table of today's top songs.">
+        </picture>
+      </div>
+    </div>
+  </section>
+
+  <section aria-labelledby="library-title" style="padding-top: 0">
+    <div class="wrap split flip">
+      <div>
+        <p class="kicker">Browse</p>
+        <h2 id="library-title">Albums, artists and playlists, all in one place.</h2>
+        <p class="section-lede">Cover art everywhere, round artist portraits, and playlists for every mood. Click a song's title to jump to its album, or right-click it to like it, share it, or see who made it.</p>
+      </div>
+      <div class="shot">
+        <picture>
+          <source type="image/avif" srcset="img/albums-800.avif 800w, img/albums.avif 1600w" sizes="(min-width: 960px) 680px, 92vw">
+          <source type="image/webp" srcset="img/albums-800.webp 800w, img/albums.webp 1600w" sizes="(min-width: 960px) 680px, 92vw">
+          <img src="img/albums.webp" width="1600" height="569" loading="lazy" decoding="async" alt="A grid of popular albums in Pulse, each with its cover, title and artist.">
+        </picture>
+      </div>
+    </div>
+    <div class="wrap strip">
+      <div class="shot">
+        <picture>
+          <source type="image/avif" srcset="img/artists-800.avif 800w, img/artists.avif 1600w" sizes="(min-width: 1180px) 1180px, (max-width: 700px) 820px, 100vw">
+          <source type="image/webp" srcset="img/artists-800.webp 800w, img/artists.webp 1600w" sizes="(min-width: 1180px) 1180px, (max-width: 700px) 820px, 100vw">
+          <img src="img/artists.webp" width="1600" height="318" loading="lazy" decoding="async" alt="A row of popular artists in Pulse, shown as round portraits with their names.">
+        </picture>
+      </div>
+    </div>
+    <div class="wrap strip">
+      <div class="shot">
+        <picture>
+          <source type="image/avif" srcset="img/playlists-800.avif 800w, img/playlists.avif 1600w" sizes="(min-width: 1180px) 1180px, (max-width: 700px) 820px, 100vw">
+          <source type="image/webp" srcset="img/playlists-800.webp 800w, img/playlists.webp 1600w" sizes="(min-width: 1180px) 1180px, (max-width: 700px) 820px, 100vw">
+          <img src="img/playlists.webp" width="1600" height="318" loading="lazy" decoding="async" alt="A row of popular playlists in Pulse, from Christmas Hits to Lofi beats.">
+        </picture>
+      </div>
+    </div>
+  </section>
+
+  <section aria-labelledby="more-title" style="padding-top: 0">
+    <div class="wrap">
+      <p class="kicker">And more</p>
+      <h2 id="more-title">Small app. Lots inside.</h2>
+      <p class="section-lede">Everything you'd expect from a music player, and a few things you might not.</p>
+      <div class="cards">
+        <article class="card">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0-4-4m4 4 4-4"/><path d="M5 21h14"/></svg>
+          <h3>Bring your playlists</h3>
+          <p>Paste a link from YouTube, Spotify or SoundCloud and Pulse rebuilds the playlist. Share yours with friends using a one-line code.</p>
+        </article>
+        <article class="card">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg>
+          <h3>Sound the way you like</h3>
+          <p>A six-band equalizer with presets, crossfade up to 10 seconds, gapless playback, automix and mono audio.</p>
+        </article>
+        <article class="card">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21s-7-4.5-9.5-9A5.5 5.5 0 0 1 12 6a5.5 5.5 0 0 1 9.5 6c-2.5 4.5-9.5 9-9.5 9z"/></svg>
+          <h3>Made for you</h3>
+          <p>Your home page fills with what you play: quick shortcuts, Daily Mixes built from your favorite artists, and the albums you keep coming back to.</p>
+        </article>
+        <article class="card">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7h18M3 12h18M3 17h10"/></svg>
+          <h3>Playlists your way</h3>
+          <p>Your own covers, search, genre filters, sorting, "date added", and Spotify-style selection with Ctrl and Shift.</p>
+        </article>
+        <article class="card">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4z"/><path d="M14 17h6M17 14v6"/></svg>
+          <h3>Offline and local files</h3>
+          <p>Save songs for when you're offline, and play the MP3, FLAC, WAV, M4A and OGG files in your Music folder.</p>
+        </article>
+        <article class="card">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/></svg>
+          <h3>Made for everyone</h3>
+          <p>Full keyboard control, screen-reader support, high contrast mode, and text colors that meet WCAG AA contrast.</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section id="themes" aria-labelledby="themes-title" style="padding-top: 0">
+    <div class="wrap">
+      <p class="kicker">Themes</p>
+      <h2 id="themes-title">Make it look like yours.</h2>
+      <p class="section-lede">Four themes come built in, each with a dark and a light version. Or make your own with a color file, a little CSS and a layout file. Spicetify color schemes work as they are, and Pulse reloads your theme the moment you save it.</p>
+      <div class="themes">
+        <figure class="theme">
+          <div class="mini" role="img" aria-label="Preview of the Default theme: near-black with violet accents." style="--t-bg:#0b0b0e;--t-side:#0f0f13;--t-card:#1d1d24;--t-text:#ededf1;--t-sub:#9696a4;--t-accent:#7c3aed;--t-soft:#a78bfa;--r:10px">
+            <div class="side"><i></i><i></i><i></i></div>
+            <div class="main"><div class="cover"></div><div class="rows"><i></i><i></i><i></i><i></i></div></div>
+            <div class="player"><b></b></div>
+          </div>
+          <figcaption><strong>Default</strong><span>Dark violet, with a light version</span></figcaption>
+        </figure>
+        <figure class="theme">
+          <div class="mini" role="img" aria-label="Preview of the Blossom theme: deep rose with pink accents and round corners." style="--t-bg:#1c1519;--t-side:#160f13;--t-card:#33262e;--t-text:#fbeef4;--t-sub:#d4b3c3;--t-accent:#b8336a;--t-soft:#ff9cc4;--r:18px">
+            <div class="side"><i></i><i></i><i></i></div>
+            <div class="main"><div class="cover"></div><div class="rows"><i></i><i></i><i></i><i></i></div></div>
+            <div class="player"><b></b></div>
+          </div>
+          <figcaption><strong>Blossom</strong><span>Soft rose, round corners, big sidebar cover</span></figcaption>
+        </figure>
+        <figure class="theme">
+          <div class="mini" role="img" aria-label="Preview of the Dreary Mono theme: greyscale with square corners." style="--t-bg:#141414;--t-side:#0e0e0e;--t-card:#262626;--t-text:#e6e6e6;--t-sub:#ababab;--t-accent:#5a5a5a;--t-soft:#d6d6d6;--r:3px">
+            <div class="side"><i></i><i></i><i></i></div>
+            <div class="main"><div class="cover"></div><div class="rows"><i></i><i></i><i></i><i></i></div></div>
+            <div class="player"><b></b></div>
+          </div>
+          <figcaption><strong>Dreary Mono</strong><span>Greyscale, square corners, capital titles</span></figcaption>
+        </figure>
+        <figure class="theme">
+          <div class="mini" role="img" aria-label="Preview of the Lunar theme: deep night blue with periwinkle accents." style="--t-bg:#0f1424;--t-side:#090d18;--t-card:#1f2740;--t-text:#e8ecff;--t-sub:#a9b2d6;--t-accent:#4b5fd6;--t-soft:#a3b3ff;--r:14px">
+            <div class="side"><i></i><i></i><i></i></div>
+            <div class="main"><div class="cover"></div><div class="rows"><i></i><i></i><i></i><i></i></div></div>
+            <div class="player"><b></b></div>
+          </div>
+          <figcaption><strong>Lunar</strong><span>Night blues, icon sidebar, full-width artist photos</span></figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <section id="download" class="download" aria-labelledby="download-title" style="padding-top: 0">
+    <div class="wrap">
+      <div class="box">
+        <h2 id="download-title">Ready when you are.</h2>
+        <p class="section-lede" style="margin-inline:auto">Download the installer, run it, and press play. It installs just for you, adds Pulse to the Start menu, and uninstalls cleanly from Windows Settings.</p>
+        <div class="cta">
+          <a class="btn btn-primary" href="https://github.com/mercy123xz/Pulse/releases/latest">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 19h16"/></svg>
+            Download Pulse 0.3.0
+          </a>
+          <a class="btn btn-ghost" href="https://github.com/mercy123xz/Pulse#readme">Read the docs</a>
+        </div>
+        <small>Windows may show "Windows protected your PC" the first time, as it does for any new app without a paid signing certificate. Click <em>More info</em>, then <em>Run anyway</em>. The first song you play takes a moment longer while Pulse sets up YouTube playback (about 70 MB, once).</small>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <nav aria-label="Footer">
+      <a href="https://github.com/mercy123xz/Pulse">Source code</a>
+      <a href="https://github.com/mercy123xz/Pulse/releases">All releases</a>
+      <a href="https://github.com/mercy123xz/Pulse/issues">Report a problem</a>
+    </nav>
+    <p style="margin:0">Pulse is a free, non-commercial side project for personal listening. Song info and artwork come from Deezer; audio is streamed from YouTube with yt-dlp. Pulse isn't affiliated with or endorsed by Deezer, YouTube, Google, Spotify or SoundCloud. Screenshots show the artwork and artists of their respective owners.</p>
+  </div>
+</footer>
+</body>
+</html>
