@@ -149,6 +149,11 @@ pub struct Settings {
     pub mini_open: bool,
     pub mini_pos: Option<[f32; 2]>,
     pub mini_on_top: bool,
+    /// Lyrics: text size (0 small, 1 medium, 2 large), centered, and the current line
+    /// in the mini player.
+    pub lyrics_size: u8,
+    pub lyrics_center: bool,
+    pub mini_lyrics: bool,
     pub hardware_acceleration: bool,
     /// Theme name and its color scheme.
     pub theme: String,
@@ -181,6 +186,9 @@ impl Default for Settings {
             mini_open: false,
             mini_pos: None,
             mini_on_top: true,
+            lyrics_size: 1,
+            lyrics_center: true,
+            mini_lyrics: false,
             hardware_acceleration: true,
             theme: "Default".into(),
             scheme: String::new(),

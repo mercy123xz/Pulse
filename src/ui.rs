@@ -7,6 +7,7 @@ use crate::theme::*;
 use crate::widgets::*;
 use crate::i18n::tr;
 
+mod lyrics_page;
 pub mod mini;
 mod personal;
 mod settings_page;
@@ -145,6 +146,13 @@ fn shortcuts(app: &mut App, ctx: &egui::Context) {
         }
         if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::R)) {
             app.cycle_repeat();
+        }
+        if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::L)) {
+            if app.route == Route::Lyrics {
+                app.go_back(ctx);
+            } else {
+                app.navigate(Route::Lyrics, ctx);
+            }
         }
         if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::M)) {
             app.toggle_mute();
@@ -714,6 +722,7 @@ fn page(app: &mut App, ui: &mut Ui) {
             }
         }
         Route::Queue => queue_page(app, ui),
+        Route::Lyrics => lyrics_page::lyrics_page(app, ui),
     }
 }
 
@@ -1934,6 +1943,14 @@ fn player_bar(app: &mut App, ui: &mut Ui) {
     let mute_tip = if app.muted_volume.is_some() { "Unmute (M)" } else { "Mute (M)" };
     if icon_button(&mut rui, vol_icon, 17.0, pal().text_muted, mute_tip).clicked() {
         app.toggle_mute();
+    }
+    let on_lyrics = app.route == Route::Lyrics;
+    if icon_button(&mut rui, icon::MICROPHONE_STAGE, 17.0, if on_lyrics { pal().accent_soft } else { pal().text_muted }, tr("Lyrics (L)")).clicked() {
+        if on_lyrics {
+            app.go_back(&ctx);
+        } else {
+            app.navigate(Route::Lyrics, &ctx);
+        }
     }
     let mini_on = app.saved.settings.mini_open;
     if icon_button(&mut rui, icon::PICTURE_IN_PICTURE, 17.0, if mini_on { pal().accent_soft } else { pal().text_muted }, tr("Mini player (Ctrl+M)")).clicked() {

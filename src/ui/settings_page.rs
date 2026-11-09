@@ -165,6 +165,9 @@ pub fn settings_page(app: &mut App, ui: &mut Ui) {
     row(ui, tr("Always on top"), tr("Keep it above other windows."), |ui| {
         switch(ui, &mut s.mini_on_top, tr("Always on top"));
     });
+    row(ui, tr("Show the lyric being sung"), tr("For songs with synced lyrics, the mini player shows the current line instead of the artists."), |ui| {
+        switch(ui, &mut s.mini_lyrics, tr("Show the lyric being sung"));
+    });
 
     // ------------------------------------------------------------ Compatibility
     section(ui, tr("Compatibility"));

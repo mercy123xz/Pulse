@@ -87,7 +87,26 @@ fn draw(app: &mut App, ui: &mut Ui) {
     let tx = art.right() + 10.0;
     let tw = controls_c.x - 48.0 - tx;
     paint_line(ui, pos2(tx, full.center().y - 18.0), &t.title, semi(13.0), pal().text, tw);
-    paint_line(ui, pos2(tx, full.center().y + 1.0), &t.all_artists(), regular(11.5), pal().text_muted, tw);
+    // Optionally the line being sung instead of the artists (synced lyrics only).
+    let pos = if app.needs_load { 0.0 } else { app.audio.position().as_secs_f32() };
+    let mut second = t.all_artists();
+    let mut second_col = pal().text_muted;
+    if app.saved.settings.mini_lyrics
+        && let crate::app::LyricsState::Ready(l) = app.lyrics_for(&t, &ctx)
+        && let Some(i) = l.line_at(pos)
+    {
+        let line = l.synced[i].1.clone();
+        if let Some(next) = l.next_change(pos)
+            && app.is_playing()
+        {
+            ctx.request_repaint_after(std::time::Duration::from_secs_f32((next - pos).max(0.05)));
+        }
+        if !line.is_empty() {
+            second = line;
+            second_col = pal().accent_soft;
+        }
+    }
+    paint_line(ui, pos2(tx, full.center().y + 1.0), &second, regular(11.5), second_col, tw);
 
     let playing = app.is_playing();
     let button = |ui: &Ui, c: Pos2, glyph: &str, name: &str, main: bool| -> bool {
@@ -116,7 +135,6 @@ fn draw(app: &mut App, ui: &mut Ui) {
     }
 
     // A thin progress line along the bottom.
-    let pos = if app.needs_load { 0.0 } else { app.audio.position().as_secs_f32() };
     let frac = (pos / t.duration.max(1) as f32).clamp(0.0, 1.0);
     let line = Rect::from_min_max(pos2(full.left() + 12.0, full.bottom() - 5.0), pos2(full.right() - 12.0, full.bottom() - 3.0));
     ui.painter().rect_filled(line, CornerRadius::same(1), pal().surface_active);

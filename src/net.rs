@@ -4,7 +4,7 @@ use std::io::Read;
 use std::sync::OnceLock;
 use std::time::Duration;
 
-pub const USER_AGENT: &str = "Pulse/0.2 (Rust desktop music player)";
+pub const USER_AGENT: &str = concat!("Pulse/", env!("CARGO_PKG_VERSION"), " (https://github.com/mercy123xz/Pulse)");
 
 /// Client for small API calls (fails fast if the network is down).
 pub fn api() -> &'static ureq::Agent {

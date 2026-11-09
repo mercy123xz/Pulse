@@ -33,6 +33,17 @@ pub enum Route {
     /// A song's own page (its id, "dz:…" or an imported song's id).
     Song(String),
     Profile,
+    /// The playing song's lyrics.
+    Lyrics,
+}
+
+/// A song's lyrics, as far as we know.
+pub enum LyricsState {
+    Loading,
+    Ready(Arc<crate::lyrics::Lyrics>),
+    /// LRCLIB doesn't have them.
+    Missing,
+    Failed(String),
 }
 
 /// Data downloaded for a page.
@@ -530,6 +541,10 @@ pub struct App {
     /// The song-colored background (themes with `backdrop = true`).
     pub backdrop: crate::backdrop::Backdrop,
     swept_at: f64,
+    /// Lyrics looked up this session, by song id.
+    pub lyrics: HashMap<String, LyricsState>,
+    lyrics_tx: Sender<(String, Result<Option<crate::lyrics::Lyrics>, String>)>,
+    lyrics_rx: Receiver<(String, Result<Option<crate::lyrics::Lyrics>, String>)>,
     /// When each loaded page was last opened, so the oldest can be let go of.
     cache_used: HashMap<String, Instant>,
     /// Size of the cache folders, measured when Settings opens.
@@ -590,6 +605,7 @@ impl App {
         let (views_tx, views_rx) = channel();
         let (prefetch_failed_tx, prefetch_failed_rx) = channel();
         let (featured_tx, featured_rx) = channel();
+        let (lyrics_tx, lyrics_rx) = channel();
         let audio = AudioEngine::new();
         audio.set_volume(saved.volume);
 
@@ -645,6 +661,9 @@ impl App {
             highlight: None,
             backdrop: Default::default(),
             swept_at: 0.0,
+            lyrics: HashMap::new(),
+            lyrics_tx,
+            lyrics_rx,
             cache_used: HashMap::new(),
             song_tracks: HashMap::new(),
             rematch_tried: HashSet::new(),
@@ -811,7 +830,7 @@ impl App {
             Route::Mix(id) => format!("mix:{id}"),
             Route::Song(id) if deezer::is_deezer_id(id.trim_start_matches("dz:")) => format!("song:{id}"),
             Route::Song(_) => return None,
-            Route::Liked | Route::Recent | Route::Queue | Route::Local(_) | Route::LocalFiles | Route::Settings | Route::Profile => return None,
+            Route::Liked | Route::Recent | Route::Queue | Route::Local(_) | Route::LocalFiles | Route::Settings | Route::Profile | Route::Lyrics => return None,
         })
     }
 
@@ -921,7 +940,33 @@ impl App {
 
     /// Called every frame before drawing: receives finished downloads and
     /// moves on to the next song when one ends.
+    /// The song's lyrics, starting the lookup the first time they're wanted.
+    pub fn lyrics_for(&mut self, t: &Track, ctx: &egui::Context) -> &LyricsState {
+        if !self.lyrics.contains_key(&t.id) {
+            // A session's worth at most; the disk copies stay.
+            if self.lyrics.len() > 100 {
+                self.lyrics.retain(|_, v| matches!(v, LyricsState::Loading));
+            }
+            self.lyrics.insert(t.id.clone(), LyricsState::Loading);
+            let (tx, track, ctx) = (self.lyrics_tx.clone(), t.clone(), ctx.clone());
+            std::thread::spawn(move || {
+                let r = crate::lyrics::get(&track);
+                let _ = tx.send((track.id, r));
+                ctx.request_repaint();
+            });
+        }
+        &self.lyrics[&t.id]
+    }
+
     pub fn tick(&mut self, ctx: &egui::Context) {
+        while let Ok((id, r)) = self.lyrics_rx.try_recv() {
+            let state = match r {
+                Ok(Some(l)) if !l.is_empty() => LyricsState::Ready(Arc::new(l)),
+                Ok(_) => LyricsState::Missing,
+                Err(e) => LyricsState::Failed(e),
+            };
+            self.lyrics.insert(id, state);
+        }
         // Now and then, let go of pictures that are no longer on screen.
         let now = ctx.input(|i| i.time);
         if now - self.swept_at > 15.0 {

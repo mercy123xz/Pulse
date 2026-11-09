@@ -12,6 +12,7 @@ mod i18n;
 mod import;
 mod itunes;
 mod local;
+mod lyrics;
 mod net;
 mod perf;
 mod settings;
