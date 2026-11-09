@@ -31,22 +31,24 @@
               ["Dawn", "f4fbfa e9f6f4 e9f6f4 ffffff d9eeeb cde8e4 b9dbd6 0c201e 3c5f5a 52736e 115e59 0f766e"]] }
   ];
 
-  // ------------------------------------------------------------------ Music (made up)
+  // ------------------------------------------------------------------ Music
+  // Real artists, songs, albums, years and lengths. The covers are plain color tiles:
+  // album art and artist photos belong to their owners (the app itself shows them).
   var ALBUMS = [
-    { id: "a1", title: "Neon Harbor", artist: "Lumen Avenue", c: ["#ff6a88", "#7b2ff7"] },
-    { id: "a2", title: "Slow Static", artist: "The Paper Tides", c: ["#43cea2", "#185a9d"] },
-    { id: "a3", title: "Gold Hour", artist: "Mira Sol", c: ["#f7b733", "#fc4a1a"] },
-    { id: "a4", title: "Night Drive Club", artist: "VANTA", c: ["#4776e6", "#8e54e9"] },
-    { id: "a5", title: "Glasshouse", artist: "Juniper Lane", c: ["#56ab2f", "#a8e063"] },
-    { id: "a6", title: "Low Tide", artist: "Okami Sound", c: ["#2c3e50", "#4ca1af"] }
+    { id: "a1", title: "After Hours", artist: "The Weeknd", year: 2020, c: ["#e52d27", "#7a0c0c"] },
+    { id: "a2", title: "Future Nostalgia", artist: "Dua Lipa", year: 2020, c: ["#ff7eb3", "#7b2ff7"] },
+    { id: "a3", title: "Hit Me Hard and Soft", artist: "Billie Eilish", year: 2024, c: ["#2b5876", "#4e4376"] },
+    { id: "a4", title: "Short n' Sweet", artist: "Sabrina Carpenter", year: 2024, c: ["#89cff0", "#f6d365"] },
+    { id: "a5", title: "Midnights", artist: "Taylor Swift", year: 2022, c: ["#1e3c72", "#6a3093"] },
+    { id: "a6", title: "DAMN.", artist: "Kendrick Lamar", year: 2017, c: ["#e53935", "#f5f5f5"] }
   ];
   var SONGS = [
-    ["Afterglow", "a1", 214], ["City of Echoes", "a1", 187], ["Blue Signal", "a2", 236], ["Paper Planes Home", "a2", 201],
-    ["Sunday Gold", "a3", 178], ["Honey & Rust", "a3", 243], ["Ninety Miles", "a4", 199], ["Tail Lights", "a4", 225],
-    ["Greenhouse Heart", "a5", 192], ["Window Seat", "a5", 208], ["Undertow", "a6", 251], ["Moonlit Ferry", "a6", 196]
+    ["Blinding Lights", "a1", 200], ["Save Your Tears", "a1", 215], ["Levitating", "a2", 203], ["Don't Start Now", "a2", 183],
+    ["Birds of a Feather", "a3", 210], ["Lunch", "a3", 179], ["Espresso", "a4", 175], ["Please Please Please", "a4", 186],
+    ["Anti-Hero", "a5", 200], ["Lavender Haze", "a5", 202], ["HUMBLE.", "a6", 177], ["LOVE.", "a6", 213]
   ].map(function (s, i) {
     var a = ALBUMS.filter(function (x) { return x.id === s[1]; })[0];
-    return { id: i, title: s[0], album: a, artist: a.artist, len: s[2], views: Math.round(2e6 + ((i * 7919) % 97) * 1.37e6) };
+    return { id: i, title: s[0], album: a, artist: a.artist, len: s[2] };
   });
   var GENRES = ["All genres", "Pop", "Rap/Hip Hop", "Rock", "Dance", "R&B"];
 
@@ -158,13 +160,13 @@
   function table(list, opts) {
     opts = opts || {};
     if (!list.length) return '<p class="d-empty">' + esc(opts.empty || "Nothing here yet.") + "</p>";
-    return '<div class="d-table"><div class="d-th" aria-hidden="true"><span>#</span><span>Title</span><span>Album</span><span>' + (opts.views ? "Views" : "") + "</span><span>" + ic("clock", 13) + "</span></div>" +
+    return '<div class="d-table"><div class="d-th" aria-hidden="true"><span>#</span><span>Title</span><span>Album</span><span>' + ic("clock", 13) + "</span></div>" +
       list.map(function (s, i) {
         var now = s.id === st.song;
         return '<div class="d-row' + (now ? " now" : "") + '"><button type="button" class="d-rowplay" data-play="' + s.id + '" aria-label="Play ' + esc(s.title) + '">' +
           '<span class="d-n">' + (now && st.playing ? '<span class="d-eq"><i></i><i></i><i></i></span>' : i + 1) + "</span>" +
           '<span class="d-tt">' + art(s.album) + '<span class="d-t"><b>' + esc(s.title) + "</b><small>" + esc(s.artist) + "</small></span></span>" +
-          '<span class="d-al">' + esc(s.album.title) + '</span><span class="d-v">' + (opts.views ? s.views.toLocaleString("en-US") : "") + '</span><span class="d-len">' + time(s.len) + "</span></button>" +
+          '<span class="d-al">' + esc(s.album.title) + '</span><span class="d-len">' + time(s.len) + "</span></button>" +
           '<button type="button" class="d-like' + (st.liked[s.id] ? " on" : "") + '" data-like="' + s.id + '" aria-pressed="' + !!st.liked[s.id] + '" aria-label="Like ' + esc(s.title) + '">' + ic("heart", 15, !!st.liked[s.id]) + "</button></div>";
       }).join("") + "</div>";
   }
@@ -177,7 +179,7 @@
     if (st.q) {
       var q = st.q.toLowerCase();
       var hits = SONGS.filter(function (s) { return (s.title + " " + s.artist + " " + s.album.title).toLowerCase().indexOf(q) >= 0; });
-      h = head("Songs", "Results for “" + esc(st.q) + "”") + table(hits, { empty: "No songs match. Try “night” or “gold”." });
+      h = head("Songs", "Results for “" + esc(st.q) + "”") + table(hits, { empty: "No songs match. Try “lights” or “espresso”." });
     } else if (st.view === "home") {
       var hour = new Date().getHours();
       h = '<h3 class="d-greet">' + (hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening") + "</h3>" +
@@ -194,7 +196,7 @@
       if (st.genre) list = list.filter(function (s, i) { return (i + st.genre) % 2 === 0 || i % (st.genre + 2) === 0; });
       h = head("Charts", "The 100 most popular songs right now") +
         '<div class="d-genre"><button type="button" class="d-select" data-genre-next>' + ic("note", 13) + " " + esc(GENRES[st.genre]) + " " + ic("caret", 13) + "</button></div>" +
-        actions(list[0].id) + table(list.slice(0, 10), { views: true });
+        actions(list[0].id) + table(list.slice(0, 10));
     } else if (st.view === "liked") {
       var liked = SONGS.filter(function (s) { return st.liked[s.id]; });
       h = '<div class="d-hero"><span class="d-art hero liked">' + ic("heart", 46, true) + '</span><div><small>PLAYLIST</small><h3>Liked Songs</h3><p class="d-sub">' + liked.length + " songs</p></div></div>" +
@@ -207,7 +209,7 @@
     } else if (st.view === "album") {
       var a = ALBUMS.filter(function (x) { return x.id === st.album; })[0];
       var tracks = SONGS.filter(function (s) { return s.album === a; });
-      h = '<div class="d-hero">' + art(a, "hero") + "<div><small>ALBUM</small><h3>" + esc(a.title) + '</h3><p class="d-sub"><b>' + esc(a.artist) + "</b> · 2025 · " + tracks.length + " songs</p></div></div>" +
+      h = '<div class="d-hero">' + art(a, "hero") + "<div><small>ALBUM</small><h3>" + esc(a.title) + '</h3><p class="d-sub"><b>' + esc(a.artist) + "</b> · " + a.year + " · " + tracks.length + " songs</p></div></div>" +
         actions(tracks[0].id) + table(tracks);
     }
     view.innerHTML = h;
