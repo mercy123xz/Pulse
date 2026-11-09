@@ -129,7 +129,10 @@ pub fn settings_page(app: &mut App, ui: &mut Ui) {
     row(ui, tr("High contrast mode"), tr("Stronger colors and borders, easier to read."), |ui| {
         switch(ui, &mut s.high_contrast, tr("High contrast mode"));
     });
-    row(ui, tr("Reduce motion"), tr("Turns off moving backgrounds, the live waveform and fades."), |ui| {
+    row(ui, tr("Moving background"), tr("In themes with a song-colored background, let it drift slowly while music plays."), |ui| {
+        switch(ui, &mut s.moving_background, tr("Moving background"));
+    });
+    row(ui, tr("Reduce motion"), tr("Turns off moving backgrounds and menu fades."), |ui| {
         switch(ui, &mut s.reduce_motion, tr("Reduce motion"));
     });
     row(ui, tr("Enable hardware acceleration"), tr("Uses your graphics card to draw Pulse. Turn off if the window flickers or stays blank. Restart Pulse to apply."), |ui| {

@@ -392,16 +392,14 @@ mod tests {
     #[test]
     fn eq_boosts_and_cuts_the_right_band() {
         let flat = rms(&run(60.0, Effects::default()));
-        let mut boost = Effects::default();
-        boost.eq = Some([12.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
+        let boost = Effects { eq: Some([12.0, 0.0, 0.0, 0.0, 0.0, 0.0]), ..Default::default() };
         // Preamp lowers everything by half the boost (6 dB); the 60 Hz band still ends up clearly louder.
         assert!(rms(&run(60.0, boost.clone())) > flat * 1.5);
         // A 5 kHz tone is barely touched by the bass band (only the preamp applies).
         let hi_flat = rms(&run(5000.0, Effects::default()));
         let hi = rms(&run(5000.0, boost));
         assert!(hi < hi_flat && hi > hi_flat * 0.3);
-        let mut cut = Effects::default();
-        cut.eq = Some([0.0, 0.0, 0.0, -12.0, 0.0, 0.0]);
+        let cut = Effects { eq: Some([0.0, 0.0, 0.0, -12.0, 0.0, 0.0]), ..Default::default() };
         assert!(rms(&run(1000.0, cut)) < rms(&run(1000.0, Effects::default())) * 0.5);
     }
 

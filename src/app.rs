@@ -459,6 +459,8 @@ pub struct App {
     pub song_tracks: HashMap<String, Track>,
     /// A song to point out on the page it was opened on (id, when).
     pub highlight: Option<(String, f64)>,
+    /// The song-colored background (themes with `backdrop = true`).
+    pub backdrop: crate::backdrop::Backdrop,
     /// Size of the cache folders, measured when Settings opens.
     pub cache_size: Option<u64>,
     /// The song last given to the audio engine as "next" (None = not told yet).
@@ -561,6 +563,7 @@ impl App {
             credits_rx: None,
             cache_size: None,
             highlight: None,
+            backdrop: Default::default(),
             song_tracks: HashMap::new(),
             rematch_tried: HashSet::new(),
             featured_queue: Default::default(),

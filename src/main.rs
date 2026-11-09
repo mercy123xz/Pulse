@@ -3,6 +3,7 @@
 
 mod app;
 mod audio;
+mod backdrop;
 mod deezer;
 mod downloads;
 mod dsp;

@@ -22,6 +22,8 @@ pub fn draw(app: &mut App, ui: &mut Ui) {
     let pt = parts();
 
     let player_fill = pt.player_bar.fill.unwrap_or(pal().player);
+    let compact = lay.sidebar == crate::theme::SidebarStyle::Icons;
+    let sidebar_fill = pt.sidebar.fill.unwrap_or(pal().sidebar);
     let player = egui::Panel::bottom("player")
         .exact_size(88.0)
         .frame(Frame::new().fill(player_fill).inner_margin(Margin::symmetric(pt.player_bar.padding.unwrap_or(16.0) as i8, 0)))
@@ -30,8 +32,6 @@ pub fn draw(app: &mut App, ui: &mut Ui) {
     let top_line = pt.player_bar.border.unwrap_or(Stroke::new(1.0, pal().border));
     ui.painter().hline(player.response.rect.x_range(), player.response.rect.top(), top_line);
 
-    let compact = lay.sidebar == crate::theme::SidebarStyle::Icons;
-    let sidebar_fill = pt.sidebar.fill.unwrap_or(pal().sidebar);
     let pad = pt.sidebar.padding.unwrap_or(12.0) as i8;
     let side = egui::Panel::left("sidebar")
         .exact_size(if compact { 76.0 } else { 240.0 })
@@ -49,6 +49,7 @@ pub fn draw(app: &mut App, ui: &mut Ui) {
         egui::CentralPanel::default().frame(Frame::new().fill(sidebar_fill).inner_margin(Margin { left: 0, right: 8, top: 8, bottom: 8 })).show(ui, |ui| {
             Frame::new().fill(pal().bg).corner_radius(r_lg()).show(ui, |ui| {
                 ui.set_min_size(ui.available_size());
+                paint_backdrop(app, ui, ui.max_rect(), r_lg(), Some(sidebar_fill));
                 Frame::new().fill(pt.header.fill.unwrap_or(Color32::TRANSPARENT)).corner_radius(r_lg()).inner_margin(Margin::symmetric(24, 0)).show(ui, |ui| {
                     ui.set_height(60.0);
                     ui.set_width(ui.available_width());
@@ -63,7 +64,10 @@ pub fn draw(app: &mut App, ui: &mut Ui) {
             .frame(Frame::new().fill(header_fill).inner_margin(Margin::symmetric(24, 0)))
             .show_separator_line(false)
             .show(ui, |ui| top_bar(app, ui));
-        egui::CentralPanel::default().frame(Frame::new().fill(pal().bg)).show(ui, |ui| main_scroll(app, ui));
+        egui::CentralPanel::default().frame(Frame::new().fill(pal().bg)).show(ui, |ui| {
+            paint_backdrop(app, ui, ui.max_rect(), CornerRadius::ZERO, None);
+            main_scroll(app, ui);
+        });
     }
 
     dialogs(app, &ctx);
@@ -76,6 +80,18 @@ fn loading_text(msg: &str) -> String {
         Some((_, pct)) => format!("{} {pct}", tr("Loading…")),
         None => tr("Loading…").to_string(),
     }
+}
+
+/// The song-colored glows behind the main area, for themes that ask for them.
+fn paint_backdrop(app: &mut App, ui: &Ui, rect: Rect, radius: CornerRadius, outside: Option<Color32>) {
+    if !layout().backdrop {
+        return;
+    }
+    let cover = app.current.as_ref().and_then(|t| t.art_small()).map(str::to_owned);
+    app.backdrop.set_cover(cover.as_deref(), ui.ctx());
+    let playing = app.is_playing();
+    let moving = playing && app.saved.settings.moving_background && !reduce_motion();
+    app.backdrop.paint(ui, rect, radius, outside, moving);
 }
 
 fn main_scroll(app: &mut App, ui: &mut Ui) {

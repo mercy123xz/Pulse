@@ -6,3 +6,4 @@ description = "Deep night colors, an icon sidebar, full-width artist photos and 
 sidebar = "icons"
 hero = "fullbleed"
 inset = true
+backdrop = true
