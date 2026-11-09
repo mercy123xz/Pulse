@@ -797,12 +797,15 @@ fn album_grid_visits(app: &mut App, ui: &mut Ui, items: &[crate::app::Visit], ro
 fn artist_grid(app: &mut App, ui: &mut Ui, artists: &[ArtistInfo], rows: Option<usize>) {
     let ctx = ui.ctx().clone();
     let mut open = None;
+    let mut radio = None;
     let mut preview = None;
     card_grid(ui, artists, rows, |ui, w, a| {
         let sub = if a.fans > 0 { format!("{} fans", fmt_count(a.fans)) } else { "Artist".into() };
         let info = CardInfo { id: egui::Id::new(("artist", &a.id)), art: a.picture.as_deref(), title: &a.name, subtitle: sub, round: true, badge: None };
         match card(ui, w, &info) {
-            CardClick::Open | CardClick::Play => open = Some(a.id.clone()),
+            CardClick::Open => open = Some(a.id.clone()),
+            // The play button on an artist starts their radio.
+            CardClick::Play => radio = Some(a.id.clone()),
             CardClick::Preview => preview = Some(a.id.clone()),
             CardClick::None => {}
         }
@@ -812,6 +815,9 @@ fn artist_grid(app: &mut App, ui: &mut Ui, artists: &[ArtistInfo], rows: Option<
     }
     if let Some(id) = open {
         app.navigate(Route::Artist(id), &ctx);
+    }
+    if let Some(id) = radio {
+        open_and_play(app, Route::Mix(id), &ctx);
     }
 }
 
@@ -1138,6 +1144,29 @@ fn artist(app: &mut App, ui: &mut Ui) {
             // Deezer's ten most popular, already sorted by popularity.
             tracks_block(app, ui, "artist_top", &p.top);
         }
+
+        // Radio: this artist's songs mixed with similar artists'. The names come from
+        // "Fans also like", already on this page, so the preview costs no extra requests.
+        section_title(ui, "Artist radio", None);
+        let with: Vec<&str> = p.related.iter().take(3).map(|a| a.name.as_str()).collect();
+        let preview = if with.is_empty() { format!("{} {}", p.artist.name, tr("and similar artists")) } else { format!("{}, {} {}", p.artist.name, with.join(", "), tr("and more")) };
+        ui.horizontal(|ui| {
+            let (r, resp) = ui.allocate_exact_size(Vec2::splat(56.0), Sense::click());
+            artwork(ui, r, p.artist.picture.as_deref(), r_md());
+            paint_icon(ui.painter(), r.center(), icon::PLANET, filled_icon(22.0), Color32::WHITE.gamma_multiply(0.9));
+            ui.vertical(|ui| {
+                ui.add_space(6.0);
+                ui.label(RichText::new(tr("{} Radio").replace("{}", &p.artist.name)).font(semi(14.5)).color(pal().text));
+                ui.label(RichText::new(&preview).font(regular(12.5)).color(pal().text_muted));
+            });
+            ui.add_space(12.0);
+            if ghost_button(ui, icon::PLAY, "Start radio").clicked() {
+                open_and_play(app, Route::Mix(p.artist.id.clone()), &ctx);
+            }
+            if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                app.navigate(Route::Mix(p.artist.id.clone()), &ctx);
+            }
+        });
 
         if !p.releases.is_empty() {
             section_title(ui, "Discography", None);

@@ -235,16 +235,22 @@ pub fn orbit_title(artist: &str) -> String {
 
 /// An Orbit page.
 pub fn mix_page(app: &mut App, ui: &mut Ui, artist_id: &str) {
-    let seed = app.saved.played_artists.iter().find(|a| a.place == Place::Artist(artist_id.to_string())).cloned();
-    let name = seed.as_ref().map(|s| s.title.clone()).unwrap_or_default();
-    let image = seed.and_then(|s| s.image);
-    let title = orbit_title(&name);
+    let place = Place::Artist(artist_id.to_string());
+    let seed = app.saved.played_artists.iter().find(|a| a.place == place).cloned();
+    // One of the artists you play most: it's their Orbit. Anyone else: their radio.
+    let orbit = top_artists(&app.saved.played_artists, now_unix()).iter().take(6).any(|a| a.place == place);
+    let artist_id = artist_id.to_string();
     with_remote(app, ui, |app, ui, page| {
         let Page::Tracks(tracks) = page else { return };
+        // The artist's name and picture: from your history, else from the songs themselves.
+        let from_songs = tracks.iter().find(|t| t.artist.id == artist_id).map(|t| (t.artist.name.clone(), t.artist.picture.clone()));
+        let name = seed.as_ref().map(|s| s.title.clone()).or_else(|| from_songs.as_ref().map(|f| f.0.clone())).unwrap_or_default();
+        let image = seed.as_ref().and_then(|s| s.image.clone()).or_else(|| from_songs.and_then(|f| f.1));
+        let (kind, title) = if orbit { (tr("Orbit"), orbit_title(&name)) } else { (tr("Radio"), tr("{} Radio").replace("{}", &name)) };
         let n = tracks.len();
-        let sub = format!("{name} {} · {n} {} · {}", tr("and similar artists"), tr(if n == 1 { "song" } else { "songs" }), tr("Updated daily"));
-        hero(ui, &Hero { editable: false, kind: tr("Orbit"), title: &title, subtitle: &sub, art: image.as_deref(), glyph: icon::PLANET, round: false, banner: None, links: &[] });
-        app.note_visit(Place::Mix(artist_id.to_string()), &title, "Orbit", image.as_deref(), false);
+        let sub = format!("{name} {} · {n} {}", tr("and similar artists"), tr(if n == 1 { "song" } else { "songs" }));
+        hero(ui, &Hero { editable: false, kind, title: &title, subtitle: &sub, art: image.as_deref(), glyph: icon::PLANET, round: false, banner: None, links: &[] });
+        app.note_visit(Place::Mix(artist_id.clone()), &title, if orbit { "Orbit" } else { "Radio" }, image.as_deref(), false);
         let ctx = ui.ctx().clone();
         super::autoplay_page(app, &ctx, tracks);
         super::action_row(app, ui, tracks);

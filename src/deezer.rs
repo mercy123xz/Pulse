@@ -771,7 +771,11 @@ pub fn playlist(id: &str) -> Result<(PlaylistInfo, Vec<Track>), String> {
 pub fn mix(artist_id: &str) -> Result<Vec<Track>, String> {
     let radio: List<DzTrack> = get(&format!("/artist/{artist_id}/radio"), &[("limit", "40")]).unwrap_or_default();
     let top: List<DzTrack> = get(&format!("/artist/{artist_id}/top"), &[("limit", "10")])?;
-    let (radio, top) = (tracks(radio), tracks(top));
+    let (mut radio, top) = (tracks(radio), tracks(top));
+    if radio.is_empty() {
+        // No radio for this artist: use the top songs of up to five similar artists.
+        radio = similar_artists_songs(artist_id);
+    }
     let mut out: Vec<Track> = vec![];
     let mut top = top.into_iter();
     for (i, t) in radio.into_iter().enumerate() {
@@ -783,8 +787,10 @@ pub fn mix(artist_id: &str) -> Result<Vec<Track>, String> {
         out.push(t);
     }
     out.extend(top);
+    // No song twice, even as a second copy of the same recording (same title and artist).
     let mut seen = std::collections::HashSet::new();
-    out.retain(|t| seen.insert(t.id.clone()));
+    let mut seen_names = std::collections::HashSet::new();
+    out.retain(|t| seen.insert(t.id.clone()) && seen_names.insert((crate::youtube::norm(&t.title), t.artist.id.clone())));
     // Shuffle with today's date as the seed.
     let day = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() / 86_400).unwrap_or(0);
     let mut seed = day ^ artist_id.bytes().fold(0u64, |h, b| h.wrapping_mul(31).wrapping_add(b as u64));
@@ -793,6 +799,18 @@ pub fn mix(artist_id: &str) -> Result<Vec<Track>, String> {
         out.swap(i, (seed >> 33) as usize % (i + 1));
     }
     Ok(out)
+}
+
+/// Fallback radio: a few songs from each of the artist's similar artists.
+fn similar_artists_songs(artist_id: &str) -> Vec<Track> {
+    let Ok(related) = get::<List<DzArtist>>(&format!("/artist/{artist_id}/related"), &[("limit", "5")]) else { return vec![] };
+    related
+        .data
+        .iter()
+        .take(5)
+        .filter_map(|a| get::<List<DzTrack>>(&format!("/artist/{}/top", a.id), &[("limit", "6")]).ok())
+        .flat_map(tracks)
+        .collect()
 }
 
 pub fn similar_to(t: &Track) -> Result<Vec<Track>, String> {
