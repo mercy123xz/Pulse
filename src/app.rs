@@ -415,6 +415,8 @@ pub struct App {
     // YouTube
     /// Shared with background threads; copied into `saved` when saving.
     youtube_ids: Arc<Mutex<HashMap<String, String>>>,
+    /// Pages being loaded ahead of time (see `preload`).
+    preloading: Arc<std::sync::atomic::AtomicUsize>,
     /// Audio links found ahead of time for upcoming songs (song id → link, found at).
     prefetched: Arc<Mutex<HashMap<String, (StreamSource, Instant)>>>,
     /// Songs whose audio link is being found ahead of time (one at a time).
@@ -540,6 +542,7 @@ impl App {
             failures_in_row: 0,
             last_title: String::new(),
             youtube_ids,
+            preloading: Default::default(),
             prefetched: Arc::new(Mutex::new(HashMap::new())),
             prefetching: Arc::new(Mutex::new(HashSet::new())),
             prefetch_failed: HashSet::new(),
@@ -669,7 +672,11 @@ impl App {
 
     /// The cache key for the current page's data (None for pages with only local data).
     pub fn route_key(&self) -> Option<String> {
-        Some(match &self.route {
+        self.key_for(&self.route)
+    }
+
+    fn key_for(&self, route: &Route) -> Option<String> {
+        Some(match route {
             Route::Home => "home".into(),
             Route::Charts => format!("charts:{}", self.chart_genre.0),
             Route::Search(q) => format!("search:{q}"),
@@ -685,12 +692,36 @@ impl App {
 
     /// Starts downloading the current page's data if we don't have it yet.
     pub fn ensure_loaded(&mut self, ctx: &egui::Context) {
-        let Some(key) = self.route_key() else { return };
+        self.load_route(self.route.clone(), ctx);
+    }
+
+    /// Loads a page you're likely to open next (pointing at its card or song), so it opens
+    /// at once. Pages already loaded or loading aren't asked for again, and only a couple
+    /// of these run at a time.
+    pub fn preload(&mut self, route: Route, ctx: &egui::Context) {
+        if self.preloading.load(std::sync::atomic::Ordering::Relaxed) >= 2 {
+            return;
+        }
+        if self.key_for(&route).is_some_and(|k| self.cache.contains_key(&k)) {
+            return;
+        }
+        self.load_route_with(route, ctx, true);
+    }
+
+    fn load_route(&mut self, route: Route, ctx: &egui::Context) {
+        self.load_route_with(route, ctx, false);
+    }
+
+    fn load_route_with(&mut self, route: Route, ctx: &egui::Context, preload: bool) {
+        let Some(key) = self.key_for(&route) else { return };
+        // Opening a page that failed before (perhaps while loading ahead) tries again.
+        if !preload && matches!(self.cache.get(&key), Some(Remote::Failed(_))) {
+            self.cache.remove(&key);
+        }
         if self.cache.contains_key(&key) {
             return;
         }
-        self.cache.insert(key.clone(), Remote::Loading);
-        let job: Box<dyn FnOnce() -> Result<Page, String> + Send> = match self.route.clone() {
+        let job: Box<dyn FnOnce() -> Result<Page, String> + Send> = match route {
             Route::Home => Box::new(|| deezer::chart().map(Page::Home)),
             Route::Charts => {
                 let genre = self.chart_genre.0;
@@ -707,10 +738,19 @@ impl App {
             }
             _ => return,
         };
+        self.cache.insert(key.clone(), Remote::Loading);
         let tx = self.tx.clone();
         let ctx = ctx.clone();
+        let counter = self.preloading.clone();
+        if preload {
+            counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
         std::thread::spawn(move || {
-            let _ = tx.send((key, job()));
+            let result = job();
+            if preload {
+                counter.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+            }
+            let _ = tx.send((key, result));
             ctx.request_repaint();
         });
     }
@@ -1967,6 +2007,13 @@ impl App {
                     self.selection = (list, (0..len).collect(), Some(0));
                 }
                 TrackEvent::ClearSelection => self.selection.1.clear(),
+                TrackEvent::Preview(t) => {
+                    let route = match t.album.as_ref().filter(|a| deezer::is_deezer_id(&a.id)) {
+                        Some(al) => Route::Album(al.id.clone()),
+                        None => Route::Song(t.id.clone()),
+                    };
+                    self.preload(route, ctx);
+                }
                 TrackEvent::OpenSongPage(t) => {
                     self.song_tracks.insert(t.id.clone(), t.clone());
                     self.navigate(Route::Song(t.id.clone()), ctx);

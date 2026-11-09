@@ -429,6 +429,12 @@ fn get<T: for<'de> Deserialize<'de>>(path: &str, query: &[(&str, &str)]) -> Resu
         let text = std::fs::read_to_string(&file).map_err(|e| format!("{file}: {e}"))?;
         return parse(&text);
     }
+    // The same reply asked for twice in a short while (a song page and its credits both
+    // read the song and its album, for example) comes from memory.
+    let key = std::iter::once(path.to_string()).chain(query.iter().map(|(k, v)| format!("{k}={v}"))).collect::<Vec<_>>().join("&");
+    if let Some(text) = reply_cache::get(&key) {
+        return parse(&text);
+    }
     // Deezer allows 50 requests per 5 seconds. When it says it's busy, wait and try again
     // (otherwise a busy moment looks like "song not found").
     let mut wait = 700;
@@ -449,9 +455,49 @@ fn get<T: for<'de> Deserialize<'de>>(path: &str, query: &[(&str, &str)]) -> Resu
             wait *= 2;
             continue;
         }
-        return parse(&text);
+        let parsed = parse(&text);
+        if parsed.is_ok() {
+            reply_cache::put(key, text);
+        }
+        return parsed;
     }
     unreachable!()
+}
+
+/// Recent Deezer replies, kept for a few minutes.
+mod reply_cache {
+    use std::collections::HashMap;
+    use std::sync::{Arc, Mutex, OnceLock};
+    use std::time::{Duration, Instant};
+
+    const LIFETIME: Duration = Duration::from_secs(10 * 60);
+    const MAX: usize = 160;
+
+    type Map = HashMap<String, (Instant, Arc<str>)>;
+    fn map() -> &'static Mutex<Map> {
+        static M: OnceLock<Mutex<Map>> = OnceLock::new();
+        M.get_or_init(Default::default)
+    }
+
+    pub fn get(key: &str) -> Option<Arc<str>> {
+        let m = map().lock().unwrap();
+        m.get(key).filter(|(at, _)| at.elapsed() < LIFETIME).map(|(_, t)| t.clone())
+    }
+
+    pub fn put(key: String, text: String) {
+        // Big replies (whole playlists) are kept by the page cache instead.
+        if text.len() > 512 * 1024 {
+            return;
+        }
+        let mut m = map().lock().unwrap();
+        m.retain(|_, (at, _)| at.elapsed() < LIFETIME);
+        if m.len() >= MAX
+            && let Some(oldest) = m.iter().min_by_key(|(_, (at, _))| *at).map(|(k, _)| k.clone())
+        {
+            m.remove(&oldest);
+        }
+        m.insert(key, (Instant::now(), text.into()));
+    }
 }
 
 /// Deezer's "too many requests" reply (error code 4).
@@ -628,9 +674,14 @@ pub struct SongPage {
 
 pub fn song_page(id: u64) -> Result<SongPage, String> {
     let track = track_by_id(id)?;
+    // The album and the artist's songs at the same time; then the credits, whose song and
+    // album replies are already in memory by then.
+    let (album, artist_top) = std::thread::scope(|s| {
+        let al = s.spawn(|| track.album.as_ref().filter(|a| is_deezer_id(&a.id)).and_then(|a| album(&a.id).ok()));
+        let top = if is_deezer_id(&track.artist.id) { artist_top(&track.artist.id, 6).unwrap_or_default() } else { vec![] };
+        (al.join().ok().flatten(), top)
+    });
     let credits = credits(id).unwrap_or_default();
-    let album = track.album.as_ref().filter(|a| is_deezer_id(&a.id)).and_then(|a| album(&a.id).ok());
-    let artist_top = if is_deezer_id(&track.artist.id) { artist_top(&track.artist.id, 6).unwrap_or_default() } else { vec![] };
     Ok(SongPage { track, credits, album, artist_top })
 }
 

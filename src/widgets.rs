@@ -371,6 +371,31 @@ pub enum CardClick {
     None,
     Open,
     Play,
+    /// The pointer has rested on the card: a good moment to load its page ahead.
+    Preview,
+}
+
+/// True once when the pointer has rested on something for a quarter second.
+pub fn hover_intent(ui: &Ui, id: egui::Id, hovered: bool) -> bool {
+    let key = id.with("hover_intent");
+    if !hovered {
+        ui.data_mut(|d| d.remove::<f64>(key));
+        return false;
+    }
+    let now = ui.input(|i| i.time);
+    match ui.data(|d| d.get_temp::<f64>(key)) {
+        None => {
+            ui.data_mut(|d| d.insert_temp(key, now));
+            ui.ctx().request_repaint_after(std::time::Duration::from_millis(260));
+            false
+        }
+        // Negative: already reported for this hover.
+        Some(start) if start >= 0.0 && now - start >= 0.25 => {
+            ui.data_mut(|d| d.insert_temp(key, -1.0));
+            true
+        }
+        _ => false,
+    }
 }
 
 pub fn card(ui: &mut Ui, w: f32, info: &CardInfo) -> CardClick {
@@ -406,7 +431,13 @@ pub fn card(ui: &mut Ui, w: f32, info: &CardInfo) -> CardClick {
     paint_line(ui, pos2(rect.left() + pad, art_rect.bottom() + 30.0), &info.subtitle, regular(12.0), pal().text_muted, text_w);
 
     // Floating play button appears on hover.
-    let mut out = if resp.clicked() { CardClick::Open } else { CardClick::None };
+    let mut out = if resp.clicked() {
+        CardClick::Open
+    } else if hover_intent(ui, info.id, hovered) {
+        CardClick::Preview
+    } else {
+        CardClick::None
+    };
     let t = ui.ctx().animate_bool(info.id.with("hover"), hovered);
     if t > 0.0 && !info.round {
         let c = pos2(art_rect.right() - 26.0, art_rect.bottom() - 26.0 + (1.0 - t) * 8.0);
@@ -452,6 +483,8 @@ pub fn card_grid<T>(ui: &mut Ui, items: &[T], max_rows: Option<usize>, mut each:
 #[derive(Clone)]
 pub enum TrackEvent {
     Play(usize),
+    /// The pointer rests on the song's title: load the page it would open.
+    Preview(Track),
     PlayNext(Track),
     AddToQueue(Track),
     ToggleLike(Track),
@@ -900,6 +933,10 @@ fn track_row(ui: &mut Ui, id: egui::Id, list: &str, i: usize, t: &Track, tracks:
     ui.painter().text(c.time.right_center(), Align2::RIGHT_CENTER, fmt_duration(t.duration), regular(12.5), pal().text_muted);
 
     // Interactions
+    // Resting on the title (which opens the song's album or page) loads that page ahead.
+    if hover_intent(ui, title_link.id, title_link.hovered()) {
+        ev.push(TrackEvent::Preview(t.clone()));
+    }
     if heart.clicked() {
         ev.push(TrackEvent::ToggleLike(t.clone()));
     } else if title_link.clicked() {

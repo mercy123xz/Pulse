@@ -96,6 +96,7 @@ pub fn home(app: &mut App, ui: &mut Ui) {
     }
     if !tiles.is_empty() {
         let mut action = None;
+        let mut preview = None;
         let gap = 8.0;
         let cols = if ui.available_width() > 900.0 { 4 } else { 2 };
         let w = (ui.available_width() - gap * (cols as f32 - 1.0)) / cols as f32;
@@ -106,11 +107,15 @@ pub fn home(app: &mut App, ui: &mut Ui) {
                     match quick_tile(ui, w, art.as_deref(), glyph, title, egui::Id::new(("tile", format!("{place:?}")))) {
                         CardClick::Open => action = Some((place.clone(), false)),
                         CardClick::Play => action = Some((place.clone(), true)),
+                        CardClick::Preview => preview = Some(place.clone()),
                         CardClick::None => {}
                     }
                 }
             });
             ui.add_space(gap);
+        }
+        if let Some(route) = preview.and_then(|p| app.route_for(&p)) {
+            app.preload(route, &ctx);
         }
         if let Some((place, play)) = action
             && let Some(route) = app.route_for(&place)
@@ -127,6 +132,7 @@ pub fn home(app: &mut App, ui: &mut Ui) {
         ui.label(RichText::new(tr("Mixes that circle the artists you play most")).font(regular(12.5)).color(pal().text_muted));
         ui.add_space(4.0);
         let mut action = None;
+        let mut preview = None;
         let labels: Vec<String> = top.iter().map(|a| orbit_title(&a.title)).collect();
         let items: Vec<(usize, &Visit)> = top.iter().enumerate().collect();
         card_grid(ui, &items, Some(1), |ui, w, (i, a)| {
@@ -136,10 +142,14 @@ pub fn home(app: &mut App, ui: &mut Ui) {
                 match card(ui, w, &info) {
                     CardClick::Open => action = Some((id.clone(), false)),
                     CardClick::Play => action = Some((id.clone(), true)),
+                    CardClick::Preview => preview = Some(id.clone()),
                     CardClick::None => {}
                 }
             }
         });
+        if let Some(id) = preview {
+            app.preload(Route::Mix(id), &ctx);
+        }
         match action {
             Some((id, false)) => app.navigate(Route::Mix(id), &ctx),
             Some((id, true)) => open_and_play(app, Route::Mix(id), &ctx),
@@ -195,7 +205,13 @@ fn quick_tile(ui: &mut Ui, w: f32, art: Option<&str>, glyph: &str, title: &str, 
     }
     let text_w = w - 56.0 - 64.0;
     paint_line(ui, pos2(art_rect.right() + 12.0, rect.center().y - 9.0), title, semi(13.5), pal().text, text_w);
-    let mut out = if resp.clicked() { CardClick::Open } else { CardClick::None };
+    let mut out = if resp.clicked() {
+        CardClick::Open
+    } else if hover_intent(ui, id, hovered) {
+        CardClick::Preview
+    } else {
+        CardClick::None
+    };
     let t = ui.ctx().animate_bool(id.with("hover"), hovered);
     if t > 0.0 {
         let c = pos2(rect.right() - 26.0, rect.center().y);
