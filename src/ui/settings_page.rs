@@ -157,6 +157,15 @@ pub fn settings_page(app: &mut App, ui: &mut Ui) {
         ui.add_space(6.0);
     }
 
+    // ------------------------------------------------------------ Mini player
+    section(ui, tr("Mini player"));
+    row(ui, tr("Show the mini player"), tr("A small window with the song and controls that stays on top of games (Ctrl+M). Drag it anywhere. Over a game it shows in borderless or windowed mode, not exclusive full screen."), |ui| {
+        switch(ui, &mut s.mini_open, tr("Show the mini player"));
+    });
+    row(ui, tr("Always on top"), tr("Keep it above other windows."), |ui| {
+        switch(ui, &mut s.mini_on_top, tr("Always on top"));
+    });
+
     // ------------------------------------------------------------ Compatibility
     section(ui, tr("Compatibility"));
     row(ui, tr("High contrast mode"), tr("Stronger colors and borders, easier to read."), |ui| {

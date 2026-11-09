@@ -2304,7 +2304,11 @@ impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.tick(&ctx);
-        crate::ui::draw(self, ui);
+        // Minimized: nothing to draw (the music and the mini player carry on).
+        if !ctx.input(|i| i.viewport().minimized.unwrap_or(false)) {
+            crate::ui::draw(self, ui);
+        }
+        crate::ui::mini::show(self, &ctx);
     }
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {

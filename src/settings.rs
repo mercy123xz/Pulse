@@ -145,6 +145,10 @@ pub struct Settings {
     /// Gaming Mode / Ultra-low resource, and the extras you kept on in them.
     pub perf_mode: crate::perf::Mode,
     pub perf_keep: Vec<String>,
+    /// The mini player: open, where it was put, and whether it stays on top.
+    pub mini_open: bool,
+    pub mini_pos: Option<[f32; 2]>,
+    pub mini_on_top: bool,
     pub hardware_acceleration: bool,
     /// Theme name and its color scheme.
     pub theme: String,
@@ -174,6 +178,9 @@ impl Default for Settings {
             art_cache_mb: 300,
             perf_mode: crate::perf::Mode::Normal,
             perf_keep: vec![],
+            mini_open: false,
+            mini_pos: None,
+            mini_on_top: true,
             hardware_acceleration: true,
             theme: "Default".into(),
             scheme: String::new(),

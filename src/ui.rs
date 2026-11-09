@@ -7,6 +7,7 @@ use crate::theme::*;
 use crate::widgets::*;
 use crate::i18n::tr;
 
+pub mod mini;
 mod personal;
 mod settings_page;
 mod song_page;
@@ -113,6 +114,9 @@ fn shortcuts(app: &mut App, ctx: &egui::Context) {
     }
     if ctx.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::G)) {
         app.toggle_gaming(ctx);
+    }
+    if ctx.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::M)) {
+        app.saved.settings.mini_open = !app.saved.settings.mini_open;
     }
     if ctx.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::ArrowRight)) {
         app.next(ctx);
@@ -545,7 +549,7 @@ fn top_bar(app: &mut App, ui: &mut Ui) {
 
         // Search pill
         // Leave room for the labeled buttons on the right.
-        let w = (ui.available_width() - 380.0).clamp(200.0, 440.0);
+        let w = (ui.available_width() - 500.0).clamp(200.0, 440.0);
         let (rect, _) = ui.allocate_exact_size(vec2(w, 38.0), Sense::hover());
         let id = egui::Id::new("search_box");
         let focused = ui.memory(|m| m.has_focus(id));
@@ -618,7 +622,7 @@ fn top_bar(app: &mut App, ui: &mut Ui) {
             }
             ui.add_space(4.0);
             // Labeled, so each button says what it does (narrow windows keep just the icons).
-            let roomy = ui.available_width() > 430.0;
+            let roomy = ui.available_width() > 420.0;
             let on_settings = app.route == Route::Settings;
             let settings = if roomy {
                 labeled_button(ui, icon::GEAR_SIX, tr("Settings"), on_settings)
@@ -1929,6 +1933,10 @@ fn player_bar(app: &mut App, ui: &mut Ui) {
     let mute_tip = if app.muted_volume.is_some() { "Unmute (M)" } else { "Mute (M)" };
     if icon_button(&mut rui, vol_icon, 17.0, pal().text_muted, mute_tip).clicked() {
         app.toggle_mute();
+    }
+    let mini_on = app.saved.settings.mini_open;
+    if icon_button(&mut rui, icon::PICTURE_IN_PICTURE, 17.0, if mini_on { pal().accent_soft } else { pal().text_muted }, tr("Mini player (Ctrl+M)")).clicked() {
+        app.saved.settings.mini_open = !mini_on;
     }
     let qcol = if app.route == Route::Queue { pal().accent_soft } else { pal().text_muted };
     let q = icon_button(&mut rui, icon::QUEUE, 17.0, qcol, "Queue");
