@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Downloading Pulse…</title>
+<meta name="description" content="Download the latest version of Pulse for Windows.">
+<meta name="theme-color" content="#0b0b0e">
+<link rel="icon" href="../img/favicon-32.png" sizes="32x32" type="image/png">
+<style>
+:root { --bg: #0b0b0e; --surface: #16161b; --border: #2c2c36; --text: #ededf1; --muted: #a3a3b0; --accent: #7c3aed; --accent-soft: #a78bfa; color-scheme: dark; }
+* { box-sizing: border-box; }
+body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: radial-gradient(80% 60% at 50% 0%, rgba(124, 58, 237, .25), transparent 70%), var(--bg); color: var(--text); font: 400 1rem/1.6 "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, Arial, sans-serif; padding: 1.5rem; }
+main { max-width: 34rem; text-align: center; }
+h1 { font-size: clamp(1.8rem, 5vw, 2.4rem); letter-spacing: -.03em; margin: 1rem 0 .5rem; }
+p { color: var(--muted); margin: .4rem 0; }
+a { color: var(--accent-soft); }
+.btn { display: inline-flex; gap: .5rem; align-items: center; margin-top: 1.4rem; padding: .85rem 1.35rem; border-radius: 999px; background: var(--accent); color: #fff; font-weight: 600; text-decoration: none; box-shadow: 0 8px 28px rgba(124, 58, 237, .35); }
+.btn:hover { background: #6d28d9; }
+a:focus-visible { outline: 3px solid var(--accent-soft); outline-offset: 3px; border-radius: 8px; }
+.note { margin-top: 1.8rem; font-size: .9rem; }
+.logo { width: 56px; height: 56px; }
+</style>
+</head>
+<body>
+<main>
+  <svg class="logo" viewBox="0 0 30 30" aria-hidden="true"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#a78bfa"/><stop offset="1" stop-color="#7c3aed"/></linearGradient></defs><rect width="30" height="30" rx="8" fill="url(#g)"/><g fill="#fff"><rect x="7" y="12" width="2.4" height="6" rx="1.2"/><rect x="11" y="8.5" width="2.4" height="13" rx="1.2"/><rect x="15" y="6" width="2.4" height="18" rx="1.2"/><rect x="19" y="10" width="2.4" height="10" rx="1.2"/><rect x="23" y="13" width="2.4" height="4" rx="1.2"/></g></svg>
+  <h1 id="title">Getting the latest Pulse…</h1>
+  <p id="status" role="status">Your download will start in a moment.</p>
+  <a class="btn" id="manual" href="https://github.com/mercy123xz/Pulse/releases/latest">Download manually</a>
+  <p class="note">Windows may say "Windows protected your PC" the first time, as it does for any new app without a paid signing certificate. Click <em>More info</em>, then <em>Run anyway</em>.</p>
+  <p class="note"><a href="../">Back to the Pulse website</a> · <a href="../docs/">Docs</a></p>
+</main>
+<script>
+// Finds the newest installer on GitHub and starts downloading it right away.
+(function () {
+  var title = document.getElementById("title");
+  var status = document.getElementById("status");
+  var manual = document.getElementById("manual");
+  fetch("https://api.github.com/repos/mercy123xz/Pulse/releases/latest", { headers: { Accept: "application/vnd.github+json" } })
+    .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
+    .then(function (rel) {
+      var exe = (rel.assets || []).find(function (a) { return /\.exe$/i.test(a.name); });
+      if (!exe) throw new Error("no installer");
+      var version = String(rel.tag_name || "").replace(/^v/, "");
+      var mb = (exe.size / 1048576).toFixed(1);
+      title.textContent = "Downloading Pulse " + version;
+      status.textContent = exe.name + " (" + mb + " MB) should be downloading now. If it isn't, use the button below.";
+      manual.href = exe.browser_download_url;
+      manual.textContent = "Download Pulse " + version;
+      document.title = "Downloading Pulse " + version;
+      window.location.href = exe.browser_download_url;
+    })
+    .catch(function () {
+      title.textContent = "Download Pulse";
+      status.textContent = "Couldn't reach GitHub to find the newest version. The button below opens the latest release.";
+    });
+})();
+</script>
+<noscript><p style="text-align:center">JavaScript is off: use the button above to open the latest release.</p></noscript>
+</body>
+</html>

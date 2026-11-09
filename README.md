@@ -12,7 +12,9 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/mercy123xz/Pulse/releases/latest"><b>⬇ Download for Windows</b></a>
+  <a href="https://mercy123xz.github.io/Pulse/download/"><b>⬇ Download for Windows</b></a>
+  &nbsp;·&nbsp; <a href="https://mercy123xz.github.io/Pulse/"><b>Website</b></a>
+  &nbsp;·&nbsp; <a href="https://mercy123xz.github.io/Pulse/docs/">Docs</a>
   &nbsp;·&nbsp; <a href="#features">Features</a>
   &nbsp;·&nbsp; <a href="#keyboard-shortcuts">Shortcuts</a>
   &nbsp;·&nbsp; <a href="#building-from-source">Build from source</a>
@@ -51,7 +53,8 @@
 - Everything is saved on your PC. No account or sign-in needed
 
 **Make it yours**
-- Four built-in **themes** (Default, Blossom, Dreary Mono, Lunar), each with dark and light colors
+- Five built-in **themes** (Default, Blossom, Dreary Mono, Lunar, Aurora), each with dark and light colors,
+  some with soft glows in the colors of the song that's playing
 - Make your own themes: `color.ini`, a little CSS and a `theme.toml`. You can also use Spicetify
   color schemes. They work as they are, and Pulse reloads a theme the moment you save it
 - English, Español, Português, Français and Deutsch languages.
@@ -63,7 +66,8 @@
 
 ## Download
 
-1. Grab **`PulseSetup-x.y.z.exe`** from the [latest release](https://github.com/mercy123xz/Pulse/releases/latest).
+1. [**Download the latest installer**](https://mercy123xz.github.io/Pulse/download/) (it starts right away), or grab
+   **`PulseSetup-x.y.z.exe`** from the [latest release](https://github.com/mercy123xz/Pulse/releases/latest).
 2. Run it. It installs Pulse for your user account (no administrator password), adds it to the
    Start menu, and can add a desktop shortcut. Uninstall it from Windows Settings → Apps.
 
