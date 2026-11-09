@@ -1144,8 +1144,9 @@ pub fn dots_menu(ui: &mut Ui, size: f32, tip: &str, add: impl FnOnce(&mut Ui)) {
 
 /// Animated "now playing" bars.
 pub fn equalizer(ui: &Ui, center: Pos2) {
-    // With animations off (Gaming Mode, Reduce motion) the bars stand still.
-    let moving = !crate::theme::reduce_motion();
+    // With animations off (Gaming Mode, Reduce motion), or behind another window (a
+    // game), the bars stand still.
+    let moving = !crate::theme::reduce_motion() && ui.input(|i| i.focused);
     let t = if moving { ui.input(|i| i.time) as f32 } else { 0.7 };
     for k in 0..3 {
         let phase = t * (5.0 + k as f32 * 1.7) + k as f32 * 1.3;
@@ -1155,7 +1156,8 @@ pub fn equalizer(ui: &Ui, center: Pos2) {
         ui.painter().rect_filled(r, CornerRadius::same(1), pal().accent_soft);
     }
     if moving {
-        ui.ctx().request_repaint_after(std::time::Duration::from_millis(33));
+        // 15 times a second is smooth enough for three little bars.
+        ui.ctx().request_repaint_after(std::time::Duration::from_millis(66));
     }
 }
 
@@ -1176,7 +1178,9 @@ pub fn skeleton_rows(ui: &mut Ui, n: usize) {
         ui.painter().rect_filled(Rect::from_min_size(pos2(art.right() + 12.0, rect.center().y - 13.0), vec2(w1, 10.0)), CornerRadius::same(4), col);
         ui.painter().rect_filled(Rect::from_min_size(pos2(art.right() + 12.0, rect.center().y + 5.0), vec2(w1 * 0.55, 8.0)), CornerRadius::same(4), col);
     }
-    ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
+    if !crate::theme::reduce_motion() && ui.input(|i| i.focused) {
+        ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
+    }
 }
 
 /// Centered message with an icon, optional button. Returns true if the button was clicked.

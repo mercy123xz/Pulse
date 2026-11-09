@@ -3,8 +3,9 @@
 //!
 //! Kept light: the cover's color is worked out once per song on a background thread
 //! from its small picture, the glows are a handful of triangles, and the screen is
-//! only redrawn for the motion (about 15 times a second) while music plays and the
-//! window is in front. With "Reduce motion" on it stands still.
+//! only redrawn for the motion (5 times a second: the glows move a few pixels a
+//! second, so more would be wasted) while music plays and the window is in front.
+//! With "Reduce motion" on it stands still.
 
 use crate::theme::pal;
 use egui::{Color32, CornerRadius, Pos2, Rect, Ui, vec2};
@@ -91,7 +92,7 @@ impl Backdrop {
             mask_corners(&painter, rect, radius, out);
         }
         if moving && ui.input(|i| i.focused) {
-            ui.ctx().request_repaint_after(std::time::Duration::from_millis(66));
+            ui.ctx().request_repaint_after(std::time::Duration::from_millis(200));
         } else if settling {
             ui.ctx().request_repaint();
         }

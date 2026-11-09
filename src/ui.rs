@@ -1860,7 +1860,8 @@ fn player_bar(app: &mut App, ui: &mut Ui) {
                 })
                 .collect();
             ui.painter().add(egui::Shape::line(pts, Stroke::new(2.2, pal().bg)));
-            ui.ctx().request_repaint();
+            // About 30 times a second (it asked for every frame the screen can show).
+            ui.ctx().request_repaint_after(std::time::Duration::from_millis(33));
         } else {
             let glyph = if app.is_playing() { icon::PAUSE } else { icon::PLAY };
             paint_icon(ui.painter(), r.center(), glyph, filled_icon(18.0), pal().bg);
@@ -2208,7 +2209,8 @@ fn credits_dialog(app: &mut App, ctx: &egui::Context) {
 fn toast(app: &App, ctx: &egui::Context) {
     let Some((msg, at)) = &app.toast else { return };
     let age = ctx.input(|i| i.time) - at;
-    let alpha = if age < 0.15 { age / 0.15 } else if age > 3.0 { (3.5 - age) / 0.5 } else { 1.0 }.clamp(0.0, 1.0) as f32;
+    let still = reduce_motion();
+    let alpha = if still { 1.0 } else if age < 0.15 { age / 0.15 } else if age > 3.0 { (3.5 - age) / 0.5 } else { 1.0 }.clamp(0.0, 1.0) as f32;
     let screen = ctx.content_rect();
     egui::Area::new(egui::Id::new("toast"))
         .order(egui::Order::Foreground)
@@ -2226,7 +2228,16 @@ fn toast(app: &App, ctx: &egui::Context) {
                     ui.label(RichText::new(msg).font(med(13.0)).color(pal().bg));
                 });
         });
-    ctx.request_repaint_after(std::time::Duration::from_millis(30));
+    // Redraw quickly only while it fades in or out; in between, wake up when the fade-out
+    // starts (it used to redraw 33 times a second the whole time it showed).
+    let next = if still {
+        3.5 - age
+    } else if age < 0.15 || age > 3.0 {
+        0.03
+    } else {
+        3.0 - age
+    };
+    ctx.request_repaint_after(std::time::Duration::from_secs_f64(next.max(0.01)));
 }
 
 /// "1 song" / "12 songs".

@@ -943,7 +943,8 @@ impl App {
             if age > 4.0 {
                 self.highlight = None;
             } else {
-                ctx.request_repaint_after(Duration::from_millis(200));
+                // Wake once when the highlight should go, not five times a second.
+                ctx.request_repaint_after(Duration::from_secs_f64(4.05 - age));
             }
         }
         self.run_downloads(ctx);
@@ -2303,6 +2304,11 @@ impl App {
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        // Developer check: PULSE_DEBUG_REPAINT=1 prints what asked for each redraw.
+        static DEBUG_REPAINT: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        if *DEBUG_REPAINT.get_or_init(|| std::env::var_os("PULSE_DEBUG_REPAINT").is_some()) {
+            eprintln!("frame {} causes {:?}", ctx.cumulative_frame_nr(), ctx.repaint_causes());
+        }
         self.tick(&ctx);
         // Minimized: nothing to draw (the music and the mini player carry on).
         if !ctx.input(|i| i.viewport().minimized.unwrap_or(false)) {
