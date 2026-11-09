@@ -1343,7 +1343,11 @@ fn player_bar(app: &mut App, ui: &mut Ui) {
         let tw = left.right() - tx - 40.0;
         let title_rect = paint_line(ui, pos2(tx, left.center().y - 18.0), &t.title, semi(13.5), pal().text, tw);
         // Right-click the song title for the song menu (like, share, credits…).
-        let title_resp = ui.interact(title_rect, egui::Id::new("np_title"), Sense::click());
+        // Hovering it shows how long the song took to start.
+        let mut title_resp = ui.interact(title_rect, egui::Id::new("np_title"), Sense::click());
+        if let Some(t) = app.audio.timing() {
+            title_resp = title_resp.on_hover_text(t);
+        }
         let mut np_events = vec![];
         let names = app.playlist_names();
         title_resp.context_menu(|ui| {

@@ -387,7 +387,12 @@ pub struct App {
     youtube_ids: Arc<Mutex<HashMap<String, String>>>,
     /// Audio links found ahead of time for upcoming songs (song id → link, found at).
     prefetched: Arc<Mutex<HashMap<String, (StreamSource, Instant)>>>,
-    prefetching: Option<String>,
+    /// Songs whose audio link is being found ahead of time (one at a time).
+    prefetching: Arc<Mutex<HashSet<String>>>,
+    /// Songs whose lookup failed ahead of time (not retried in the background).
+    prefetch_failed: HashSet<String>,
+    prefetch_failed_tx: Sender<String>,
+    prefetch_failed_rx: Receiver<String>,
 
     // autoplay
     autoplay_rx: Option<Receiver<Vec<Track>>>,
@@ -457,6 +462,7 @@ impl App {
         crate::i18n::set_language(saved.settings.language);
         let (tx, rx) = channel();
         let (views_tx, views_rx) = channel();
+        let (prefetch_failed_tx, prefetch_failed_rx) = channel();
         let audio = AudioEngine::new();
         audio.set_volume(saved.volume);
 
@@ -486,7 +492,10 @@ impl App {
             last_title: String::new(),
             youtube_ids,
             prefetched: Arc::new(Mutex::new(HashMap::new())),
-            prefetching: None,
+            prefetching: Arc::new(Mutex::new(HashSet::new())),
+            prefetch_failed: HashSet::new(),
+            prefetch_failed_tx,
+            prefetch_failed_rx,
             autoplay_rx: None,
             autoplay_for: None,
             advance_when_autoplay_arrives: false,
@@ -653,6 +662,9 @@ impl App {
         self.receive_credits();
         self.receive_import(ctx);
         self.run_views(ctx);
+        while let Ok(id) = self.prefetch_failed_rx.try_recv() {
+            self.prefetch_failed.insert(id);
+        }
         self.reload_themes_if_changed(ctx);
         self.run_downloads(ctx);
         if let Some(rx) = &self.local_rx
@@ -1491,29 +1503,41 @@ impl App {
     }
 
     /// Finds the next song's audio link in the background, so it starts instantly.
+    /// Finds the next two songs' audio links in the background, one at a time,
+    /// so pressing Next (or the song ending) starts them right away.
     fn prefetch_next(&mut self) {
-        let Some(next) = self.queue.get(self.queue_pos + 1).cloned() else { return };
-        if self.prefetching.as_deref() == Some(next.id.as_str()) {
-            return;
+        if !self.prefetching.lock().unwrap().is_empty() {
+            return; // one lookup at a time keeps it light
         }
-        self.prefetching = Some(next.id.clone());
-        if self.prefetched.lock().unwrap().contains_key(&next.id)
-            || crate::local::is_local(&next.id)
-            || self.saved.downloads.contains_key(&next.id)
-        {
+        let upcoming: Vec<Track> = self.queue.iter().skip(self.queue_pos + 1).take(2).cloned().collect();
+        let Some(next) = upcoming.into_iter().find(|t| {
+            !self.prefetched.lock().unwrap().get(&t.id).is_some_and(|(_, at)| at.elapsed() < LINK_LIFETIME)
+                && !crate::local::is_local(&t.id)
+                && !self.saved.downloads.contains_key(&t.id)
+                && !self.prefetch_failed.contains(&t.id)
+        }) else {
             return;
-        }
+        };
+        self.prefetching.lock().unwrap().insert(next.id.clone());
         let ids = self.youtube_ids.clone();
         let prefetched = self.prefetched.clone();
+        let busy = self.prefetching.clone();
+        let failed = self.prefetch_failed_tx.clone();
         let quality = self.saved.settings.stream_quality;
         std::thread::spawn(move || {
             let known = ids.lock().unwrap().get(&next.id).cloned();
-            if let Ok((src, video)) = crate::youtube::resolve(&next, known, quality, &|_| {}) {
-                ids.lock().unwrap().insert(next.id.clone(), video);
-                let mut p = prefetched.lock().unwrap();
-                p.retain(|_, (_, at)| at.elapsed() < LINK_LIFETIME);
-                p.insert(next.id.clone(), (src, Instant::now()));
+            match crate::youtube::resolve(&next, known, quality, &|_| {}) {
+                Ok((src, video)) => {
+                    ids.lock().unwrap().insert(next.id.clone(), video);
+                    let mut p = prefetched.lock().unwrap();
+                    p.retain(|_, (_, at)| at.elapsed() < LINK_LIFETIME);
+                    p.insert(next.id.clone(), (src, Instant::now()));
+                }
+                Err(_) => {
+                    let _ = failed.send(next.id.clone());
+                }
             }
+            busy.lock().unwrap().remove(&next.id);
         });
     }
 
