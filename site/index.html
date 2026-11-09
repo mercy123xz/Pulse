@@ -6,7 +6,7 @@
 <title>Pulse — a fast, native music player for Windows</title>
 <meta name="description" content="Pulse is a free, open-source music player for Windows, written in Rust. Search any artist, play full songs, import playlists, and make it yours with themes. No account needed.">
 <meta name="theme-color" content="#0b0b0e">
-<link rel="icon" href="img/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="icon" href="img/favicon-32.png" type="image/png">
 <link rel="apple-touch-icon" href="img/apple-touch-icon.png">
 <meta property="og:type" content="website">
 <meta property="og:title" content="Pulse — a fast, native music player for Windows">
@@ -15,7 +15,7 @@
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image">
-<link rel="preload" as="image" type="image/avif" imagesrcset="img/chart-page-half.avif 823w, img/chart-page.avif 1647w" imagesizes="(min-width: 1100px) 760px, 92vw" fetchpriority="high">
+<link rel="preload" as="image" type="image/avif" href="img/chart-page.avif" fetchpriority="high">
 <style>
 :root {
   --bg: #0b0b0e;
@@ -193,9 +193,9 @@ footer a:hover { text-decoration: underline; }
       <div class="window">
         <div class="window-bar" aria-hidden="true"><i></i><i></i><i></i></div>
         <picture>
-          <source type="image/avif" srcset="img/chart-page-half.avif 823w, img/chart-page.avif 1647w" sizes="(min-width: 1100px) 760px, 92vw">
-          <source type="image/webp" srcset="img/chart-page-half.webp 823w, img/chart-page.webp 1647w" sizes="(min-width: 1100px) 760px, 92vw">
-          <img src="img/chart-page.webp" width="1647" height="791" fetchpriority="high" decoding="async" alt="Pulse's Charts page: the 100 most popular songs, each with its cover, artist, album, YouTube view count and length.">
+          <source type="image/avif" srcset="img/chart-page.avif">
+          <source type="image/webp" srcset="img/chart-page.webp">
+          <img src="img/chart-page.webp" width="960" height="791" fetchpriority="high" decoding="async" alt="Pulse's Charts page: the 100 most popular songs, each with its cover, artist, album, YouTube view count and length.">
         </picture>
       </div>
     </div>
@@ -225,9 +225,9 @@ footer a:hover { text-decoration: underline; }
       </div>
       <div class="shot">
         <picture>
-          <source type="image/avif" srcset="img/charts-half.avif 831w, img/charts.avif 1663w" sizes="(min-width: 960px) 680px, 92vw">
-          <source type="image/webp" srcset="img/charts-half.webp 831w, img/charts.webp 1663w" sizes="(min-width: 960px) 680px, 92vw">
-          <img src="img/charts.webp" width="1663" height="769" loading="lazy" decoding="async" alt="The Discover section of Pulse's home page: genre buttons from Pop to Folk, above a table of today's top songs.">
+          <source type="image/avif" srcset="img/charts.avif">
+          <source type="image/webp" srcset="img/charts.webp">
+          <img src="img/charts.webp" width="752" height="470" loading="lazy" decoding="async" alt="The Discover section of Pulse's home page: genre buttons from Pop to Folk, above a table of today's top songs.">
         </picture>
       </div>
     </div>
@@ -242,27 +242,27 @@ footer a:hover { text-decoration: underline; }
       </div>
       <div class="shot">
         <picture>
-          <source type="image/avif" srcset="img/albums-half.avif 820w, img/albums.avif 1641w" sizes="(min-width: 960px) 680px, 92vw">
-          <source type="image/webp" srcset="img/albums-half.webp 820w, img/albums.webp 1641w" sizes="(min-width: 960px) 680px, 92vw">
-          <img src="img/albums.webp" width="1641" height="584" loading="lazy" decoding="async" alt="A grid of popular albums in Pulse, each with its cover, title and artist.">
+          <source type="image/avif" srcset="img/albums.avif">
+          <source type="image/webp" srcset="img/albums.webp">
+          <img src="img/albums.webp" width="824" height="300" loading="lazy" decoding="async" alt="A grid of popular albums in Pulse, each with its cover, title and artist.">
         </picture>
       </div>
     </div>
     <div class="wrap strip">
       <div class="shot">
         <picture>
-          <source type="image/avif" srcset="img/artists-half.avif 821w, img/artists.avif 1642w" sizes="(min-width: 1180px) 1180px, (max-width: 700px) 820px, 100vw">
-          <source type="image/webp" srcset="img/artists-half.webp 821w, img/artists.webp 1642w" sizes="(min-width: 1180px) 1180px, (max-width: 700px) 820px, 100vw">
-          <img src="img/artists.webp" width="1642" height="326" loading="lazy" decoding="async" alt="A row of popular artists in Pulse, shown as round portraits with their names.">
+          <source type="image/avif" srcset="img/artists.avif">
+          <source type="image/webp" srcset="img/artists.webp">
+          <img src="img/artists.webp" width="1226" height="326" loading="lazy" decoding="async" alt="A row of popular artists in Pulse, shown as round portraits with their names.">
         </picture>
       </div>
     </div>
     <div class="wrap strip">
       <div class="shot">
         <picture>
-          <source type="image/avif" srcset="img/playlists-half.avif 823w, img/playlists.avif 1647w" sizes="(min-width: 1180px) 1180px, (max-width: 700px) 820px, 100vw">
-          <source type="image/webp" srcset="img/playlists-half.webp 823w, img/playlists.webp 1647w" sizes="(min-width: 1180px) 1180px, (max-width: 700px) 820px, 100vw">
-          <img src="img/playlists.webp" width="1647" height="327" loading="lazy" decoding="async" alt="A row of popular playlists in Pulse, from Christmas Hits to Lofi beats.">
+          <source type="image/avif" srcset="img/playlists.avif">
+          <source type="image/webp" srcset="img/playlists.webp">
+          <img src="img/playlists.webp" width="1226" height="327" loading="lazy" decoding="async" alt="A row of popular playlists in Pulse, from Christmas Hits to Lofi beats.">
         </picture>
       </div>
     </div>
