@@ -84,6 +84,9 @@
     ".ask-form{display:flex;flex-direction:column;gap:8px}.ask-form label{font-size:.85rem;color:#a3a3b0}.ask-form textarea,.ask-form input{background:#0f0f13;color:#ededf1;border:1px solid #2c2c36;border-radius:10px;padding:9px 11px;font:inherit;resize:vertical}",
     ".ask-kind{display:flex;gap:6px}.ask-kind button{flex:1;background:#0f0f13;color:#ededf1;border:1px solid #2c2c36;border-radius:10px;padding:8px;font:inherit;font-size:.88rem}.ask-kind button[aria-pressed=true]{border-color:#a78bfa;background:#241a3d}",
     ".ask-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.ask-row .ask-send{padding:9px 14px}.ask-note{font-size:.8rem;color:#80808e}",
+    ".ask-status{margin:0;display:flex;gap:8px;align-items:flex-start;padding:9px 11px;border-radius:10px;font-size:.88rem;line-height:1.4}.ask-status[hidden]{display:none}.ask-status svg{flex:none;margin-top:1px}.ask-status.err{background:#3a1520;color:#ffb4c2;border:1px solid #6b2236}.ask-status a{color:inherit}",
+    ".ask-done{display:flex;gap:10px;align-items:flex-start;color:#bbf7d0}.ask-done svg{flex:none;width:26px;height:26px;padding:4px;border-radius:50%;background:#14532d;color:#86efac}.ask-done b{color:#fff}.ask-done p{margin:2px 0 0;color:#d4d4dc}.ask-done a{color:#c4b5fd}",
+    ".ask-wait{margin:0;font-size:.85rem;color:#c4b5fd}.ask-wait[hidden]{display:none}.ask-send:disabled{cursor:not-allowed}",
     ".ask-hp{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}",
     "@media (max-width:520px){.ask{right:12px;bottom:76px}.ask-fab{right:12px;bottom:12px}}"
   ].join("");
@@ -184,7 +187,9 @@
       '<label for="' + id + 't">Your message</label><textarea id="' + id + 't" rows="4" maxlength="3000" required></textarea>' +
       '<label class="ask-hp">Leave this empty<input name="website" tabindex="-1" autocomplete="off"></label>' +
       '<div class="ask-ts"></div>' +
-      '<div class="ask-row"><button class="ask-send" type="submit">Send</button><span class="ask-note">Posted publicly on GitHub, without your name. Don’t include personal info.</span></div>' +
+      '<p class="ask-wait" aria-live="polite">Tick “Verify you are human” above, then press Send.</p>' +
+      '<p class="ask-status" role="status" hidden></p>' +
+      '<div class="ask-row"><button class="ask-send" type="submit" disabled>Send</button><span class="ask-note">Posted publicly on GitHub, without your name. Don’t include personal info.</span></div>' +
       "</form>";
     var form = box.querySelector("form");
     var area = form.querySelector("textarea");
@@ -199,20 +204,38 @@
     });
     var token = "";
     var widget = null;
+    var sendBtn = form.querySelector(".ask-send"), wait = form.querySelector(".ask-wait");
+    function setToken(t, why) {
+      token = t || "";
+      sendBtn.disabled = !token;
+      wait.hidden = !!token;
+      if (!token && why) wait.textContent = why;
+    }
     loadTurnstile().then(function () {
       widget = window.turnstile.render(form.querySelector(".ask-ts"), {
         sitekey: TURNSTILE_SITE_KEY, theme: "dark", size: "flexible",
-        callback: function (t) { token = t; }, "expired-callback": function () { token = ""; }
+        callback: function (t) { setToken(t); },
+        "expired-callback": function () { setToken("", "The check expired. Tick the box again, then press Send."); },
+        "error-callback": function () { setToken("", "The anti-spam check had a problem. Reload the page and try again."); }
       });
     }).catch(function () {
+      wait.hidden = true;
       form.querySelector(".ask-ts").innerHTML = '<p class="ask-note">The anti-spam check couldn’t load. <a href="' + esc(issueLink(kindNow, text)) + '" target="_blank" rel="noopener">Post on GitHub instead</a>.</p>';
     });
+    var status = form.querySelector(".ask-status");
+    function say(kind, html) {
+      status.className = "ask-status " + kind; status.innerHTML = html; status.hidden = !html;
+      if (html) status.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }
+    var ICON_OK = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7"/></svg>';
+    var ICON_ERR = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5M12 16.5v.01"/></svg>';
     form.addEventListener("submit", function (e) {
       e.preventDefault();
       var msg = area.value.trim();
       var send = form.querySelector(".ask-send");
-      if (msg.length < 5) { area.focus(); return; }
-      if (!token) { form.querySelector(".ask-note").textContent = "Please finish the anti-spam check first."; return; }
+      if (msg.length < 5) { say("err", ICON_ERR + "<span>Please write a little more.</span>"); area.focus(); return; }
+      if (!token) { say("err", ICON_ERR + "<span>Tick “Verify you are human” first.</span>"); return; }
+      say("", "");
       send.disabled = true;
       send.textContent = "Sending…";
       var controller = window.AbortController ? new AbortController() : null;
@@ -225,12 +248,14 @@
       }).then(function (r) {
         return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok) throw new Error(j.error || "Couldn't send it."); return j; });
       }).then(function (j) {
-        box.innerHTML = "<p><b>Sent, thank you!</b> " + (j.url ? 'You can follow the answer here: <a href="' + esc(j.url) + '" target="_blank" rel="noopener">' + esc("#" + j.number) + "</a>." : "") + "</p>";
+        box.innerHTML = '<div class="ask-done">' + ICON_OK + "<div><b>Sent, thank you!</b><p>" + (j.url ? 'Follow the answer here: <a href="' + esc(j.url) + '" target="_blank" rel="noopener">' + esc("question #" + j.number) + "</a>" : "It’s on its way to the Pulse team.") + "</p></div></div>";
+        box.scrollIntoView({ block: "nearest", behavior: "smooth" });
       }).catch(function (err) {
         send.disabled = false;
         send.textContent = "Send";
-        if (window.turnstile && widget !== null) { window.turnstile.reset(widget); token = ""; }
-        form.querySelector(".ask-note").innerHTML = esc(err.name === "AbortError" ? "That took too long." : err.message) + ' <a href="' + esc(issueLink(kindNow, msg)) + '" target="_blank" rel="noopener">Post on GitHub instead</a>.';
+        if (window.turnstile && widget !== null) { window.turnstile.reset(widget); setToken("", "Tick the box again to retry."); }
+        var why = err.name === "AbortError" ? "That took too long." : err.name === "TypeError" ? "Couldn’t reach the server. Check your connection." : err.message;
+        say("err", ICON_ERR + "<span>" + esc(why) + ' <a href="' + esc(issueLink(kindNow, msg)) + '" target="_blank" rel="noopener">Post on GitHub instead</a></span>');
       }).then(function () { clearTimeout(timer); });
     });
     area.focus();
