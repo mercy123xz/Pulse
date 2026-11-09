@@ -412,6 +412,8 @@ pub struct App {
     /// "View credits" window: the song and its credits once loaded.
     pub credits: Option<(Track, Option<Result<crate::deezer::Credits, String>>)>,
     credits_rx: Option<Receiver<Result<crate::deezer::Credits, String>>>,
+    /// A song to point out on the page it was opened on (id, when).
+    pub highlight: Option<(String, f64)>,
     /// Size of the cache folders, measured when Settings opens.
     pub cache_size: Option<u64>,
     /// The song last given to the audio engine as "next" (None = not told yet).
@@ -507,6 +509,7 @@ impl App {
             credits: None,
             credits_rx: None,
             cache_size: None,
+            highlight: None,
             told_next: None,
             themes,
             theme_watch: crate::themes::watch(&cc.egui_ctx),
@@ -576,6 +579,7 @@ impl App {
         }
         self.forward.clear();
         self.list_view = ListView::default();
+        self.highlight = None;
         // Lookups for the page we left aren't needed any more.
         for t in self.views_queue.drain(..) {
             self.views_pending.remove(&t.id);
@@ -666,6 +670,14 @@ impl App {
             self.prefetch_failed.insert(id);
         }
         self.reload_themes_if_changed(ctx);
+        if let Some((_, at)) = &self.highlight {
+            let age = ctx.input(|i| i.time) - at;
+            if age > 4.0 {
+                self.highlight = None;
+            } else {
+                ctx.request_repaint_after(Duration::from_millis(200));
+            }
+        }
         self.run_downloads(ctx);
         if let Some(rx) = &self.local_rx
             && let Ok(list) = rx.try_recv()
@@ -1599,6 +1611,19 @@ impl App {
     }
 
     /// Applies what the user did in a track list. `list` is the list that was shown.
+    /// Opens a song's album with the song highlighted (or its artist, for songs without one).
+    pub fn open_song(&mut self, t: &Track, ctx: &egui::Context) {
+        let now = ctx.input(|i| i.time);
+        if let Some(al) = t.album.as_ref().filter(|a| deezer::is_deezer_id(&a.id)) {
+            self.navigate(Route::Album(al.id.clone()), ctx);
+            self.highlight = Some((t.id.clone(), now));
+        } else if t.has_artist_page() {
+            self.open_artist(t, ctx);
+        } else {
+            self.toast("This song has no album page.", ctx);
+        }
+    }
+
     /// Opens the credits window and loads the credits in the background.
     pub fn show_credits(&mut self, t: Track, ctx: &egui::Context) {
         let (tx, rx) = channel();
@@ -1705,6 +1730,7 @@ impl App {
                 TrackEvent::OpenArtist(t) => self.open_artist(&t, ctx),
                 TrackEvent::OpenAlbum(id) => self.navigate(Route::Album(id), ctx),
                 TrackEvent::ShowCredits(t) => self.show_credits(t, ctx),
+                TrackEvent::OpenSong(t) => self.open_song(&t, ctx),
                 TrackEvent::Download(t) => self.download(&[t], ctx),
                 TrackEvent::RemoveDownload(t) => self.remove_download(&t, ctx),
                 TrackEvent::Share(t, target) => {

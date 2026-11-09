@@ -225,6 +225,7 @@ const STRINGS: &[(&str, [&str; 4])] = &[
     ("Names can be up to 30 characters.", ["Los nombres pueden tener hasta 30 caracteres.", "Os nomes podem ter até 30 caracteres.", "Les noms peuvent compter jusqu'à 30 caractères.", "Namen können bis zu 30 Zeichen haben."]),
     ("Use letters, numbers, spaces, _ . or -", ["Usa letras, números, espacios, _ . o -", "Use letras, números, espaços, _ . ou -", "Utilisez des lettres, chiffres, espaces, _ . ou -", "Nutze Buchstaben, Zahlen, Leerzeichen, _ . oder -"]),
     ("Getting songs…", ["Obteniendo canciones…", "Buscando músicas…", "Récupération des titres…", "Songs werden geladen…"]),
+    ("Loading…", ["Cargando…", "Carregando…", "Chargement…", "Wird geladen…"]),
     ("Open themes folder", ["Abrir carpeta de temas", "Abrir pasta de temas", "Ouvrir le dossier des thèmes", "Design-Ordner öffnen"]),
 ];
 

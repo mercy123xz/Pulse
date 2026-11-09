@@ -69,6 +69,14 @@ pub fn draw(app: &mut App, ui: &mut Ui) {
     toast(app, &ctx);
 }
 
+/// What the player bar says while a song loads.
+fn loading_text(msg: &str) -> String {
+    match msg.rsplit_once(' ').filter(|(_, pct)| pct.ends_with('%')) {
+        Some((_, pct)) => format!("{} {pct}", tr("Loading…")),
+        None => tr("Loading…").to_string(),
+    }
+}
+
 fn main_scroll(app: &mut App, ui: &mut Ui) {
     egui::ScrollArea::vertical()
         .id_salt(("page", format!("{:?}", app.route)))
@@ -136,16 +144,22 @@ fn sidebar(app: &mut App, ui: &mut Ui) {
 
     // Logo
     let compact = compact_sidebar();
-    ui.horizontal(|ui| {
-        ui.add_space(if compact { (ui.available_width() - 30.0) / 2.0 } else { 6.0 });
-        let (r, _) = ui.allocate_exact_size(Vec2::splat(30.0), Sense::hover());
+    if compact {
+        // Centred exactly in the narrow sidebar.
+        let (row, _) = ui.allocate_exact_size(vec2(ui.available_width(), 30.0), Sense::hover());
+        let r = Rect::from_center_size(row.center(), Vec2::splat(30.0));
         vgradient_rounded(ui, r, pal().accent_soft, pal().accent);
         ui.painter().text(r.center(), Align2::CENTER_CENTER, icon::WAVEFORM, filled_icon(18.0), Color32::WHITE);
-        if !compact {
+    } else {
+        ui.horizontal(|ui| {
+            ui.add_space(6.0);
+            let (r, _) = ui.allocate_exact_size(Vec2::splat(30.0), Sense::hover());
+            vgradient_rounded(ui, r, pal().accent_soft, pal().accent);
+            ui.painter().text(r.center(), Align2::CENTER_CENTER, icon::WAVEFORM, filled_icon(18.0), Color32::WHITE);
             ui.add_space(4.0);
             ui.label(RichText::new("Pulse").font(heavy(19.0)));
-        }
-    });
+        });
+    }
     ui.add_space(18.0);
 
     nav_heading(ui, "Browse");
@@ -527,6 +541,7 @@ fn table_ctx<'a>(app: &'a App, names: &'a [String]) -> TableCtx<'a> {
         downloads: &app.saved.downloads,
         added: None,
         views: None,
+        highlight: app.highlight.as_ref().map(|(id, at)| (id.as_str(), *at)),
         index_offset: 0,
     }
 }
@@ -884,15 +899,19 @@ fn hero(ui: &mut Ui, h: &Hero) -> HeroClicks {
 fn hero_full_bleed(ui: &mut Ui, h: &Hero, radius: CornerRadius) -> HeroClicks {
     ui.add_space(8.0);
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 320.0), Sense::hover());
-    artwork(ui, rect, h.art, radius);
+    // Fill the banner without stretching: crop the (square) photo to the banner's shape,
+    // keeping a little more of the top, where faces usually are.
+    artwork_cover(ui, rect, h.art, radius, 0.35);
     // Darken towards the bottom so the name stays readable.
     vgradient(ui, rect, Color32::from_black_alpha(20), Color32::from_black_alpha(200));
     let style = &parts().hero;
     let tw = rect.width() - 56.0;
     let title = if style.uppercase == Some(true) { h.title.to_uppercase() } else { h.title.to_string() };
-    paint_line(ui, rect.left_bottom() + vec2(28.0, -118.0), &h.kind.to_uppercase(), semi(11.5), ON_DARK_MUTED, tw);
+    // Bottom up: subtitle, then the name, then "ARTIST" above the name's actual height.
     let tg = one_line(ui, &title, heavy(style.font_size.unwrap_or(64.0)), ON_DARK, tw);
-    ui.painter().galley(rect.left_bottom() + vec2(28.0, -46.0 - tg.size().y), tg, ON_DARK);
+    let title_top = rect.bottom() - 46.0 - tg.size().y;
+    paint_line(ui, pos2(rect.left() + 28.0, title_top - 20.0), &h.kind.to_uppercase(), semi(11.5), ON_DARK_MUTED, tw);
+    ui.painter().galley(pos2(rect.left() + 28.0, title_top), tg, ON_DARK);
     paint_line(ui, rect.left_bottom() + vec2(28.0, -36.0), h.subtitle, regular(14.0), ON_DARK_MUTED, tw);
     ui.add_space(18.0);
     HeroClicks::default()
@@ -983,7 +1002,11 @@ fn artist(app: &mut App, ui: &mut Ui) {
             // Ten songs, with a button to show all of them.
             let id = egui::Id::new(("artist_all", &p.artist.id));
             let show_all = ui.ctx().data(|d| d.get_temp::<bool>(id).unwrap_or(false));
-            let shown = if show_all { &p.top[..] } else { &p.top[..p.top.len().min(10)] };
+            // Most-viewed first (songs whose views aren't known yet keep Deezer's order, after).
+            let mut top = p.top.clone();
+            app.ensure_views(&top);
+            top.sort_by_key(|t| std::cmp::Reverse(app.saved.views.get(&t.id).map(|(v, _)| *v).unwrap_or(0)));
+            let shown = if show_all { &top[..] } else { &top[..top.len().min(10)] };
             tracks_block(app, ui, "artist_top", shown);
             if p.top.len() > 10 {
                 ui.add_space(6.0);
@@ -1344,9 +1367,15 @@ fn player_bar(app: &mut App, ui: &mut Ui) {
         let title_rect = paint_line(ui, pos2(tx, left.center().y - 18.0), &t.title, semi(13.5), pal().text, tw);
         // Right-click the song title for the song menu (like, share, credits…).
         // Hovering it shows how long the song took to start.
-        let mut title_resp = ui.interact(title_rect, egui::Id::new("np_title"), Sense::click());
+        let mut title_resp = ui.interact(title_rect, egui::Id::new("np_title"), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
         if let Some(t) = app.audio.timing() {
             title_resp = title_resp.on_hover_text(t);
+        }
+        if title_resp.hovered() {
+            ui.painter().hline(title_rect.x_range(), title_rect.bottom() - 1.0, Stroke::new(1.0, pal().text));
+        }
+        if title_resp.clicked() {
+            app.handle_events(vec![TrackEvent::OpenSong(t.clone())], std::slice::from_ref(&t), &ctx);
         }
         let mut np_events = vec![];
         let names = app.playlist_names();
@@ -1376,8 +1405,8 @@ fn player_bar(app: &mut App, ui: &mut Ui) {
             app.handle_events(np_events, std::slice::from_ref(&t), &ctx);
         }
         if let LoadState::Resolving(msg) = app.audio.load_state() {
-            // "Finding song on YouTube…" etc. instead of the artist while it loads.
-            paint_line(ui, pos2(tx, left.center().y + 2.0), &msg, regular(12.0), pal().accent_soft, tw);
+            // Just "Loading…" while it loads (with the percentage during first-time setup).
+            paint_line(ui, pos2(tx, left.center().y + 2.0), &loading_text(&msg), regular(12.0), pal().accent_soft, tw);
             ui.ctx().request_repaint_after(std::time::Duration::from_millis(200));
         } else {
             let a = link_text(ui, egui::Id::new("np_artist"), pos2(tx, left.center().y + 2.0), &t.artist.name, regular(12.5), pal().text_muted, tw);
@@ -1387,7 +1416,11 @@ fn player_bar(app: &mut App, ui: &mut Ui) {
         }
         let liked = app.liked_ids.contains(&t.id);
         // The heart sits just after the song's title and artist, like Spotify.
-        let artist_w = one_line(ui, &t.artist.name, regular(12.5), pal().text_muted, tw).size().x;
+        let second_line = match app.audio.load_state() {
+            LoadState::Resolving(msg) => loading_text(&msg),
+            _ => t.artist.name.clone(),
+        };
+        let artist_w = one_line(ui, &second_line, regular(12.5), pal().text_muted, tw).size().x;
         let text_right = tx + title_rect.width().max(artist_w);
         let hr = Rect::from_center_size(pos2((text_right + 22.0).min(left.right() - 18.0), left.center().y), Vec2::splat(30.0));
         let h = ui.interact(hr, egui::Id::new("np_like"), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
@@ -1404,11 +1437,17 @@ fn player_bar(app: &mut App, ui: &mut Ui) {
     // ---- controls + progress
     let mut cui = ui.new_child(egui::UiBuilder::new().max_rect(center).layout(Layout::top_down(Align::Center)));
     cui.add_space(10.0);
-    cui.horizontal(|ui| {
-        // center the row of buttons
-        let row_w = 5.0 * 32.0 + 40.0 + 4.0 * 14.0;
-        ui.add_space(((center_w - row_w) / 2.0).max(0.0));
-        ui.spacing_mut().item_spacing.x = 14.0;
+    {
+        // Each button has a fixed spot measured from the middle, so play sits exactly
+        // above the centre of the progress bar whatever size the icons are.
+        let (row, _) = cui.allocate_exact_size(vec2(center_w, 40.0), Sense::hover());
+        // A slot exactly as wide as its button (icon size + 12), centred on its spot.
+        let mut slot = |n: i32, icon: f32| {
+            let w = if n == 0 { 40.0 } else { icon + 12.0 };
+            let r = Rect::from_center_size(pos2(row.center().x + n as f32 * 50.0, row.center().y), vec2(w, 40.0));
+            cui.new_child(egui::UiBuilder::new().max_rect(r).layout(Layout::left_to_right(Align::Center)))
+        };
+        let ui = &mut slot(-2, 17.0);
         let shuf_col = if app.saved.shuffle { pal().accent_soft } else { pal().text_muted };
         let tip = if app.saved.shuffle { "Shuffle: on (S)" } else { "Shuffle: off (S)" };
         let s = icon_toggle(ui, icon::SHUFFLE, 17.0, shuf_col, tip, "Shuffle", app.saved.shuffle);
@@ -1418,9 +1457,11 @@ fn player_bar(app: &mut App, ui: &mut Ui) {
         if s.clicked() {
             app.toggle_shuffle();
         }
+        let ui = &mut slot(-1, 19.0);
         if icon_button(ui, icon::SKIP_BACK, 19.0, pal().text, "Previous (Ctrl ←)").clicked() {
             app.previous(&ctx);
         }
+        let ui = &mut slot(0, 40.0);
         let loading = app.audio.load_state().is_busy() && app.current.is_some();
         let (r, resp) = ui.allocate_exact_size(Vec2::splat(40.0), Sense::click());
         let resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand);
@@ -1446,6 +1487,7 @@ fn player_bar(app: &mut App, ui: &mut Ui) {
         if resp.on_hover_text("Play / Pause (Space)").clicked() {
             app.toggle_play(&ctx);
         }
+        let ui = &mut slot(1, 19.0);
         if icon_button(ui, icon::SKIP_FORWARD, 19.0, pal().text, "Next (Ctrl →)").clicked() {
             app.next(&ctx);
         }
@@ -1454,13 +1496,15 @@ fn player_bar(app: &mut App, ui: &mut Ui) {
             Repeat::All => (icon::REPEAT, pal().accent_soft, "Repeat: all (R)"),
             Repeat::One => (icon::REPEAT_ONCE, pal().accent_soft, "Repeat: one (R)"),
         };
-        let rr = icon_button(ui, rg, 17.0, rc, tip);        if app.saved.repeat != Repeat::Off {
+        let ui = &mut slot(2, 17.0);
+        let rr = icon_button(ui, rg, 17.0, rc, tip);
+        if app.saved.repeat != Repeat::Off {
             active_dot(ui, &rr);
         }
         if rr.clicked() {
             app.cycle_repeat();
         }
-    });
+    }
 
     // progress
     cui.add_space(2.0);

@@ -69,6 +69,28 @@ pub fn artwork(ui: &Ui, rect: Rect, url: Option<&str>, radius: CornerRadius) {
 }
 
 /// Vertical gradient (used behind page headers).
+/// Like `artwork`, but fills `rect` without stretching: a square picture is cropped
+/// to the rect's shape. `focus_y` (0 = top, 1 = bottom) picks which band to keep.
+pub fn artwork_cover(ui: &Ui, rect: Rect, url: Option<&str>, radius: CornerRadius, focus_y: f32) {
+    if !ui.is_rect_visible(rect) {
+        return;
+    }
+    ui.painter().rect_filled(rect, radius, pal().surface_active);
+    let Some(url) = url else { return };
+    let aspect = rect.width() / rect.height().max(1.0);
+    // Deezer's artist and cover pictures are square.
+    let uv = if aspect >= 1.0 {
+        let h = 1.0 / aspect;
+        let top = ((1.0 - h) * focus_y).clamp(0.0, 1.0 - h);
+        Rect::from_min_max(pos2(0.0, top), pos2(1.0, top + h))
+    } else {
+        let w = aspect;
+        let left = (1.0 - w) / 2.0;
+        Rect::from_min_max(pos2(left, 0.0), pos2(left + w, 1.0))
+    };
+    egui::Image::new(url).uv(uv).corner_radius(radius).show_loading_spinner(false).paint_at(ui, rect);
+}
+
 pub fn vgradient(ui: &Ui, rect: Rect, top: Color32, bottom: Color32) {
     let mut mesh = egui::Mesh::default();
     mesh.colored_vertex(rect.left_top(), top);
@@ -368,6 +390,8 @@ pub enum TrackEvent {
     OpenAlbum(String),
     ShowCredits(Track),
     Share(Track, ShareTarget),
+    /// The song's title was clicked: open its album with the song highlighted.
+    OpenSong(Track),
     Download(Track),
     RemoveDownload(Track),
 }
@@ -495,6 +519,8 @@ pub struct TableCtx<'a> {
     pub added: Option<&'a HashMap<String, u64>>,
     /// YouTube views (shows the "Views" column).
     pub views: Option<&'a HashMap<String, (u64, u64)>>,
+    /// A song to point out (opened by clicking its title somewhere else).
+    pub highlight: Option<(&'a str, f64)>,
     /// Number shown for the first row (queue shows "next up" starting at 1).
     pub index_offset: usize,
 }
@@ -626,6 +652,17 @@ fn track_row(ui: &mut Ui, id: egui::Id, i: usize, t: &Track, cx: &TableCtx, ev: 
     if let Some(b) = style.border {
         ui.painter().hline(rect.x_range(), rect.bottom() - 0.5, b);
     }
+    if let Some((hid, at)) = cx.highlight
+        && hid == t.id
+    {
+        // The song you came here for: tinted, and scrolled into view once.
+        ui.painter().rect_filled(rect, radius, pal().accent.gamma_multiply(0.22));
+        let key = egui::Id::new(("highlight_scrolled", hid, at.to_bits()));
+        if !ui.ctx().data(|d| d.get_temp::<bool>(key).unwrap_or(false)) {
+            resp.scroll_to_me(Some(egui::Align::Center));
+            ui.ctx().data_mut(|d| d.insert_temp(key, true));
+        }
+    }
     let c = columns(rect, cx.added.is_some(), cx.views.is_some());
 
     // Number / play icon / "now playing" bars
@@ -645,7 +682,7 @@ fn track_row(ui: &mut Ui, id: egui::Id, i: usize, t: &Track, cx: &TableCtx, ev: 
     let tx = art.right() + 12.0;
     let tw = c.title.right() - tx;
     let title_col = if is_current { pal().accent_soft } else { pal().text };
-    paint_line(ui, pos2(tx, rect.center().y - 17.0), &t.title, med(13.5), title_col, tw);
+    let title_link = link_text(ui, id.with("title"), pos2(tx, rect.center().y - 17.0), &t.title, med(13.5), title_col, tw);
     let mut artist_x = tx;
     if cx.downloads.contains_key(&t.id) {
         ui.painter().text(pos2(tx + 7.0, rect.center().y + 11.0), Align2::CENTER_CENTER, icon::ARROW_CIRCLE_DOWN, filled_icon(14.0), pal().accent_soft);
@@ -706,6 +743,8 @@ fn track_row(ui: &mut Ui, id: egui::Id, i: usize, t: &Track, cx: &TableCtx, ev: 
     // Interactions
     if heart.clicked() {
         ev.push(TrackEvent::ToggleLike(t.clone()));
+    } else if title_link.clicked() {
+        ev.push(TrackEvent::OpenSong(t.clone()));
     } else if artist.clicked() {
         ev.push(TrackEvent::OpenArtist(t.clone()));
     } else if album_link.as_ref().is_some_and(|r| r.clicked()) {
