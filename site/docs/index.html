@@ -2,6 +2,8 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<script>try{var t=localStorage.getItem("pulse-theme");document.documentElement.dataset.theme=t||(matchMedia("(prefers-color-scheme: light)").matches?"light":"dark")}catch(e){document.documentElement.dataset.theme="dark"}</script>
+
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>How Pulse works — Pulse docs</title>
 <meta name="description" content="How Pulse is built and released, how a song gets from a search to your speakers, where music info comes from, how themes work, and where your data lives.">
@@ -27,16 +29,6 @@ a:focus-visible, .btn:focus-visible { outline: 3px solid var(--accent-soft); out
 .wrap { width: min(100% - 2.5rem, var(--wrap)); margin-inline: auto; }
 .skip { position: absolute; left: -9999px; top: 0; background: var(--text); color: var(--bg); padding: .6rem 1rem; z-index: 10; }
 .skip:focus { left: 1rem; top: 1rem; }
-header.top { position: sticky; top: 0; z-index: 5; background: rgba(11, 11, 14, .86); border-bottom: 1px solid rgba(44, 44, 54, .6); }
-@supports (backdrop-filter: blur(8px)) { header.top { backdrop-filter: blur(8px); background: rgba(11, 11, 14, .72); } }
-.nav { display: flex; align-items: center; gap: 1.5rem; height: 64px; }
-.brand { display: flex; align-items: center; gap: .6rem; color: var(--text); text-decoration: none; font-weight: 700; font-size: 1.2rem; }
-.brand small { color: var(--muted); font-weight: 500; font-size: .95rem; }
-.nav nav { margin-left: auto; }
-.nav ul { display: flex; gap: 1.4rem; list-style: none; margin: 0; padding: 0; }
-.nav ul a { color: var(--muted); text-decoration: none; font-size: .95rem; }
-.nav ul a:hover, .nav ul a[aria-current] { color: var(--text); }
-@media (max-width: 720px) { .nav nav { display: none; } .nav .btn { margin-left: auto; } }
 .btn { display: inline-flex; align-items: center; gap: .55rem; padding: .6rem 1rem; border-radius: 999px; font-weight: 600; text-decoration: none; font-size: .9rem; line-height: 1; background: var(--accent); color: #fff; }
 .btn:hover { background: #6d28d9; }
 
@@ -99,12 +91,13 @@ footer a:hover { text-decoration: underline; }
   a, button, summary, label, [role="button"] { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 28 28'%3E%3Cpath d='M4 3v19.5l5.6-5.4 3.6 8.4 3.6-1.6-3.6-8.2H21z' fill='%237c3aed' stroke='%23f5f3ff' stroke-width='1.8' stroke-linejoin='round'/%3E%3C/svg%3E") 4 3, pointer; }
 }
 </style>
+<link rel="stylesheet" href="../site.css">
 </head>
 <body>
 <a class="skip" href="#main">Skip to content</a>
 
 <header class="top">
-  <div class="wrap nav">
+  <div class="nav">
     <a class="brand" href="../" aria-label="Pulse home">
       <svg width="30" height="30" viewBox="0 0 30 30" aria-hidden="true"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#a78bfa"/><stop offset="1" stop-color="#7c3aed"/></linearGradient></defs><rect width="30" height="30" rx="8" fill="url(#g)"/><g fill="#fff"><rect x="7" y="12" width="2.4" height="6" rx="1.2"/><rect x="11" y="8.5" width="2.4" height="13" rx="1.2"/><rect x="15" y="6" width="2.4" height="18" rx="1.2"/><rect x="19" y="10" width="2.4" height="10" rx="1.2"/><rect x="23" y="13" width="2.4" height="4" rx="1.2"/></g></svg>
       Pulse <small>Docs</small>
@@ -376,5 +369,6 @@ cargo run --release</code></pre>
   </div>
 </footer>
 <script src="../ask.js" defer></script>
+<script src="../site.js" defer></script>
 </body>
 </html>
