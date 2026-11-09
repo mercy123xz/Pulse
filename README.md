@@ -52,9 +52,9 @@
 
 **Make it yours**
 - Four built-in **themes** (Default, Blossom, Dreary Mono, Lunar), each with dark and light colors
-- Make your own themes, Spicetify-style: `color.ini`, a little CSS and a `theme.toml`. Spicetify
-  color schemes work as they are, and Pulse reloads a theme the moment you save it
-- English, Español, Português, Français and Deutsch
+- Make your own themes: `color.ini`, a little CSS and a `theme.toml`. You can also use Spicetify
+  color schemes. They work as they are, and Pulse reloads a theme the moment you save it
+- English, Español, Português, Français and Deutsch languages.
 
 **Made for everyone**
 - High contrast mode
