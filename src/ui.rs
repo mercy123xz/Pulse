@@ -693,6 +693,7 @@ fn autoplay_page(app: &mut App, ctx: &egui::Context, tracks: &[Track]) {
 fn album_grid(app: &mut App, ui: &mut Ui, albums: &[AlbumInfo], rows: Option<usize>) {
     let ctx = ui.ctx().clone();
     let mut action = None;
+    let mut preview = None;
     card_grid(ui, albums, rows, |ui, w, a| {
         let mut sub = a.kind().to_string();
         if let Some(y) = a.year() {
@@ -705,9 +706,13 @@ fn album_grid(app: &mut App, ui: &mut Ui, albums: &[AlbumInfo], rows: Option<usi
         match card(ui, w, &info) {
             CardClick::Open => action = Some((a.id.clone(), false)),
             CardClick::Play => action = Some((a.id.clone(), true)),
+            CardClick::Preview => preview = Some(a.id.clone()),
             CardClick::None => {}
         }
     });
+    if let Some(id) = preview {
+        app.preload(Route::Album(id), &ctx);
+    }
     match action {
         Some((id, false)) => app.navigate(Route::Album(id), &ctx),
         Some((id, true)) => open_and_play(app, Route::Album(id), &ctx),
@@ -718,15 +723,20 @@ fn album_grid(app: &mut App, ui: &mut Ui, albums: &[AlbumInfo], rows: Option<usi
 fn playlist_grid(app: &mut App, ui: &mut Ui, playlists: &[PlaylistInfo], rows: Option<usize>) {
     let ctx = ui.ctx().clone();
     let mut action = None;
+    let mut preview = None;
     card_grid(ui, playlists, rows, |ui, w, p| {
         let sub = if !p.creator.is_empty() { format!("Playlist · {}", p.creator) } else if p.nb_tracks > 0 { song_count(p.nb_tracks as usize) } else { "Playlist".to_string() };
         let info = CardInfo { id: egui::Id::new(("pl", &p.id)), art: p.picture.as_deref(), title: &p.title, subtitle: sub, round: false, badge: None };
         match card(ui, w, &info) {
             CardClick::Open => action = Some((p.id.clone(), false)),
             CardClick::Play => action = Some((p.id.clone(), true)),
+            CardClick::Preview => preview = Some(p.id.clone()),
             CardClick::None => {}
         }
     });
+    if let Some(id) = preview {
+        app.preload(Route::Playlist(id), &ctx);
+    }
     match action {
         Some((id, false)) => app.navigate(Route::Playlist(id), &ctx),
         Some((id, true)) => open_and_play(app, Route::Playlist(id), &ctx),
@@ -738,6 +748,7 @@ fn playlist_grid(app: &mut App, ui: &mut Ui, playlists: &[PlaylistInfo], rows: O
 fn album_grid_visits(app: &mut App, ui: &mut Ui, items: &[crate::app::Visit], rows: Option<usize>) {
     let ctx = ui.ctx().clone();
     let mut action = None;
+    let mut preview = None;
     card_grid(ui, items, rows, |ui, w, v| {
         let current = match &v.place {
             crate::app::Place::Yours(name) => app.saved.playlists.iter().position(|p| p.name == *name).and_then(|i| app.playlist_art(i)),
@@ -753,9 +764,13 @@ fn album_grid_visits(app: &mut App, ui: &mut Ui, items: &[crate::app::Visit], ro
         match card(ui, w, &info) {
             CardClick::Open => action = Some((v.place.clone(), false)),
             CardClick::Play => action = Some((v.place.clone(), true)),
+            CardClick::Preview => preview = Some(v.place.clone()),
             CardClick::None => {}
         }
     });
+    if let Some(route) = preview.and_then(|p| app.route_for(&p)) {
+        app.preload(route, &ctx);
+    }
     if let Some((place, play)) = action
         && let Some(route) = app.route_for(&place)
     {
@@ -766,13 +781,19 @@ fn album_grid_visits(app: &mut App, ui: &mut Ui, items: &[crate::app::Visit], ro
 fn artist_grid(app: &mut App, ui: &mut Ui, artists: &[ArtistInfo], rows: Option<usize>) {
     let ctx = ui.ctx().clone();
     let mut open = None;
+    let mut preview = None;
     card_grid(ui, artists, rows, |ui, w, a| {
         let sub = if a.fans > 0 { format!("{} fans", fmt_count(a.fans)) } else { "Artist".into() };
         let info = CardInfo { id: egui::Id::new(("artist", &a.id)), art: a.picture.as_deref(), title: &a.name, subtitle: sub, round: true, badge: None };
-        if !matches!(card(ui, w, &info), CardClick::None) {
-            open = Some(a.id.clone());
+        match card(ui, w, &info) {
+            CardClick::Open | CardClick::Play => open = Some(a.id.clone()),
+            CardClick::Preview => preview = Some(a.id.clone()),
+            CardClick::None => {}
         }
     });
+    if let Some(id) = preview {
+        app.preload(Route::Artist(id), &ctx);
+    }
     if let Some(id) = open {
         app.navigate(Route::Artist(id), &ctx);
     }
