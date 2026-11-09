@@ -217,7 +217,7 @@ pub fn mix_page(app: &mut App, ui: &mut Ui, artist_id: &str) {
     with_remote(app, ui, |app, ui, page| {
         let Page::Tracks(tracks) = page else { return };
         let sub = format!("{name} {} · {} songs · {}", tr("and more"), tracks.len(), tr("Updated daily"));
-        hero(ui, &Hero { editable: false, kind: tr("Made for you"), title: &title, subtitle: &sub, art: image.as_deref(), glyph: icon::SHUFFLE, round: false, banner: None });
+        hero(ui, &Hero { editable: false, kind: tr("Made for you"), title: &title, subtitle: &sub, art: image.as_deref(), glyph: icon::SHUFFLE, round: false, banner: None, links: &[] });
         app.note_visit(Place::Mix(artist_id.to_string()), &title, &format!("{name} {}", tr("and more")), image.as_deref(), false);
         let ctx = ui.ctx().clone();
         super::autoplay_page(app, &ctx, tracks);

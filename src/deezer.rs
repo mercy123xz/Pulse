@@ -56,9 +56,23 @@ pub struct Track {
     pub preview: Option<String>,
     #[serde(skip_serializing)]
     pub artwork: Option<LegacyArtwork>,
+    /// Featured / other credited artists (besides `artist`).
+    pub featured: Vec<ArtistRef>,
+    /// Deezer's popularity score (0 if unknown).
+    #[serde(skip_serializing_if = "is_zero")]
+    pub rank: u64,
+}
+
+fn is_zero(n: &u64) -> bool {
+    *n == 0
 }
 
 impl Track {
+    /// "Quality Control, Lil Baby, DaBaby": the main artist and any featured artists.
+    pub fn all_artists(&self) -> String {
+        std::iter::once(self.artist.name.as_str()).chain(self.featured.iter().map(|a| a.name.as_str())).collect::<Vec<_>>().join(", ")
+    }
+
     /// Deezer's number for this song, if it came from Deezer.
     pub fn deezer_number(&self) -> Option<u64> {
         self.deezer_id()
@@ -230,6 +244,10 @@ struct DzTrack {
     preview: Option<String>,
     artist: DzArtist,
     album: Option<DzAlbum>,
+    /// Deezer's popularity score.
+    rank: u64,
+    /// Every credited artist (only in some replies: song details, artist top songs).
+    contributors: Vec<DzArtist>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -302,7 +320,7 @@ impl From<DzArtist> for ArtistInfo {
         Self {
             id: a.id.to_string(),
             name: a.name,
-            picture: a.picture_medium.or(a.picture_big.clone()),
+            picture: a.picture_big.clone().or(a.picture_medium),
             picture_xl: a.picture_xl.or(a.picture_big),
             fans: a.nb_fan,
             albums: a.nb_album,
@@ -311,7 +329,26 @@ impl From<DzArtist> for ArtistInfo {
 }
 
 fn artist_ref(a: &DzArtist) -> ArtistRef {
-    ArtistRef { id: a.id.to_string(), name: a.name.clone(), picture: a.picture_medium.clone() }
+    // The 500 px picture: sharp in cards and lists on high-resolution screens.
+    ArtistRef { id: a.id.to_string(), name: a.name.clone(), picture: a.picture_big.clone().or(a.picture_medium.clone()) }
+}
+
+/// The other credited artists of a song (featured artists), without the main one.
+fn featured_from(main: &ArtistRef, contributors: &[DzArtist]) -> Vec<ArtistRef> {
+    let mut seen = std::collections::HashSet::new();
+    seen.insert(main.id.clone());
+    contributors
+        .iter()
+        .filter(|c| c.id != 0 && !c.name.is_empty())
+        .map(artist_ref)
+        .filter(|a| seen.insert(a.id.clone()))
+        .collect()
+}
+
+/// Featured artists of one song, from its full details (lists don't include them).
+pub fn featured_artists(track_id: u64) -> Result<Vec<ArtistRef>, String> {
+    let t: DzTrack = get(&format!("/track/{track_id}"), &[])?;
+    Ok(featured_from(&artist_ref(&t.artist), &t.contributors))
 }
 
 fn album_info(a: DzAlbum, fallback_artist: Option<&ArtistRef>) -> AlbumInfo {
@@ -340,11 +377,15 @@ fn track(t: DzTrack, album: Option<&AlbumInfo>) -> Track {
         (_, Some(a)) => (Some(AlbumRef { id: a.id.clone(), title: a.title.clone() }), a.cover_small.clone(), a.cover.clone()),
         _ => (None, None, None),
     };
+    let main = artist_ref(&t.artist);
+    let featured = featured_from(&main, &t.contributors);
     Track {
         id: format!("dz:{}", t.id),
         title: t.title,
         duration: t.duration,
-        artist: artist_ref(&t.artist),
+        rank: t.rank,
+        featured,
+        artist: main,
         album: album_ref,
         cover_small: small,
         cover_big: big,
@@ -491,9 +532,21 @@ pub fn artist_page(id: &str) -> Result<ArtistPage, String> {
     let related: List<DzArtist> = get(&format!("/artist/{id}/related"), &[("limit", "12")]).unwrap_or_default();
     let mut releases: Vec<AlbumInfo> = albums.data.into_iter().map(|a| album_info(a, Some(&me))).collect();
     sort_newest_first(&mut releases);
+    // The 10 most popular songs, most popular first (by Deezer's popularity score).
+    let mut top = tracks(top);
+    top.sort_by_key(|t| std::cmp::Reverse(t.rank));
+    top.truncate(10);
+    // The artist list doesn't say how many songs a release has; ask for the newest one,
+    // which the page shows big.
+    if let Some(latest) = releases.first_mut()
+        && latest.nb_tracks == 0
+        && let Ok(full) = get::<DzAlbum>(&format!("/album/{}", latest.id), &[])
+    {
+        latest.nb_tracks = full.nb_tracks;
+    }
     Ok(ArtistPage {
         artist: artist.into(),
-        top: tracks(top),
+        top,
         releases,
         related: related.data.into_iter().map(ArtistInfo::from).collect(),
     })
@@ -620,16 +673,43 @@ pub fn credits(track_id: u64) -> Result<Credits, String> {
 
 pub fn album(id: &str) -> Result<(AlbumInfo, Vec<Track>), String> {
     let full: DzAlbumFull = get(&format!("/album/{id}"), &[])?;
-    let list = full.tracks.unwrap_or_default();
+    let mut list = full.tracks.unwrap_or_default().data;
     let info = album_info(full.album, None);
-    let t = list.data.into_iter().map(|t| track(t, Some(&info))).collect();
+    // Long albums come in pages: get the rest.
+    if (list.len() as u64) < info.nb_tracks {
+        list = all_pages(&format!("/album/{id}/tracks"), info.nb_tracks as usize).unwrap_or(list);
+    }
+    let t = list.into_iter().map(|t| track(t, Some(&info))).collect();
     Ok((info, t))
+}
+
+/// Every song of a list that Deezer returns in pages (up to `expected`, max 2,000).
+fn all_pages(path: &str, expected: usize) -> Result<Vec<DzTrack>, String> {
+    let mut out: Vec<DzTrack> = vec![];
+    let cap = expected.clamp(1, 2000);
+    while out.len() < cap {
+        let index = out.len().to_string();
+        let page: List<DzTrack> = get(path, &[("index", &index), ("limit", "100")])?;
+        if page.data.is_empty() {
+            break;
+        }
+        out.extend(page.data);
+    }
+    Ok(out)
 }
 
 pub fn playlist(id: &str) -> Result<(PlaylistInfo, Vec<Track>), String> {
     let p: DzPlaylist = get(&format!("/playlist/{id}"), &[])?;
     let info = playlist_info(&p);
-    let t = p.tracks.map(tracks).unwrap_or_default();
+    let mut t = p.tracks.map(tracks).unwrap_or_default();
+    // Deezer only sends the first part of big playlists here: fetch every song,
+    // so playing the playlist plays all of it.
+    if (t.len() as u64) < info.nb_tracks
+        && let Ok(all) = all_pages(&format!("/playlist/{id}/tracks"), info.nb_tracks as usize)
+        && all.len() > t.len()
+    {
+        t = all.into_iter().map(|x| track(x, None)).collect();
+    }
     Ok((info, t))
 }
 

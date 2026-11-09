@@ -225,6 +225,28 @@ pub fn ghost_button(ui: &mut Ui, glyph: &str, label: &str) -> Response {
 }
 
 /// A text "link" (e.g. artist name) that underlines on hover.
+/// The song's artists as links: "Main, Featured 1, Featured 2". Returns the main
+/// artist's link and, if a featured artist was clicked, that artist's id.
+pub fn artist_links(ui: &Ui, id: egui::Id, pos: Pos2, t: &Track, font: FontId, color: Color32, max_w: f32) -> (Response, Option<String>) {
+    let main = link_text(ui, id.with("artist"), pos, &t.artist.name, font.clone(), color, max_w);
+    let mut x = main.rect.right();
+    let mut clicked = None;
+    for (k, a) in t.featured.iter().enumerate() {
+        let room = pos.x + max_w - x;
+        if room < 30.0 {
+            break;
+        }
+        let comma = ui.painter().text(pos2(x, pos.y), Align2::LEFT_TOP, ", ", font.clone(), color);
+        x = comma.right();
+        let r = link_text(ui, id.with(("feat", k)), pos2(x, pos.y), &a.name, font.clone(), color, pos.x + max_w - x);
+        x = r.rect.right();
+        if r.clicked() && crate::deezer::is_deezer_id(&a.id) {
+            clicked = Some(a.id.clone());
+        }
+    }
+    (main, clicked)
+}
+
 pub fn link_text(ui: &Ui, rect_id: egui::Id, pos: Pos2, text: &str, font: FontId, color: Color32, max_w: f32) -> Response {
     let g = one_line(ui, text, font, color, max_w);
     let rect = Rect::from_min_size(pos, g.size());
@@ -401,6 +423,8 @@ pub enum TrackEvent {
     ClearSelection,
     /// "Go to song": the song's own page.
     OpenSongPage(Track),
+    /// A featured artist's name was clicked (Deezer artist id).
+    OpenArtistById(String),
     RemoveFromPlaylist(usize),
     RemoveFromQueue(usize),
     OpenArtist(Track),
@@ -728,7 +752,7 @@ fn track_row(ui: &mut Ui, id: egui::Id, list: &str, i: usize, t: &Track, tracks:
     // Register the row even when it's scrolled out of view, so Tab can reach it
     // (focusing it then scrolls it into view, see `focus_ring`).
     let resp = ui.interact(rect, id, Sense::click());
-    a11y(ui, &resp, WidgetType::Button, || format!("{} by {}, {}", t.title, t.artist.name, fmt_duration(t.duration)));
+    a11y(ui, &resp, WidgetType::Button, || format!("{} by {}, {}", t.title, t.all_artists(), fmt_duration(t.duration)));
     if !ui.is_rect_visible(rect) {
         return;
     }
@@ -795,15 +819,10 @@ fn track_row(ui: &mut Ui, id: egui::Id, list: &str, i: usize, t: &Track, tracks:
         ui.painter().text(badge.center(), Align2::CENTER_CENTER, "E", semi(9.5), pal().bg);
         artist_x += 19.0;
     }
-    let artist = link_text(
-        ui,
-        id.with("artist"),
-        pos2(artist_x, rect.center().y + 3.0),
-        &t.artist.name,
-        regular(12.5),
-        pal().text_muted,
-        tw - (artist_x - tx),
-    );
+    let (artist, featured_click) = artist_links(ui, id, pos2(artist_x, rect.center().y + 3.0), t, regular(12.5), pal().text_muted, tw - (artist_x - tx));
+    if let Some(a) = featured_click {
+        ev.push(TrackEvent::OpenArtistById(a));
+    }
 
     let mut album_link = None;
     if let (Some(a), Some(al)) = (c.album, t.album.as_ref()) {
