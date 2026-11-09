@@ -122,7 +122,15 @@ pub fn run(url: &str, progress: &Arc<Mutex<Progress>>, cancel: &AtomicBool) -> R
                 matched += 1;
                 t
             }
-            None => unmatched(&item, source, i),
+            None => {
+                // Not on Deezer: take the cover from iTunes, else the video's picture (YouTube),
+                // else none (Pulse fills it in from YouTube once the song is looked up).
+                let mut item = item.clone();
+                if let Some(art) = crate::itunes::cover(&item.artist, &item.title) {
+                    item.art = Some(art);
+                }
+                unmatched(&item, source, i)
+            }
         };
         if !tracks.iter().any(|(x, _): &(Track, Option<String>)| x.id == t.id) {
             tracks.push((t, item.video.clone()));
@@ -187,12 +195,17 @@ fn youtube(url: &str, status: &dyn Fn(&str)) -> Result<(String, Vec<Item>), Stri
                 title,
                 artist,
                 duration: e.duration.unwrap_or(0.0) as u32,
-                art: Some(format!("https://i.ytimg.com/vi/{}/hqdefault.jpg", e.id)),
+                art: Some(youtube_thumb(&e.id)),
                 video: Some(e.id),
             }
         })
         .collect();
     Ok((title, items))
+}
+
+/// A video's 16:9 picture (Pulse shows the middle square of it).
+pub fn youtube_thumb(video: &str) -> String {
+    format!("https://i.ytimg.com/vi/{video}/mqdefault.jpg")
 }
 
 /// "Artist - Song (Official Video)" → ("Artist", "Song"); otherwise the channel is the artist.
@@ -298,7 +311,8 @@ pub fn parse_spotify_embed(html: &str) -> Result<(String, Vec<Item>), String> {
             // "Artist A, Artist B": the first artist is enough to match.
             artist: t.subtitle.split(',').next().unwrap_or("").replace('\u{a0}', " ").trim().to_string(),
             duration: (t.duration / 1000) as u32,
-            art: cover.clone(),
+            // The embed page has no per-song pictures (only the playlist's own cover).
+            art: None,
             video: None,
         })
         .collect();
@@ -459,7 +473,8 @@ mod tests {
         let (name, items) = parse_spotify_embed(html).unwrap();
         assert_eq!(name, "Top Hits");
         assert_eq!(items.len(), 2);
-        assert_eq!(items[0], Item { title: "Loser".into(), artist: "Tame Impala".into(), duration: 223, art: Some("https://i.scdn.co/x".into()), video: None });
+        // The playlist's cover isn't used as a song's cover.
+        assert_eq!(items[0], Item { title: "Loser".into(), artist: "Tame Impala".into(), duration: 223, art: None, video: None });
         assert_eq!(items[1].artist, "A");
         assert!(parse_spotify_embed("<html></html>").is_err());
     }
