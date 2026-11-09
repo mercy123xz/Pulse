@@ -12,7 +12,7 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
 use std::time::{Duration, Instant};
 
 /// Pulse's application on Discord (it's public: it only names the app).
-const APP_ID: &str = "";
+const APP_ID: &str = "1569481347553038476";
 /// Shown when a song has no cover Discord can load (local files), and as the small badge.
 const LOGO: &str = "https://mercy123xz.github.io/Pulse/img/apple-touch-icon.png";
 
