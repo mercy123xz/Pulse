@@ -91,6 +91,13 @@ footer { border-top: 1px solid var(--border); padding: 2.2rem 0 3rem; color: var
 footer nav { display: flex; gap: 1.2rem; flex-wrap: wrap; margin-bottom: .8rem; }
 footer a { color: var(--text); text-decoration: none; }
 footer a:hover { text-decoration: underline; }
+
+/* Cursor: black arrow with a purple edge; purple over anything clickable.
+   Native cursors (no script), only for mouse users. */
+@media (pointer: fine) {
+  html { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 28 28'%3E%3Cpath d='M4 3v19.5l5.6-5.4 3.6 8.4 3.6-1.6-3.6-8.2H21z' fill='%230b0b0e' stroke='%23a78bfa' stroke-width='1.8' stroke-linejoin='round'/%3E%3C/svg%3E") 4 3, auto; }
+  a, button, summary, label, [role="button"] { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 28 28'%3E%3Cpath d='M4 3v19.5l5.6-5.4 3.6 8.4 3.6-1.6-3.6-8.2H21z' fill='%237c3aed' stroke='%23f5f3ff' stroke-width='1.8' stroke-linejoin='round'/%3E%3C/svg%3E") 4 3, pointer; }
+}
 </style>
 </head>
 <body>
