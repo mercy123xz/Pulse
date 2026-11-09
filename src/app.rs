@@ -529,6 +529,9 @@ pub struct App {
     pub highlight: Option<(String, f64)>,
     /// The song-colored background (themes with `backdrop = true`).
     pub backdrop: crate::backdrop::Backdrop,
+    swept_at: f64,
+    /// When each loaded page was last opened, so the oldest can be let go of.
+    cache_used: HashMap<String, Instant>,
     /// Size of the cache folders, measured when Settings opens.
     pub cache_size: Option<u64>,
     /// The song last given to the audio engine as "next" (None = not told yet).
@@ -575,6 +578,8 @@ impl App {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         crate::theme::install(&cc.egui_ctx);
         egui_extras::install_image_loaders(&cc.egui_ctx);
+        // Pictures from the web: saved on disk, let go of in memory when off screen.
+        crate::artcache::ArtLoader::install(&cc.egui_ctx);
 
         let saved: Saved = cc.storage.and_then(|s| eframe::get_value(s, STORAGE_KEY)).unwrap_or_default();
         let themes = crate::themes::list();
@@ -638,6 +643,8 @@ impl App {
             cache_size: None,
             highlight: None,
             backdrop: Default::default(),
+            swept_at: 0.0,
+            cache_used: HashMap::new(),
             song_tracks: HashMap::new(),
             rematch_tried: HashSet::new(),
             featured_queue: Default::default(),
@@ -676,6 +683,8 @@ impl App {
             app.queue_pos = app.saved.last_queue_pos.min(app.queue.len() - 1);
         }
         crate::single::listen(cc.egui_ctx.clone());
+        crate::artcache::set_limit_mb(app.saved.settings.art_cache_mb);
+        std::thread::spawn(crate::artcache::trim_disk);
         app.apply_theme(&cc.egui_ctx);
         // First launch: offer to make a profile.
         if app.saved.profile.created == 0 && !app.saved.profile.skipped {
@@ -806,7 +815,34 @@ impl App {
 
     /// Starts downloading the current page's data if we don't have it yet.
     pub fn ensure_loaded(&mut self, ctx: &egui::Context) {
+        if let Some(k) = self.route_key() {
+            self.cache_used.insert(k, Instant::now());
+        }
         self.load_route(self.route.clone(), ctx);
+    }
+
+    /// Keeps at most 60 loaded pages in memory: the ones opened longest ago go first
+    /// (they load again if you go back to them).
+    fn trim_page_cache(&mut self) {
+        const KEEP: usize = 60;
+        if self.cache.len() <= KEEP {
+            return;
+        }
+        let current = self.route_key();
+        let back: HashSet<String> = self.back.iter().rev().take(10).filter_map(|r| self.key_for(r)).collect();
+        let mut keys: Vec<(String, Option<Instant>)> = self
+            .cache
+            .iter()
+            .filter(|(k, v)| !matches!(v, Remote::Loading) && Some(*k) != current.as_ref() && !back.contains(*k))
+            .map(|(k, _)| (k.clone(), self.cache_used.get(k).copied()))
+            .collect();
+        // Never-opened (loaded ahead) pages first, then the oldest.
+        keys.sort_by_key(|(_, at)| *at);
+        let extra = self.cache.len() - KEEP;
+        for (k, _) in keys.into_iter().take(extra) {
+            self.cache.remove(&k);
+            self.cache_used.remove(&k);
+        }
     }
 
     /// Loads a page you're likely to open next (pointing at its card or song), so it opens
@@ -881,6 +917,13 @@ impl App {
     /// Called every frame before drawing: receives finished downloads and
     /// moves on to the next song when one ends.
     pub fn tick(&mut self, ctx: &egui::Context) {
+        // Now and then, let go of pictures that are no longer on screen.
+        let now = ctx.input(|i| i.time);
+        if now - self.swept_at > 15.0 {
+            self.swept_at = now;
+            crate::artcache::sweep(ctx);
+            self.trim_page_cache();
+        }
         self.receive_credits();
         self.receive_import(ctx);
         self.receive_rematches();
@@ -1285,6 +1328,11 @@ impl App {
         let s = self.saved.settings.clone();
         crate::i18n::set_language(s.language);
         crate::theme::set_reduce_motion(s.reduce_motion);
+        if s.art_cache_mb != before.art_cache_mb {
+            crate::artcache::set_limit_mb(s.art_cache_mb);
+            std::thread::spawn(crate::artcache::trim_disk);
+            self.cache_size = None;
+        }
         if s.high_contrast != before.high_contrast || s.theme != before.theme || s.scheme != before.scheme {
             self.apply_theme(ctx);
         }

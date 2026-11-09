@@ -111,6 +111,14 @@ pub fn settings_page(app: &mut App, ui: &mut Ui) {
         clear = ui.button(tr("Clear cache")).clicked();
     });
     let s = &mut app.saved.settings;
+    row(ui, tr("Space for saved pictures"), tr("Covers and artist photos are kept so they aren't downloaded again. The oldest go first when this fills up."), |ui| {
+        for mb in [100u64, 300, 1000] {
+            let label = if mb >= 1000 { format!("{} GB", mb / 1000) } else { format!("{mb} MB") };
+            if ui.selectable_label(s.art_cache_mb == mb, label).clicked() {
+                s.art_cache_mb = mb;
+            }
+        }
+    });
     let offline = s.offline_dir();
     row(ui, tr("Offline storage location"), &offline.display().to_string(), |ui| {
         #[cfg(windows)]

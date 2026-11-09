@@ -62,6 +62,7 @@ pub fn artwork(ui: &Ui, rect: Rect, url: Option<&str>, radius: CornerRadius) {
     ui.painter().rect_filled(rect, radius, pal().surface_active);
     paint_icon(ui.painter(), rect.center(), icon::MUSIC_NOTES, regular(rect.height() * 0.38), pal().text_faint);
     if let Some(url) = url {
+        crate::artcache::drawn(url);
         let mut img = egui::Image::new(url).corner_radius(radius).show_loading_spinner(false);
         // YouTube video pictures are wide: show their middle square instead of squashing them.
         if url.contains("i.ytimg.com/") {
@@ -120,6 +121,7 @@ pub fn artwork_cover(ui: &Ui, rect: Rect, url: Option<&str>, radius: CornerRadiu
         let left = (1.0 - w) / 2.0;
         Rect::from_min_max(pos2(left, 0.0), pos2(left + w, 1.0))
     };
+    crate::artcache::drawn(url);
     egui::Image::new(url).uv(uv).corner_radius(radius).show_loading_spinner(false).paint_at(ui, rect);
 }
 

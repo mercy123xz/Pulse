@@ -221,6 +221,8 @@ const STRINGS: &[(&str, [&str; 4])] = &[
     ("Recent searches", ["Búsquedas recientes", "Pesquisas recentes", "Recherches récentes", "Letzte Suchen"]),
     ("Searching…", ["Buscando…", "Pesquisando…", "Recherche…", "Suche…"]),
     ("Clear history", ["Borrar historial", "Limpar histórico", "Effacer l'historique", "Verlauf löschen"]),
+    ("Space for saved pictures", ["Espacio para imágenes guardadas", "Espaço para imagens salvas", "Espace pour les images", "Platz für gespeicherte Bilder"]),
+    ("Covers and artist photos are kept so they aren't downloaded again. The oldest go first when this fills up.", ["Las portadas y fotos se guardan para no descargarlas otra vez. Las más antiguas se borran primero cuando se llena.", "Capas e fotos ficam salvas para não serem baixadas de novo. As mais antigas saem primeiro quando enche.", "Les pochettes et photos sont gardées pour ne pas les retélécharger. Les plus anciennes partent en premier.", "Cover und Fotos werden behalten, damit sie nicht neu geladen werden. Die ältesten gehen zuerst, wenn es voll ist."]),
     ("Light", ["Claro", "Claro", "Clair", "Hell"]),
     ("Dark", ["Oscuro", "Escuro", "Sombre", "Dunkel"]),
     ("Orbit", ["Órbita", "Órbita", "Orbite", "Orbit"]),

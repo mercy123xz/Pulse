@@ -140,6 +140,8 @@ pub struct Settings {
     pub reduce_motion: bool,
     /// Themes with a song-colored background: let it drift while music plays.
     pub moving_background: bool,
+    /// Most disk space for saved pictures, in MB.
+    pub art_cache_mb: u64,
     pub hardware_acceleration: bool,
     /// Theme name and its color scheme.
     pub theme: String,
@@ -166,6 +168,7 @@ impl Default for Settings {
             high_contrast: false,
             reduce_motion: false,
             moving_background: true,
+            art_cache_mb: 300,
             hardware_acceleration: true,
             theme: "Default".into(),
             scheme: String::new(),
