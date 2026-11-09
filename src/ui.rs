@@ -397,7 +397,7 @@ fn nav_item_art(ui: &mut Ui, art: Option<&str>, glyph: &str, label: &str, select
 enum Suggestion {
     Recent(String),
     Artist(String),
-    Song(Track),
+    Song(Box<Track>),
 }
 
 /// Under the search box while it's in use: recent searches when it's empty, quick picks
@@ -423,7 +423,7 @@ fn search_dropdown(app: &mut App, ui: &mut Ui, pill: Rect, edit: &egui::Response
             items.push((Suggestion::Artist(a.id.clone()), a.name.clone(), tr("Artist").to_string(), a.picture.clone()));
         }
         for t in r.tracks.iter().take(5) {
-            items.push((Suggestion::Song(t.clone()), t.title.clone(), t.all_artists(), t.art_small().map(str::to_owned)));
+            items.push((Suggestion::Song(Box::new(t.clone())), t.title.clone(), t.all_artists(), t.art_small().map(str::to_owned)));
         }
     }
     let searching = !q.is_empty() && items.is_empty() && (app.search_edited_at.is_some() || matches!(app.cache.get(&format!("search:{q}")), Some(Remote::Loading)));

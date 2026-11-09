@@ -2225,8 +2225,7 @@ mod search_tests {
     use super::*;
 
     fn song(title: &str, artist: &str) -> Track {
-        let mut t = Track::default();
-        t.title = title.into();
+        let mut t = Track { title: title.into(), ..Default::default() };
         t.artist.name = artist.into();
         t
     }
