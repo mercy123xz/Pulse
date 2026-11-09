@@ -1,6 +1,6 @@
 [package]
 name = "pulse"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 description = "A fast, native music player written in Rust: any song, with info from Deezer and audio from YouTube"
 
@@ -9,12 +9,12 @@ description = "A fast, native music player written in Rust: any song, with info 
 eframe = { version = "0.36", default-features = false, features = ["accesskit", "default_fonts", "glow", "persistence", "wayland", "x11"] }
 egui = "0.36"
 # Loads album art straight from URLs (ui.image("https://..."))
-egui_extras = { version = "0.36", features = ["http", "image"] }
+egui_extras = { version = "0.36", features = ["http", "image", "file"] }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
 egui-phosphor = { version = "0.14", features = ["regular", "fill"] }
 
 # Audio playback (MP3 decoding via symphonia)
-rodio = { version = "0.23", default-features = false, features = ["playback", "mp3", "mp4"] }
+rodio = { version = "0.23", default-features = false, features = ["playback", "mp3", "mp4", "flac", "wav", "vorbis", "symphonia-alac"] }
 
 # HTTP + JSON
 ureq = { version = "3", features = ["json"] }
@@ -24,12 +24,18 @@ serde_json = "1"
 rand = "0.9"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 sha2 = "0.10"
+lofty = "0.22"
+toml = "0.9"
+notify = "8"
+miniz_oxide = "0.8"
+base64 = "0.22"
 
 # On Windows, draw with DirectX 12 (through wgpu) instead of OpenGL. DirectX 12 is built
 # into every Windows 10/11 PC, and it falls back to software drawing when a PC has no
 # proper graphics driver, so Pulse opens everywhere with nothing extra to install.
 [target.'cfg(windows)'.dependencies]
 eframe = { version = "0.36", default-features = false, features = ["wgpu"] }
+rfd = "0.18.0"
 
 [profile.release]
 opt-level = 3
@@ -40,3 +46,6 @@ strip = true
 # Make debug builds play audio smoothly (decoding is slow without optimizations)
 [profile.dev.package."*"]
 opt-level = 2
+
+[build-dependencies]
+winresource = "0.1.34"

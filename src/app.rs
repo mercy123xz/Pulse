@@ -3,7 +3,7 @@
 
 use crate::audio::{AudioEngine, LoadState, Resolver, StreamSource};
 use crate::deezer::{self, AlbumInfo, ArtistPage, Chart, PlaylistInfo, SearchResults, Track};
-use crate::widgets::TrackEvent;
+use crate::widgets::{ShareTarget, TrackEvent};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::{Receiver, Sender, channel};
@@ -26,6 +26,13 @@ pub enum Route {
     Album(String),
     Artist(String),
     Local(usize),
+    LocalFiles,
+    Settings,
+    /// A Daily Mix built around one of your most-played artists (Deezer artist id).
+    Mix(String),
+    /// A song's own page (its id, "dz:…" or an imported song's id).
+    Song(String),
+    Profile,
 }
 
 /// Data downloaded for a page.
@@ -36,12 +43,65 @@ pub enum Page {
     Playlist { info: PlaylistInfo, tracks: Vec<Track> },
     Album { info: AlbumInfo, tracks: Vec<Track> },
     Artist(ArtistPage),
+    Song(Box<deezer::SongPage>),
 }
 
 pub enum Remote {
     Loading,
     Ready(Box<Page>),
     Failed(String),
+}
+
+/// Somewhere you went or something you played, for the home page.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Place {
+    Album(String),
+    Artist(String),
+    Playlist(String),
+    /// One of your playlists, by name (positions change when playlists are deleted).
+    Yours(String),
+    Liked,
+    Mix(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Visit {
+    pub place: Place,
+    pub title: String,
+    pub subtitle: String,
+    pub image: Option<String>,
+    pub round: bool,
+    /// Times played or opened, and when last (Unix seconds).
+    pub count: u32,
+    pub last: u64,
+}
+
+/// Adds or moves `v` to the front of `list` (keeping at most `max`), counting it.
+fn bump(list: &mut Vec<Visit>, mut v: Visit, max: usize) {
+    if let Some(i) = list.iter().position(|x| x.place == v.place) {
+        let old = list.remove(i);
+        v.count = old.count + 1;
+        if v.image.is_none() {
+            v.image = old.image;
+        }
+    } else {
+        v.count = 1;
+    }
+    list.insert(0, v);
+    list.truncate(max);
+}
+
+/// Your most-played artists, best first: plays count, recent plays count more.
+pub fn top_artists(artists: &[Visit], now: u64) -> Vec<&Visit> {
+    let mut v: Vec<(f64, &Visit)> = artists
+        .iter()
+        .map(|a| {
+            let days = now.saturating_sub(a.last) as f64 / 86_400.0;
+            (a.count as f64 / (1.0 + days / 14.0), a)
+        })
+        .collect();
+    v.sort_by(|a, b| b.0.total_cmp(&a.0));
+    v.into_iter().map(|(_, a)| a).collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -60,6 +120,109 @@ pub enum Repeat {
 pub struct LocalPlaylist {
     pub name: String,
     pub tracks: Vec<Track>,
+    /// Your own cover picture (a copy kept in Pulse's data folder).
+    #[serde(default)]
+    pub cover: Option<std::path::PathBuf>,
+    /// When each song was added: song id → Unix time in seconds.
+    #[serde(default)]
+    pub added: HashMap<String, u64>,
+}
+
+/// How a song list is filtered and sorted (the bar above playlists).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ListView {
+    pub search: String,
+    pub search_open: bool,
+    pub genre: Option<String>,
+    pub sort: SortBy,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum SortBy {
+    #[default]
+    Custom,
+    Title,
+    Artist,
+    Album,
+    RecentlyAdded,
+    Duration,
+}
+
+impl SortBy {
+    pub const ALL: [SortBy; 6] = [SortBy::Custom, SortBy::Title, SortBy::Artist, SortBy::Album, SortBy::RecentlyAdded, SortBy::Duration];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            SortBy::Custom => "Custom order",
+            SortBy::Title => "Title",
+            SortBy::Artist => "Artist",
+            SortBy::Album => "Album",
+            SortBy::RecentlyAdded => "Recently added",
+            SortBy::Duration => "Duration",
+        }
+    }
+}
+
+/// A playlist import running in the background.
+pub struct ImportJob {
+    pub progress: Arc<Mutex<crate::import::Progress>>,
+    pub cancel: Arc<std::sync::atomic::AtomicBool>,
+    rx: Receiver<Result<crate::import::Imported, String>>,
+}
+
+/// Seconds since 1970, for "Date added".
+pub fn now_unix() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+}
+
+/// The songs of a list after search, genre filter and sorting.
+pub fn apply_view(tracks: &[Track], view: &ListView, added: Option<&HashMap<String, u64>>, genres: &HashMap<String, Vec<String>>) -> Vec<Track> {
+    let q = view.search.trim().to_lowercase();
+    let mut out: Vec<Track> = tracks
+        .iter()
+        .filter(|t| {
+            q.is_empty()
+                || t.title.to_lowercase().contains(&q)
+                || t.artist.name.to_lowercase().contains(&q)
+                || t.album.as_ref().is_some_and(|a| a.title.to_lowercase().contains(&q))
+        })
+        .filter(|t| match &view.genre {
+            None => true,
+            Some(g) => track_genres(t, genres).iter().any(|x| x == g),
+        })
+        .cloned()
+        .collect();
+    let key = |s: &str| s.to_lowercase();
+    match view.sort {
+        SortBy::Custom => {}
+        SortBy::Title => out.sort_by_key(|t| key(&t.title)),
+        SortBy::Artist => out.sort_by_key(|t| (key(&t.artist.name), key(&t.title))),
+        SortBy::Album => out.sort_by_key(|t| (t.album.as_ref().map(|a| key(&a.title)), key(&t.title))),
+        SortBy::Duration => out.sort_by_key(|t| t.duration),
+        SortBy::RecentlyAdded => {
+            let when = |t: &Track| added.and_then(|a| a.get(&t.id)).copied().unwrap_or(0);
+            out.sort_by_key(|t| std::cmp::Reverse(when(t)));
+        }
+    }
+    out
+}
+
+/// A song's genres (from its album), if known.
+pub fn track_genres<'a>(t: &Track, genres: &'a HashMap<String, Vec<String>>) -> &'a [String] {
+    t.album.as_ref().and_then(|a| genres.get(&a.id)).map(Vec::as_slice).unwrap_or(&[])
+}
+
+/// The genres in a list, most common first (at most 15).
+pub fn genre_chips(tracks: &[Track], genres: &HashMap<String, Vec<String>>) -> Vec<String> {
+    let mut count: HashMap<&str, usize> = HashMap::new();
+    for t in tracks {
+        for g in track_genres(t, genres) {
+            *count.entry(g.as_str()).or_default() += 1;
+        }
+    }
+    let mut v: Vec<(&str, usize)> = count.into_iter().collect();
+    v.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(b.0)));
+    v.into_iter().take(15).map(|(g, _)| g.to_string()).collect()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -77,6 +240,35 @@ pub struct Saved {
     pub autoplay: bool,
     /// Which YouTube video plays each song (song id → video id), so repeat plays skip the search.
     pub youtube_ids: HashMap<String, String>,
+    pub settings: crate::settings::Settings,
+    /// Downloaded songs: song id → file.
+    pub downloads: HashMap<String, std::path::PathBuf>,
+    /// When each liked song was liked (song id → Unix time).
+    pub liked_added: HashMap<String, u64>,
+    /// Genres of albums looked up so far (album id → genres), so it happens once.
+    pub album_genres: HashMap<String, Vec<String>>,
+    /// YouTube view counts: song id → (views, when looked up).
+    pub views: HashMap<String, (u64, u64)>,
+    /// Artists and albums you've played, most recent first (for the home page).
+    pub played_artists: Vec<Visit>,
+    pub played_albums: Vec<Visit>,
+    /// Pages you opened, most recent first ("Recents" on the home page).
+    pub visits: Vec<Visit>,
+    pub profile: Profile,
+}
+
+/// Your profile, kept on this computer.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Profile {
+    pub name: String,
+    /// A copy of your picture in Pulse's data folder.
+    pub picture: Option<std::path::PathBuf>,
+    pub bio: String,
+    /// When the profile was made (Unix seconds); 0 = not made yet.
+    pub created: u64,
+    /// "Later" was pressed on the welcome screen.
+    pub skipped: bool,
 }
 
 impl Default for Saved {
@@ -92,11 +284,70 @@ impl Default for Saved {
             light_mode: false,
             autoplay: true,
             youtube_ids: HashMap::new(),
+            settings: crate::settings::Settings::default(),
+            downloads: HashMap::new(),
+            liked_added: HashMap::new(),
+            album_genres: HashMap::new(),
+            views: HashMap::new(),
+            played_artists: vec![],
+            played_albums: vec![],
+            visits: vec![],
+            profile: Profile::default(),
         }
     }
 }
 
 const STORAGE_KEY: &str = "pulse_state_v1";
+
+/// Local songs and downloaded songs play from a file on this computer.
+fn offline_source(track: &Track, downloaded: Option<&std::path::Path>) -> Option<Result<StreamSource, String>> {
+    if crate::local::is_local(&track.id) {
+        return Some(crate::local::source(track));
+    }
+    let path = downloaded.filter(|p| p.is_file())?;
+    let ext = path.extension().and_then(|x| x.to_str()).unwrap_or("m4a");
+    Some(Ok(StreamSource {
+        url: format!("file://{}", path.display()),
+        headers: vec![],
+        codec: crate::audio::Codec::from_extension(ext).unwrap_or(crate::audio::Codec::Mp4),
+        content_length: None,
+        notice: None,
+    }))
+}
+
+/// Result of checking an imported song again: (its id, the Deezer song if found now,
+/// else a cover from iTunes if there is one).
+type Rematch = (String, Option<Track>, Option<String>);
+
+/// A finished download: the song, and its file and YouTube video id (or what went wrong).
+type DownloadResult = (Track, Result<(std::path::PathBuf, String), String>);
+
+/// Folders with files Pulse can always download again.
+pub fn cache_dirs() -> Vec<std::path::PathBuf> {
+    vec![crate::youtube::tools_dir().join("cache"), crate::settings::data_dir().join("cache")]
+}
+
+/// Total size of the cache folders.
+pub fn cache_size() -> u64 {
+    cache_dirs().iter().map(|d| crate::settings::folder_size(d)).sum()
+}
+
+/// Builds a share link. Pulse knows the exact YouTube video once a song has played;
+/// otherwise (and for Spotify, which Pulse doesn't use) the link opens a search.
+pub fn share_link(t: &Track, target: ShareTarget, youtube_video: Option<&str>) -> String {
+    let query = crate::net::encode(&format!("{} {}", t.artist.name, t.title));
+    match target {
+        ShareTarget::YouTube => match youtube_video {
+            Some(v) => format!("https://www.youtube.com/watch?v={v}"),
+            None => format!("https://www.youtube.com/results?search_query={query}"),
+        },
+        ShareTarget::Spotify => format!("https://open.spotify.com/search/{query}"),
+        ShareTarget::Deezer => match t.deezer_number() {
+            Some(n) => format!("https://www.deezer.com/track/{n}"),
+            None => format!("https://www.deezer.com/search/{query}"),
+        },
+    }
+}
 
 /// YouTube audio links stop working after about six hours; reuse them for less.
 const LINK_LIFETIME: Duration = Duration::from_secs(4 * 3600);
@@ -143,7 +394,12 @@ pub struct App {
     youtube_ids: Arc<Mutex<HashMap<String, String>>>,
     /// Audio links found ahead of time for upcoming songs (song id → link, found at).
     prefetched: Arc<Mutex<HashMap<String, (StreamSource, Instant)>>>,
-    prefetching: Option<String>,
+    /// Songs whose audio link is being found ahead of time (one at a time).
+    prefetching: Arc<Mutex<HashSet<String>>>,
+    /// Songs whose lookup failed ahead of time (not retried in the background).
+    prefetch_failed: HashSet<String>,
+    prefetch_failed_tx: Sender<String>,
+    prefetch_failed_rx: Receiver<String>,
 
     // autoplay
     autoplay_rx: Option<Receiver<Vec<Track>>>,
@@ -160,6 +416,56 @@ pub struct App {
     pub rename_playlist: Option<(usize, String)>,
     /// Playlist waiting for "are you sure?" before it is deleted.
     pub confirm_delete: Option<usize>,
+    /// "View credits" window: the song and its credits once loaded.
+    pub credits: Option<(Track, Option<Result<crate::deezer::Credits, String>>)>,
+    credits_rx: Option<Receiver<Result<crate::deezer::Credits, String>>>,
+    /// Imported songs that weren't found on Deezer, checked again this session.
+    rematch_tried: HashSet<String>,
+    rematch_rx: Option<Receiver<Rematch>>,
+    /// Songs whose page was opened, for songs that aren't on Deezer (drawn from what Pulse has).
+    pub song_tracks: HashMap<String, Track>,
+    /// A song to point out on the page it was opened on (id, when).
+    pub highlight: Option<(String, f64)>,
+    /// Size of the cache folders, measured when Settings opens.
+    pub cache_size: Option<u64>,
+    /// The song last given to the audio engine as "next" (None = not told yet).
+    told_next: Option<Option<String>>,
+
+    // themes
+    pub themes: Vec<crate::themes::Theme>,
+    theme_watch: Option<(notify::RecommendedWatcher, Receiver<()>)>,
+    theme_changed_at: Option<f64>,
+
+    // local files
+    pub local_files: Vec<Track>,
+    pub local_scanning: bool,
+    local_rx: Option<Receiver<Vec<Track>>>,
+
+    // downloads
+    pub download_queue: std::collections::VecDeque<Track>,
+    /// The song downloading now and how far along it is.
+    pub downloading: Option<(Track, Arc<Mutex<f32>>)>,
+    download_rx: Option<Receiver<DownloadResult>>,
+
+    /// Search / genre / sort of the list on screen (reset when the page changes).
+    pub list_view: ListView,
+
+    /// The "Import a playlist" window: the link typed so far, and the running import.
+    pub import_open: bool,
+    pub import_url: String,
+    pub import_running: Option<ImportJob>,
+    /// The profile form, when open (first-launch welcome or "Edit profile").
+    pub profile_editing: Option<crate::ui::ProfileForm>,
+
+    // YouTube view counts
+    views_queue: std::collections::VecDeque<Track>,
+    views_pending: HashSet<String>,
+    /// Songs whose lookup found nothing this session (not asked again until restart).
+    views_failed: HashSet<String>,
+    views_tx: Sender<(String, Option<(String, u64)>)>,
+    views_rx: Receiver<(String, Option<(String, u64)>)>,
+    genre_rx: Option<Receiver<(String, Vec<String>)>>,
+    genre_pending: HashSet<String>,
 }
 
 impl App {
@@ -168,8 +474,11 @@ impl App {
         egui_extras::install_image_loaders(&cc.egui_ctx);
 
         let saved: Saved = cc.storage.and_then(|s| eframe::get_value(s, STORAGE_KEY)).unwrap_or_default();
-        crate::theme::set_light(&cc.egui_ctx, saved.light_mode);
+        let themes = crate::themes::list();
+        crate::i18n::set_language(saved.settings.language);
         let (tx, rx) = channel();
+        let (views_tx, views_rx) = channel();
+        let (prefetch_failed_tx, prefetch_failed_rx) = channel();
         let audio = AudioEngine::new();
         audio.set_volume(saved.volume);
 
@@ -199,7 +508,10 @@ impl App {
             last_title: String::new(),
             youtube_ids,
             prefetched: Arc::new(Mutex::new(HashMap::new())),
-            prefetching: None,
+            prefetching: Arc::new(Mutex::new(HashSet::new())),
+            prefetch_failed: HashSet::new(),
+            prefetch_failed_tx,
+            prefetch_failed_rx,
             autoplay_rx: None,
             autoplay_for: None,
             advance_when_autoplay_arrives: false,
@@ -208,7 +520,53 @@ impl App {
             new_playlist: None,
             rename_playlist: None,
             confirm_delete: None,
+            credits: None,
+            credits_rx: None,
+            cache_size: None,
+            highlight: None,
+            song_tracks: HashMap::new(),
+            rematch_tried: HashSet::new(),
+            rematch_rx: None,
+            told_next: None,
+            themes,
+            theme_watch: crate::themes::watch(&cc.egui_ctx),
+            theme_changed_at: None,
+            local_files: vec![],
+            local_scanning: false,
+            local_rx: None,
+            download_queue: Default::default(),
+            downloading: None,
+            download_rx: None,
+            list_view: ListView::default(),
+            import_open: false,
+            import_url: String::new(),
+            import_running: None,
+            profile_editing: None,
+            views_queue: Default::default(),
+            views_pending: HashSet::new(),
+            views_failed: HashSet::new(),
+            views_tx,
+            views_rx,
+            genre_rx: None,
+            genre_pending: HashSet::new(),
         };
+        // Pulse 0.2 had only a light/dark switch: carry it over to the Default theme.
+        if app.saved.light_mode && app.saved.settings.theme == "Default" && app.saved.settings.scheme.is_empty() {
+            app.saved.settings.scheme = "Light".into();
+        }
+        app.apply_theme(&cc.egui_ctx);
+        // First launch: offer to make a profile.
+        if app.saved.profile.created == 0 && !app.saved.profile.skipped {
+            app.profile_editing = Some(crate::ui::ProfileForm { welcome: true, ..Default::default() });
+        }
+        // Forget downloads whose files were deleted outside Pulse.
+        app.saved.downloads.retain(|_, path| path.is_file());
+        app.audio.set_effects(crate::audio::Effects::from_settings(&app.saved.settings));
+        if app.saved.settings.show_local_files {
+            app.scan_local_files(&cc.egui_ctx);
+        }
+        // The window was created before settings loaded; keep the setting in step with how it opened.
+        app.saved.settings.hardware_acceleration = crate::settings::hardware_acceleration_enabled();
         if let Some(err) = app.audio.device_error.clone() {
             app.toast(&err, &cc.egui_ctx);
         }
@@ -238,6 +596,15 @@ impl App {
             self.back.push(old);
         }
         self.forward.clear();
+        self.list_view = ListView::default();
+        self.highlight = None;
+        // Lookups for the page we left aren't needed any more.
+        for t in self.views_queue.drain(..) {
+            self.views_pending.remove(&t.id);
+        }
+        if self.route == Route::Settings {
+            self.cache_size = None;
+        }
         self.ensure_loaded(ctx);
     }
 
@@ -269,7 +636,10 @@ impl App {
             Route::Playlist(id) => format!("playlist:{id}"),
             Route::Album(id) => format!("album:{id}"),
             Route::Artist(id) => format!("artist:{id}"),
-            Route::Liked | Route::Recent | Route::Queue | Route::Local(_) => return None,
+            Route::Mix(id) => format!("mix:{id}"),
+            Route::Song(id) if deezer::is_deezer_id(id.trim_start_matches("dz:")) => format!("song:{id}"),
+            Route::Song(_) => return None,
+            Route::Liked | Route::Recent | Route::Queue | Route::Local(_) | Route::LocalFiles | Route::Settings | Route::Profile => return None,
         })
     }
 
@@ -290,6 +660,11 @@ impl App {
             Route::Playlist(id) => Box::new(move || deezer::playlist(&id).map(|(info, tracks)| Page::Playlist { info, tracks })),
             Route::Album(id) => Box::new(move || deezer::album(&id).map(|(info, tracks)| Page::Album { info, tracks })),
             Route::Artist(id) => Box::new(move || deezer::artist_page(&id).map(Page::Artist)),
+            Route::Mix(id) => Box::new(move || deezer::mix(&id).map(Page::Tracks)),
+            Route::Song(id) => {
+                let Some(n) = id.strip_prefix("dz:").and_then(|n| n.parse::<u64>().ok()) else { return };
+                Box::new(move || deezer::song_page(n).map(|p| Page::Song(Box::new(p))))
+            }
             _ => return,
         };
         let tx = self.tx.clone();
@@ -312,6 +687,30 @@ impl App {
     /// Called every frame before drawing: receives finished downloads and
     /// moves on to the next song when one ends.
     pub fn tick(&mut self, ctx: &egui::Context) {
+        self.receive_credits();
+        self.receive_import(ctx);
+        self.receive_rematches();
+        self.run_views(ctx);
+        while let Ok(id) = self.prefetch_failed_rx.try_recv() {
+            self.prefetch_failed.insert(id);
+        }
+        self.reload_themes_if_changed(ctx);
+        if let Some((_, at)) = &self.highlight {
+            let age = ctx.input(|i| i.time) - at;
+            if age > 4.0 {
+                self.highlight = None;
+            } else {
+                ctx.request_repaint_after(Duration::from_millis(200));
+            }
+        }
+        self.run_downloads(ctx);
+        if let Some(rx) = &self.local_rx
+            && let Ok(list) = rx.try_recv()
+        {
+            self.local_files = list;
+            self.local_scanning = false;
+            self.local_rx = None;
+        }
         while let Ok((key, result)) = self.rx.try_recv() {
             let value = match result {
                 Ok(page) => Remote::Ready(Box::new(page)),
@@ -331,6 +730,12 @@ impl App {
             }
         }
 
+        if let Some(id) = self.audio.take_advanced() {
+            self.advanced_to(&id, ctx);
+        }
+        if !self.needs_load && self.current.is_some() {
+            self.tell_engine_next();
+        }
         match self.audio.load_state() {
             LoadState::Failed(e) if self.current.is_some() && !self.needs_load => {
                 self.failures_in_row += 1;
@@ -419,15 +824,61 @@ impl App {
 
     fn start_current(&mut self, ctx: &egui::Context) {
         let Some(track) = self.queue.get(self.queue_pos).cloned() else { return };
-        self.audio.load(self.resolver(&track), false, ctx.clone());
+        self.audio.load(&track.id, Duration::from_secs(track.duration as u64), self.resolver(&track), false, ctx.clone());
         self.audio.set_volume(self.saved.volume);
+        self.told_next = None;
         self.needs_load = false;
         self.seek_preview = None;
         // Recently played: newest first, no duplicates, max 50.
         self.saved.recent.retain(|t| t.id != track.id);
         self.saved.recent.insert(0, track.clone());
         self.saved.recent.truncate(50);
+        self.record_play(&track);
         self.current = Some(track);
+    }
+
+    /// The song that plays after the current one: its queue position and the song.
+    fn upcoming(&self) -> Option<(usize, Track)> {
+        match self.saved.repeat {
+            Repeat::One => self.queue.get(self.queue_pos).map(|t| (self.queue_pos, t.clone())),
+            _ if self.queue_pos + 1 < self.queue.len() => Some((self.queue_pos + 1, self.queue[self.queue_pos + 1].clone())),
+            Repeat::All if !self.queue.is_empty() => Some((0, self.queue[0].clone())),
+            _ => None,
+        }
+    }
+
+    /// Keeps the audio engine told which song is next (for gapless, crossfade, automix).
+    fn tell_engine_next(&mut self) {
+        let next = self.upcoming().map(|(_, t)| t);
+        let id = next.as_ref().map(|t| t.id.clone());
+        if self.told_next.as_ref() == Some(&id) {
+            return;
+        }
+        self.told_next = Some(id);
+        let req = next.map(|t| (t.id.clone(), Duration::from_secs(t.duration as u64), self.resolver(&t)));
+        self.audio.set_next(req);
+    }
+
+    /// The engine moved on to the next song by itself: catch the queue up.
+    fn advanced_to(&mut self, id: &str, ctx: &egui::Context) {
+        let pos = match self.upcoming() {
+            Some((i, t)) if t.id == id => i,
+            _ => match self.queue.iter().skip(self.queue_pos).position(|t| t.id == id) {
+                Some(i) => self.queue_pos + i,
+                None => return,
+            },
+        };
+        self.queue_pos = pos;
+        let track = self.queue[pos].clone();
+        self.told_next = None;
+        self.needs_load = false;
+        self.seek_preview = None;
+        self.saved.recent.retain(|t| t.id != track.id);
+        self.saved.recent.insert(0, track.clone());
+        self.saved.recent.truncate(50);
+        self.record_play(&track);
+        self.current = Some(track);
+        self.maybe_fetch_autoplay(ctx);
     }
 
     pub fn toggle_play(&mut self, ctx: &egui::Context) {
@@ -550,8 +1001,538 @@ impl App {
     }
 
     pub fn toggle_theme(&mut self, ctx: &egui::Context) {
-        self.saved.light_mode = !self.saved.light_mode;
-        crate::theme::set_light(ctx, self.saved.light_mode);
+        // Switch to the theme's other scheme: dark ↔ light.
+        let Some(t) = self.current_theme() else { return };
+        let cur = t.scheme_index(&self.saved.settings.scheme);
+        let want_light = !crate::themes::is_light(&t.schemes[cur].palette);
+        if let Some(s) = t.schemes.iter().find(|s| crate::themes::is_light(&s.palette) == want_light) {
+            self.saved.settings.scheme = s.name.clone();
+            self.saved.light_mode = want_light;
+        }
+        self.apply_theme(ctx);
+    }
+
+    pub fn current_theme(&self) -> Option<&crate::themes::Theme> {
+        let name = &self.saved.settings.theme;
+        self.themes.iter().find(|t| t.name.eq_ignore_ascii_case(name)).or_else(|| self.themes.first())
+    }
+
+    /// True if the current theme has both a dark and a light scheme.
+    pub fn theme_has_light_and_dark(&self) -> bool {
+        self.current_theme().is_some_and(|t| {
+            let light = t.schemes.iter().filter(|s| crate::themes::is_light(&s.palette)).count();
+            light > 0 && light < t.schemes.len()
+        })
+    }
+
+    /// Applies the chosen theme, scheme and high-contrast setting.
+    pub fn apply_theme(&mut self, ctx: &egui::Context) {
+        let Some(t) = self.current_theme() else { return };
+        let active = t.active(t.scheme_index(&self.saved.settings.scheme), self.saved.settings.high_contrast);
+        self.saved.light_mode = crate::themes::is_light(&active.palette);
+        crate::theme::set_active(ctx, active);
+    }
+
+    /// Reloads themes after a theme file changed (a moment after the last change).
+    fn reload_themes_if_changed(&mut self, ctx: &egui::Context) {
+        let now = ctx.input(|i| i.time);
+        if let Some((_, rx)) = &self.theme_watch {
+            let mut changed = false;
+            while rx.try_recv().is_ok() {
+                changed = true;
+            }
+            if changed {
+                self.theme_changed_at = Some(now);
+            }
+        }
+        if let Some(at) = self.theme_changed_at {
+            if now - at > 0.25 {
+                self.theme_changed_at = None;
+                self.themes = crate::themes::list();
+                self.apply_theme(ctx);
+            } else {
+                ctx.request_repaint_after(Duration::from_millis(100));
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------- settings
+
+    /// Puts changed settings into effect. `before` is how they were.
+    pub fn apply_settings(&mut self, before: &crate::settings::Settings, ctx: &egui::Context) {
+        let s = self.saved.settings.clone();
+        crate::i18n::set_language(s.language);
+        if s.high_contrast != before.high_contrast || s.theme != before.theme || s.scheme != before.scheme {
+            self.apply_theme(ctx);
+        }
+        if s.hardware_acceleration != before.hardware_acceleration {
+            crate::settings::set_hardware_acceleration(s.hardware_acceleration);
+            self.toast(crate::i18n::tr("Restart Pulse to apply this change."), ctx);
+        }
+        if s.stream_quality != before.stream_quality {
+            // Links found ahead of time were for the old quality.
+            self.prefetched.lock().unwrap().clear();
+        }
+        self.audio.set_effects(crate::audio::Effects::from_settings(&s));
+        if s.show_local_files && !before.show_local_files {
+            self.scan_local_files(ctx);
+        }
+        if !s.show_local_files && self.route == Route::LocalFiles {
+            self.navigate(Route::Home, ctx);
+        }
+    }
+
+    /// Looks up genres for the albums in `tracks` that aren't known yet (in the background).
+    pub fn ensure_genres(&mut self, tracks: &[Track], ctx: &egui::Context) {
+        if let Some(rx) = &self.genre_rx {
+            while let Ok((id, g)) = rx.try_recv() {
+                self.genre_pending.remove(&id);
+                self.saved.album_genres.insert(id, g);
+            }
+        }
+        if !self.genre_pending.is_empty() {
+            return; // one batch at a time
+        }
+        let missing: Vec<String> = tracks
+            .iter()
+            .filter_map(|t| t.album.as_ref())
+            .map(|a| a.id.clone())
+            .filter(|id| deezer::is_deezer_id(id) && !self.saved.album_genres.contains_key(id))
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .take(40)
+            .collect();
+        if missing.is_empty() {
+            return;
+        }
+        self.genre_pending.extend(missing.iter().cloned());
+        let (tx, rx) = channel();
+        self.genre_rx = Some(rx);
+        let ctx = ctx.clone();
+        std::thread::spawn(move || {
+            for id in missing {
+                // Albums without genres are remembered as empty, so they aren't asked for again.
+                let g = deezer::album_genres(&id).unwrap_or_default();
+                if tx.send((id, g)).is_err() {
+                    return;
+                }
+                ctx.request_repaint();
+                // Stay well under Deezer's limit of 50 requests per 5 seconds.
+                std::thread::sleep(Duration::from_millis(150));
+            }
+        });
+    }
+
+    /// Copies a picture into Pulse's data folder and makes it the playlist's cover.
+    #[cfg_attr(not(windows), allow(dead_code))] // the picture picker is Windows-only
+    pub fn set_playlist_cover(&mut self, i: usize, picture: &std::path::Path) -> Result<(), String> {
+        let dir = crate::settings::data_dir().join("covers");
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        let ext = picture.extension().and_then(|x| x.to_str()).unwrap_or("jpg").to_lowercase();
+        // A new name each time, so the old picture isn't shown from memory.
+        let dest = dir.join(format!("playlist-{}-{}.{ext}", i, now_unix()));
+        std::fs::copy(picture, &dest).map_err(|e| format!("Couldn't copy the picture ({e})"))?;
+        if let Some(old) = self.saved.playlists.get_mut(i).and_then(|p| p.cover.replace(dest)) {
+            let _ = std::fs::remove_file(old);
+        }
+        Ok(())
+    }
+
+    pub fn remove_playlist_cover(&mut self, i: usize) {
+        if let Some(old) = self.saved.playlists.get_mut(i).and_then(|p| p.cover.take()) {
+            let _ = std::fs::remove_file(old);
+        }
+    }
+
+    /// Saves the profile form. A new picture is copied into Pulse's data folder.
+    pub fn save_profile(&mut self, f: &crate::ui::ProfileForm) -> Result<(), String> {
+        let dir = crate::settings::data_dir().join("covers");
+        let mut picture = f.picture.clone();
+        if let Some(src) = &f.picture
+            && !src.starts_with(&dir)
+        {
+            std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+            let ext = src.extension().and_then(|x| x.to_str()).unwrap_or("png").to_lowercase();
+            let dest = dir.join(format!("profile-{}.{ext}", now_unix()));
+            std::fs::copy(src, &dest).map_err(|e| format!("Couldn't copy the picture ({e})"))?;
+            if let Some(old) = self.saved.profile.picture.take() {
+                let _ = std::fs::remove_file(old);
+            }
+            picture = Some(dest);
+        }
+        let p = &mut self.saved.profile;
+        p.name = f.name.trim().to_string();
+        p.bio = f.bio.trim().to_string();
+        p.picture = picture;
+        if p.created == 0 {
+            p.created = now_unix();
+        }
+        Ok(())
+    }
+
+    /// Copies a share code for playlist `i` to the clipboard.
+    pub fn share_playlist(&mut self, i: usize, ctx: &egui::Context) {
+        let Some(p) = self.saved.playlists.get(i) else { return };
+        let code = crate::share::encode(&p.name, &self.saved.profile.name, &p.tracks);
+        ctx.copy_text(code);
+        self.toast("Share code copied. Friends paste it into Import playlist.", ctx);
+    }
+
+    pub fn remove_from_playlist(&mut self, i: usize, id: &str) {
+        if let Some(p) = self.saved.playlists.get_mut(i) {
+            p.tracks.retain(|t| t.id != id);
+            p.added.remove(id);
+        }
+    }
+
+    /// Remembers the artist and album of a song you played (for the home page).
+    fn record_play(&mut self, t: &Track) {
+        let now = now_unix();
+        if t.has_artist_page() {
+            let image = t.artist.picture.clone().or_else(|| t.art_big().map(str::to_owned));
+            let v = Visit { place: Place::Artist(t.artist.id.clone()), title: t.artist.name.clone(), subtitle: "Artist".into(), image, round: true, count: 0, last: now };
+            bump(&mut self.saved.played_artists, v, 60);
+        }
+        if let Some(al) = t.album.as_ref().filter(|a| deezer::is_deezer_id(&a.id)) {
+            let v = Visit {
+                place: Place::Album(al.id.clone()),
+                title: al.title.clone(),
+                subtitle: t.artist.name.clone(),
+                image: t.art_big().map(str::to_owned),
+                round: false,
+                count: 0,
+                last: now,
+            };
+            bump(&mut self.saved.played_albums, v, 30);
+        }
+    }
+
+    /// Remembers a page you opened (for "Recents"). Cheap to call every frame.
+    pub fn note_visit(&mut self, place: Place, title: &str, subtitle: &str, image: Option<&str>, round: bool) {
+        if self.saved.visits.first().is_some_and(|v| v.place == place) {
+            return;
+        }
+        let v = Visit { place, title: title.to_string(), subtitle: subtitle.to_string(), image: image.map(str::to_owned), round, count: 0, last: now_unix() };
+        bump(&mut self.saved.visits, v, 20);
+    }
+
+    /// The page for a remembered place.
+    pub fn route_for(&self, place: &Place) -> Option<Route> {
+        Some(match place {
+            Place::Album(id) => Route::Album(id.clone()),
+            Place::Artist(id) => Route::Artist(id.clone()),
+            Place::Playlist(id) => Route::Playlist(id.clone()),
+            Place::Yours(name) => Route::Local(self.saved.playlists.iter().position(|p| p.name == *name)?),
+            Place::Liked => Route::Liked,
+            Place::Mix(id) => Route::Mix(id.clone()),
+        })
+    }
+
+    /// Changes every saved copy of song `id` (playlists, likes, history, queue).
+    fn update_track(&mut self, id: &str, mut f: impl FnMut(&mut Track)) {
+        let lists = self.saved.playlists.iter_mut().flat_map(|p| p.tracks.iter_mut());
+        let others = self.saved.liked.iter_mut().chain(self.saved.recent.iter_mut()).chain(self.queue.iter_mut()).chain(self.current.iter_mut());
+        for t in lists.chain(others).filter(|t| t.id == id) {
+            f(t);
+        }
+    }
+
+    /// Looks again for imported songs that weren't found on Deezer (e.g. because Deezer
+    /// was busy during the import), and fixes their covers. One batch at a time.
+    pub fn rematch_imports(&mut self, tracks: &[Track], ctx: &egui::Context) {
+        if self.rematch_rx.is_some() {
+            return;
+        }
+        let todo: Vec<Track> = tracks.iter().filter(|t| t.id.starts_with("imp:") && !self.rematch_tried.contains(&t.id)).take(25).cloned().collect();
+        if todo.is_empty() {
+            return;
+        }
+        self.rematch_tried.extend(todo.iter().map(|t| t.id.clone()));
+        let (tx, rx) = channel();
+        self.rematch_rx = Some(rx);
+        let ctx = ctx.clone();
+        std::thread::spawn(move || {
+            for t in todo {
+                let mut found = deezer::find_track(&t.artist.name, &t.title, t.duration).ok().flatten();
+                if found.is_none() {
+                    found = deezer::find_track(&t.title, &t.artist.name, t.duration).ok().flatten();
+                }
+                let cover = if found.is_none() { crate::itunes::cover(&t.artist.name, &t.title) } else { None };
+                if tx.send((t.id, found, cover)).is_err() {
+                    return;
+                }
+                ctx.request_repaint();
+                std::thread::sleep(Duration::from_millis(250));
+            }
+        });
+    }
+
+    fn receive_rematches(&mut self) {
+        let Some(rx) = &self.rematch_rx else { return };
+        let mut results = vec![];
+        let mut finished = false;
+        loop {
+            match rx.try_recv() {
+                Ok(r) => results.push(r),
+                Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    finished = true;
+                    break;
+                }
+            }
+        }
+        if finished {
+            self.rematch_rx = None;
+        }
+        for (old, found, cover) in results {
+            match found {
+                Some(new) => {
+                    // Swap in the Deezer song; keep its YouTube video and "date added".
+                    if let Some(v) = self.youtube_ids.lock().unwrap().get(&old).cloned() {
+                        self.youtube_ids.lock().unwrap().insert(new.id.clone(), v);
+                    }
+                    for p in &mut self.saved.playlists {
+                        if let Some(when) = p.added.remove(&old) {
+                            p.added.insert(new.id.clone(), when);
+                        }
+                    }
+                    let new2 = new.clone();
+                    self.update_track(&old, |t| *t = new2.clone());
+                    if self.liked_ids.remove(&old) {
+                        self.liked_ids.insert(new.id.clone());
+                    }
+                }
+                None => {
+                    // Songs imported from Spotify before this fix carry the playlist's cover.
+                    let spotify = old.starts_with("imp:spotify:");
+                    self.update_track(&old, |t| {
+                        if cover.is_some() || spotify {
+                            t.cover_small = cover.clone();
+                            t.cover_big = cover.clone();
+                        }
+                    });
+                }
+            }
+        }
+    }
+
+    /// Asks for YouTube view counts of songs that don't have a recent one.
+    pub fn ensure_views(&mut self, tracks: &[Track]) {
+        const WEEK: u64 = 7 * 86_400;
+        let now = now_unix();
+        for t in tracks.iter().take(60) {
+            if crate::local::is_local(&t.id) || self.views_pending.contains(&t.id) || self.views_failed.contains(&t.id) {
+                continue;
+            }
+            if self.saved.views.get(&t.id).is_some_and(|(_, at)| now.saturating_sub(*at) < WEEK) {
+                continue;
+            }
+            self.views_pending.insert(t.id.clone());
+            self.views_queue.push_back(t.clone());
+        }
+    }
+
+    /// Looks up view counts, three songs at a time (called every frame).
+    fn run_views(&mut self, ctx: &egui::Context) {
+        while let Ok((id, found)) = self.views_rx.try_recv() {
+            self.views_pending.remove(&id);
+            if found.is_none() && crate::youtube::tools_ready() {
+                self.views_failed.insert(id.clone());
+            }
+            if let Some((video, n)) = found {
+                self.saved.views.insert(id.clone(), (n, now_unix()));
+                // Songs without any cover get their video's picture.
+                let thumb = crate::import::youtube_thumb(&video);
+                self.update_track(&id, |t| {
+                    if t.cover_small.is_none() {
+                        t.cover_small = Some(thumb.clone());
+                        t.cover_big = Some(thumb.clone());
+                    }
+                });
+                // Remember the video too, so playing the song skips the search.
+                self.youtube_ids.lock().unwrap().entry(id).or_insert(video);
+            }
+        }
+        let running = self.views_pending.len() - self.views_queue.len();
+        if running >= 3 || !crate::youtube::tools_ready() {
+            return;
+        }
+        for _ in running..3 {
+            let Some(t) = self.views_queue.pop_front() else { break };
+            let tx = self.views_tx.clone();
+            let ctx = ctx.clone();
+            std::thread::spawn(move || {
+                let r = crate::youtube::views(&t).ok().flatten();
+                let _ = tx.send((t.id, r));
+                ctx.request_repaint();
+            });
+        }
+    }
+
+    /// Starts importing the playlist at `import_url`.
+    pub fn start_import(&mut self, ctx: &egui::Context) {
+        let url = self.import_url.trim().to_string();
+        if let Err(e) = crate::import::detect(&url) {
+            self.toast(&e, ctx);
+            return;
+        }
+        let progress = Arc::new(Mutex::new(crate::import::Progress::default()));
+        let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (tx, rx) = channel();
+        let (p, c, ctx2) = (progress.clone(), cancel.clone(), ctx.clone());
+        std::thread::spawn(move || {
+            // Keep the window updating while the import runs.
+            let ticker = {
+                let ctx = ctx2.clone();
+                let c = c.clone();
+                std::thread::spawn(move || {
+                    while !c.load(std::sync::atomic::Ordering::Relaxed) {
+                        ctx.request_repaint();
+                        std::thread::sleep(Duration::from_millis(300));
+                    }
+                })
+            };
+            let r = crate::import::run(&url, &p, &c);
+            let _ = tx.send(r);
+            c.store(true, std::sync::atomic::Ordering::Relaxed);
+            let _ = ticker.join();
+            ctx2.request_repaint();
+        });
+        self.import_running = Some(ImportJob { progress, cancel, rx });
+    }
+
+    pub fn cancel_import(&mut self) {
+        if let Some(job) = self.import_running.take() {
+            job.cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+
+    /// Turns a finished import into a new playlist (called every frame).
+    fn receive_import(&mut self, ctx: &egui::Context) {
+        let Some(job) = &self.import_running else { return };
+        let Ok(result) = job.rx.try_recv() else { return };
+        self.import_running = None;
+        match result {
+            Ok(imp) => {
+                let mut name = imp.name.trim().to_string();
+                if name.is_empty() {
+                    name = "Imported playlist".into();
+                }
+                if self.saved.playlists.iter().any(|p| p.name == name) {
+                    name = format!("{name} (imported)");
+                }
+                let now = now_unix();
+                let mut ids = self.youtube_ids.lock().unwrap();
+                for (t, video) in &imp.tracks {
+                    if let Some(v) = video {
+                        ids.insert(t.id.clone(), v.clone());
+                    }
+                }
+                drop(ids);
+                let total = imp.tracks.len();
+                let tracks: Vec<Track> = imp.tracks.into_iter().map(|(t, _)| t).collect();
+                let added = tracks.iter().map(|t| (t.id.clone(), now)).collect();
+                self.saved.playlists.push(LocalPlaylist { name: name.clone(), tracks, cover: None, added });
+                let i = self.saved.playlists.len() - 1;
+                self.import_open = false;
+                self.import_url.clear();
+                self.navigate(Route::Local(i), ctx);
+                let extra = if imp.matched < total { format!(" ({} not found on Deezer, they'll still play)", total - imp.matched) } else { String::new() };
+                let from = imp.owner.map(|o| format!(" from {o}")).unwrap_or_default();
+                self.toast(&format!("Imported “{name}”{from}: {total} songs{extra}"), ctx);
+            }
+            Err(e) => self.toast(&e, ctx),
+        }
+    }
+
+    /// Reads the Music folder in the background.
+    pub fn scan_local_files(&mut self, ctx: &egui::Context) {
+        let Some(dir) = crate::settings::music_dir() else { return };
+        let (tx, rx) = channel();
+        self.local_rx = Some(rx);
+        self.local_scanning = true;
+        let ctx = ctx.clone();
+        std::thread::spawn(move || {
+            let _ = tx.send(crate::local::scan(&dir));
+            ctx.request_repaint();
+        });
+    }
+
+    /// Adds songs to the download list (skipping ones already downloaded or queued).
+    pub fn download(&mut self, tracks: &[Track], ctx: &egui::Context) {
+        let mut added = 0;
+        for t in tracks {
+            let busy = self.downloading.as_ref().is_some_and(|(d, _)| d.id == t.id);
+            if crate::local::is_local(&t.id) || busy || self.saved.downloads.contains_key(&t.id) || self.download_queue.iter().any(|q| q.id == t.id) {
+                continue;
+            }
+            self.download_queue.push_back(t.clone());
+            added += 1;
+        }
+        if added > 0 {
+            let msg = if added == 1 { "Downloading 1 song".to_string() } else { format!("Downloading {added} songs") };
+            self.toast(&msg, ctx);
+        }
+    }
+
+    pub fn remove_download(&mut self, t: &Track, ctx: &egui::Context) {
+        self.download_queue.retain(|q| q.id != t.id);
+        if let Some(path) = self.saved.downloads.remove(&t.id) {
+            let _ = std::fs::remove_file(path);
+            self.toast(crate::i18n::tr("Remove download"), ctx);
+        }
+    }
+
+    pub fn is_downloaded(&self, id: &str) -> bool {
+        self.saved.downloads.contains_key(id)
+    }
+
+    /// Runs one download at a time and records finished ones (called every frame).
+    fn run_downloads(&mut self, ctx: &egui::Context) {
+        if let Some(rx) = &self.download_rx
+            && let Ok((t, result)) = rx.try_recv()
+        {
+            self.download_rx = None;
+            self.downloading = None;
+            match result {
+                Ok((path, video)) => {
+                    self.youtube_ids.lock().unwrap().insert(t.id.clone(), video);
+                    self.saved.downloads.insert(t.id, path);
+                }
+                Err(e) => self.toast(&format!("Couldn't download “{}”: {e}", t.title), ctx),
+            }
+        }
+        if self.downloading.is_none()
+            && let Some(t) = self.download_queue.pop_front()
+        {
+            let progress = Arc::new(Mutex::new(0.0));
+            let (tx, rx) = channel();
+            self.download_rx = Some(rx);
+            self.downloading = Some((t.clone(), progress.clone()));
+            let known = self.youtube_ids.lock().unwrap().get(&t.id).cloned();
+            let quality = self.saved.settings.download_quality;
+            let dir = self.saved.settings.offline_dir();
+            let ctx = ctx.clone();
+            std::thread::spawn(move || {
+                let r = crate::downloads::download(&t, known, quality, &dir, &|p| {
+                    *progress.lock().unwrap() = p;
+                    ctx.request_repaint_after(Duration::from_millis(200));
+                });
+                let _ = tx.send((t, r));
+                ctx.request_repaint();
+            });
+        }
+    }
+
+    /// Deletes temporary files: yt-dlp's cache, saved artwork and found audio links.
+    pub fn clear_cache(&mut self, ctx: &egui::Context) {
+        for dir in cache_dirs() {
+            let _ = std::fs::remove_dir_all(dir);
+        }
+        ctx.forget_all_images();
+        self.prefetched.lock().unwrap().clear();
+        self.cache_size = None;
+        self.toast(crate::i18n::tr("Cache cleared"), ctx);
     }
 
     // ---------------------------------------------------------------- library
@@ -559,10 +1540,12 @@ impl App {
     pub fn toggle_like(&mut self, t: &Track, ctx: &egui::Context) {
         if self.liked_ids.remove(&t.id) {
             self.saved.liked.retain(|x| x.id != t.id);
+            self.saved.liked_added.remove(&t.id);
             self.toast("Removed from Liked Songs", ctx);
         } else {
             self.liked_ids.insert(t.id.clone());
             self.saved.liked.insert(0, t.clone());
+            self.saved.liked_added.insert(t.id.clone(), now_unix());
             self.toast("Saved to Liked Songs", ctx);
         }
     }
@@ -573,7 +1556,8 @@ impl App {
         } else {
             name.trim().to_string()
         };
-        self.saved.playlists.push(LocalPlaylist { name: name.clone(), tracks: first.into_iter().collect() });
+        let added = first.iter().map(|t| (t.id.clone(), now_unix())).collect();
+        self.saved.playlists.push(LocalPlaylist { name: name.clone(), tracks: first.into_iter().collect(), cover: None, added });
         self.toast(&format!("Created “{name}”"), ctx);
         self.navigate(Route::Local(self.saved.playlists.len() - 1), ctx);
     }
@@ -628,14 +1612,19 @@ impl App {
         let track = track.clone();
         let ids = self.youtube_ids.clone();
         let prefetched = self.prefetched.clone();
+        let offline = self.saved.downloads.get(&track.id).cloned();
+        let quality = self.saved.settings.stream_quality;
         Box::new(move |status| {
+            if let Some(src) = offline_source(&track, offline.as_deref()) {
+                return src;
+            }
             if let Some((src, at)) = prefetched.lock().unwrap().remove(&track.id)
                 && at.elapsed() < LINK_LIFETIME
             {
                 return Ok(src);
             }
             let known = ids.lock().unwrap().get(&track.id).cloned();
-            match crate::youtube::resolve(&track, known, status) {
+            match crate::youtube::resolve(&track, known, quality, status) {
                 Ok((src, video)) => {
                     ids.lock().unwrap().insert(track.id.clone(), video);
                     Ok(src)
@@ -650,25 +1639,41 @@ impl App {
     }
 
     /// Finds the next song's audio link in the background, so it starts instantly.
+    /// Finds the next two songs' audio links in the background, one at a time,
+    /// so pressing Next (or the song ending) starts them right away.
     fn prefetch_next(&mut self) {
-        let Some(next) = self.queue.get(self.queue_pos + 1).cloned() else { return };
-        if self.prefetching.as_deref() == Some(next.id.as_str()) {
-            return;
+        if !self.prefetching.lock().unwrap().is_empty() {
+            return; // one lookup at a time keeps it light
         }
-        self.prefetching = Some(next.id.clone());
-        if self.prefetched.lock().unwrap().contains_key(&next.id) {
+        let upcoming: Vec<Track> = self.queue.iter().skip(self.queue_pos + 1).take(2).cloned().collect();
+        let Some(next) = upcoming.into_iter().find(|t| {
+            !self.prefetched.lock().unwrap().get(&t.id).is_some_and(|(_, at)| at.elapsed() < LINK_LIFETIME)
+                && !crate::local::is_local(&t.id)
+                && !self.saved.downloads.contains_key(&t.id)
+                && !self.prefetch_failed.contains(&t.id)
+        }) else {
             return;
-        }
+        };
+        self.prefetching.lock().unwrap().insert(next.id.clone());
         let ids = self.youtube_ids.clone();
         let prefetched = self.prefetched.clone();
+        let busy = self.prefetching.clone();
+        let failed = self.prefetch_failed_tx.clone();
+        let quality = self.saved.settings.stream_quality;
         std::thread::spawn(move || {
             let known = ids.lock().unwrap().get(&next.id).cloned();
-            if let Ok((src, video)) = crate::youtube::resolve(&next, known, &|_| {}) {
-                ids.lock().unwrap().insert(next.id.clone(), video);
-                let mut p = prefetched.lock().unwrap();
-                p.retain(|_, (_, at)| at.elapsed() < LINK_LIFETIME);
-                p.insert(next.id.clone(), (src, Instant::now()));
+            match crate::youtube::resolve(&next, known, quality, &|_| {}) {
+                Ok((src, video)) => {
+                    ids.lock().unwrap().insert(next.id.clone(), video);
+                    let mut p = prefetched.lock().unwrap();
+                    p.retain(|_, (_, at)| at.elapsed() < LINK_LIFETIME);
+                    p.insert(next.id.clone(), (src, Instant::now()));
+                }
+                Err(_) => {
+                    let _ = failed.send(next.id.clone());
+                }
             }
+            busy.lock().unwrap().remove(&next.id);
         });
     }
 
@@ -683,6 +1688,9 @@ impl App {
             return;
         }
         let Some(cur) = self.current.clone() else { return };
+        if !cur.has_artist_page() {
+            return; // similar songs come from Deezer; local files have no Deezer artist
+        }
         if self.autoplay_for.as_deref() == Some(cur.id.as_str()) {
             return;
         }
@@ -727,6 +1735,47 @@ impl App {
     }
 
     /// Applies what the user did in a track list. `list` is the list that was shown.
+    /// Opens a song's own page (like Spotify's).
+    pub fn open_song(&mut self, t: &Track, ctx: &egui::Context) {
+        self.song_tracks.insert(t.id.clone(), t.clone());
+        self.navigate(Route::Song(t.id.clone()), ctx);
+        self.highlight = Some((t.id.clone(), ctx.input(|i| i.time)));
+    }
+
+    /// Opens the credits window and loads the credits in the background.
+    pub fn show_credits(&mut self, t: Track, ctx: &egui::Context) {
+        let (tx, rx) = channel();
+        let id = t.deezer_number();
+        let ctx2 = ctx.clone();
+        std::thread::spawn(move || {
+            let r = match id {
+                Some(id) => crate::deezer::credits(id),
+                None => Err("Credits are only available for songs from the catalog.".into()),
+            };
+            let _ = tx.send(r);
+            ctx2.request_repaint();
+        });
+        self.credits = Some((t, None));
+        self.credits_rx = Some(rx);
+    }
+
+    /// Checks whether credits finished loading (called every frame).
+    pub fn receive_credits(&mut self) {
+        if let Some(rx) = &self.credits_rx
+            && let Ok(r) = rx.try_recv()
+        {
+            if let Some((_, slot)) = &mut self.credits {
+                *slot = Some(r);
+            }
+            self.credits_rx = None;
+        }
+    }
+
+    /// A link to `t` on YouTube, Spotify or Deezer, for the Share menu.
+    pub fn share_link(&self, t: &Track, target: ShareTarget) -> String {
+        share_link(t, target, self.youtube_ids.lock().unwrap().get(&t.id).map(String::as_str))
+    }
+
     pub fn handle_events(&mut self, events: Vec<TrackEvent>, list: &[Track], ctx: &egui::Context) {
         for ev in events {
             match ev {
@@ -769,6 +1818,7 @@ impl App {
                             let msg = format!("Already in “{}”", p.name);
                             self.toast(&msg, ctx);
                         } else {
+                            p.added.insert(t.id.clone(), now_unix());
                             p.tracks.push(t);
                             let msg = format!("Added to “{}”", p.name);
                             self.toast(&msg, ctx);
@@ -797,6 +1847,15 @@ impl App {
                 }
                 TrackEvent::OpenArtist(t) => self.open_artist(&t, ctx),
                 TrackEvent::OpenAlbum(id) => self.navigate(Route::Album(id), ctx),
+                TrackEvent::ShowCredits(t) => self.show_credits(t, ctx),
+                TrackEvent::OpenSong(t) => self.open_song(&t, ctx),
+                TrackEvent::Download(t) => self.download(&[t], ctx),
+                TrackEvent::RemoveDownload(t) => self.remove_download(&t, ctx),
+                TrackEvent::Share(t, target) => {
+                    let link = self.share_link(&t, target);
+                    ctx.copy_text(link);
+                    self.toast("Link copied", ctx);
+                }
             }
         }
     }
@@ -815,5 +1874,73 @@ impl eframe::App for App {
 
     fn auto_save_interval(&self) -> Duration {
         Duration::from_secs(15)
+    }
+}
+
+#[cfg(test)]
+mod share_tests {
+    use super::*;
+
+    fn song(id: &str, title: &str, artist: &str, album: &str, secs: u32) -> Track {
+        Track {
+            id: id.into(),
+            title: title.into(),
+            duration: secs,
+            artist: deezer::ArtistRef { name: artist.into(), ..Default::default() },
+            album: Some(deezer::AlbumRef { id: album.into(), title: album.into() }),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn remembers_what_you_play() {
+        let v = |id: &str, last: u64| Visit { place: Place::Artist(id.into()), title: id.into(), subtitle: String::new(), image: None, round: true, count: 0, last };
+        let mut list = vec![];
+        bump(&mut list, v("a", 100), 3);
+        bump(&mut list, v("b", 100), 3);
+        bump(&mut list, v("a", 100), 3);
+        assert_eq!(list[0].place, Place::Artist("a".into()));
+        assert_eq!(list[0].count, 2);
+        bump(&mut list, v("c", 100), 3);
+        bump(&mut list, v("d", 100), 3);
+        assert_eq!(list.len(), 3, "keeps at most 3");
+        // Played often long ago vs. a little recently.
+        let mut old = v("old", 0);
+        old.count = 10;
+        let mut new = v("new", 365 * 86_400);
+        new.count = 3;
+        let both = [old, new];
+        let top = top_artists(&both, 365 * 86_400);
+        assert_eq!(top[0].title, "new");
+    }
+
+    #[test]
+    fn playlist_search_genre_and_sort() {
+        let list = vec![song("a", "Zebra", "Bee", "1", 200), song("b", "Apple", "Cat", "2", 100), song("c", "Mango", "Ant", "1", 300)];
+        let genres = HashMap::from([("1".to_string(), vec!["Rap".to_string()]), ("2".to_string(), vec!["Pop".to_string()])]);
+        let added = HashMap::from([("a".to_string(), 10), ("b".to_string(), 30), ("c".to_string(), 20)]);
+        let ids = |v: Vec<Track>| v.into_iter().map(|t| t.id).collect::<Vec<_>>();
+        let mut view = ListView::default();
+        assert_eq!(ids(apply_view(&list, &view, Some(&added), &genres)), ["a", "b", "c"]);
+        view.sort = SortBy::Title;
+        assert_eq!(ids(apply_view(&list, &view, Some(&added), &genres)), ["b", "c", "a"]);
+        view.sort = SortBy::RecentlyAdded;
+        assert_eq!(ids(apply_view(&list, &view, Some(&added), &genres)), ["b", "c", "a"]);
+        view.sort = SortBy::Artist;
+        assert_eq!(ids(apply_view(&list, &view, Some(&added), &genres)), ["c", "a", "b"]);
+        view.genre = Some("Rap".into());
+        assert_eq!(ids(apply_view(&list, &view, Some(&added), &genres)), ["c", "a"]);
+        view.search = "zeb".into();
+        assert_eq!(ids(apply_view(&list, &view, Some(&added), &genres)), ["a"]);
+        assert_eq!(genre_chips(&list, &genres), ["Rap", "Pop"]);
+    }
+
+    #[test]
+    fn share_links_point_to_the_right_place() {
+        let t = Track { id: "dz:123".into(), title: "Song A".into(), ..Default::default() };
+        assert_eq!(share_link(&t, ShareTarget::YouTube, Some("abcdefghijk")), "https://www.youtube.com/watch?v=abcdefghijk");
+        assert!(share_link(&t, ShareTarget::YouTube, None).starts_with("https://www.youtube.com/results?search_query="));
+        assert!(share_link(&t, ShareTarget::Spotify, None).contains("Song%20A"));
+        assert_eq!(share_link(&t, ShareTarget::Deezer, None), "https://www.deezer.com/track/123");
     }
 }

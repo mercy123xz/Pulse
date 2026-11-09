@@ -1,0 +1,24 @@
+:root {
+  --radius-sm: 2px;
+  --radius-md: 2px;
+  --radius-lg: 4px;
+}
+
+.hero {
+  text-transform: uppercase;
+  font-weight: bold;
+  border-radius: 0;
+}
+
+.player-bar {
+  border-top: 1px solid var(--spice-border);
+}
+
+.sidebar {
+  border-right: 1px solid var(--spice-border);
+}
+
+.play-button {
+  background: var(--spice-text);
+  color: var(--spice-main);
+}

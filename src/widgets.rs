@@ -1,5 +1,6 @@
 //! Reusable, custom-drawn UI pieces (buttons, artwork, sliders, track rows...).
 
+use crate::i18n::tr;
 use crate::deezer::Track;
 use crate::theme::{self, *};
 use egui::{
@@ -7,7 +8,7 @@ use egui::{
     vec2,
 };
 use egui_phosphor::regular as icon;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 // ---------------------------------------------------------------------------
@@ -60,14 +61,44 @@ pub fn artwork(ui: &Ui, rect: Rect, url: Option<&str>, radius: CornerRadius) {
         pal().text_faint,
     );
     if let Some(url) = url {
-        egui::Image::new(url)
-            .corner_radius(radius)
-            .show_loading_spinner(false)
-            .paint_at(ui, rect);
+        let mut img = egui::Image::new(url).corner_radius(radius).show_loading_spinner(false);
+        // YouTube video pictures are wide: show their middle square instead of squashing them.
+        if url.contains("i.ytimg.com/") {
+            let uv = if url.contains("hqdefault") {
+                // 4:3 with black bars above and below the 16:9 picture.
+                Rect::from_min_max(pos2(0.21875, 0.125), pos2(0.78125, 0.875))
+            } else {
+                Rect::from_min_max(pos2(0.21875, 0.0), pos2(0.78125, 1.0))
+            };
+            img = img.uv(uv);
+        }
+        img.paint_at(ui, rect);
     }
 }
 
 /// Vertical gradient (used behind page headers).
+/// Like `artwork`, but fills `rect` without stretching: a square picture is cropped
+/// to the rect's shape. `focus_y` (0 = top, 1 = bottom) picks which band to keep.
+pub fn artwork_cover(ui: &Ui, rect: Rect, url: Option<&str>, radius: CornerRadius, focus_y: f32) {
+    if !ui.is_rect_visible(rect) {
+        return;
+    }
+    ui.painter().rect_filled(rect, radius, pal().surface_active);
+    let Some(url) = url else { return };
+    let aspect = rect.width() / rect.height().max(1.0);
+    // Deezer's artist and cover pictures are square.
+    let uv = if aspect >= 1.0 {
+        let h = 1.0 / aspect;
+        let top = ((1.0 - h) * focus_y).clamp(0.0, 1.0 - h);
+        Rect::from_min_max(pos2(0.0, top), pos2(1.0, top + h))
+    } else {
+        let w = aspect;
+        let left = (1.0 - w) / 2.0;
+        Rect::from_min_max(pos2(left, 0.0), pos2(left + w, 1.0))
+    };
+    egui::Image::new(url).uv(uv).corner_radius(radius).show_loading_spinner(false).paint_at(ui, rect);
+}
+
 pub fn vgradient(ui: &Ui, rect: Rect, top: Color32, bottom: Color32) {
     let mut mesh = egui::Mesh::default();
     mesh.colored_vertex(rect.left_top(), top);
@@ -143,7 +174,11 @@ pub fn play_button(ui: &mut Ui, size: f32, playing: bool) -> Response {
     // Hover is shown by the grow animation only: white on the lighter accent is too faint.
     let t = ui.ctx().animate_bool(resp.id, resp.hovered());
     let r = size / 2.0 * (1.0 + 0.05 * t);
-    ui.painter().circle_filled(rect.center(), r, pal().accent);
+    let style = &parts().play_button;
+    ui.painter().circle_filled(rect.center(), r, style.fill.unwrap_or(pal().accent));
+    if let Some(b) = style.border {
+        ui.painter().circle_stroke(rect.center(), r, b);
+    }
     let glyph = if playing { icon::PAUSE } else { icon::PLAY };
     let nudge = if playing { 0.0 } else { size * 0.04 };
     ui.painter().text(
@@ -151,13 +186,14 @@ pub fn play_button(ui: &mut Ui, size: f32, playing: bool) -> Response {
         Align2::CENTER_CENTER,
         glyph,
         filled_icon(size * 0.42),
-        Color32::WHITE,
+        style.color.unwrap_or(Color32::WHITE),
     );
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
 /// A pill-shaped toggle (e.g. "This week" / "This month").
 pub fn pill(ui: &mut Ui, label: &str, selected: bool) -> Response {
+    let label = tr(label);
     let probe = ui.painter().layout_no_wrap(label.to_owned(), med(12.5), pal().text);
     let size = vec2(probe.size().x + 26.0, 30.0);
     let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
@@ -177,6 +213,7 @@ pub fn pill(ui: &mut Ui, label: &str, selected: bool) -> Response {
 
 /// Outline button with icon + label ("Shuffle", "See all", ...).
 pub fn ghost_button(ui: &mut Ui, glyph: &str, label: &str) -> Response {
+    let label = tr(label);
     let text = if glyph.is_empty() { label.to_owned() } else { format!("{glyph}  {label}") };
     let g = ui.painter().layout_no_wrap(text.clone(), med(13.0), pal().text);
     let (rect, resp) = ui.allocate_exact_size(vec2(g.size().x + 28.0, 34.0), Sense::click());
@@ -261,6 +298,8 @@ pub struct CardInfo<'a> {
     pub title: &'a str,
     pub subtitle: String,
     pub round: bool,
+    /// A label on the picture, like "Daily Mix 01".
+    pub badge: Option<&'a str>,
 }
 
 pub enum CardClick {
@@ -274,13 +313,28 @@ pub fn card(ui: &mut Ui, w: f32, info: &CardInfo) -> CardClick {
     let (rect, resp) = ui.allocate_exact_size(vec2(w, h), Sense::click());
     a11y(ui, &resp, WidgetType::Button, || format!("{}, {}", info.title, info.subtitle));
     let hovered = resp.hovered();
+    let style = &parts().card;
+    let radius = style.radius.map(CornerRadius::same).unwrap_or(r_lg());
     if hovered {
-        ui.painter().rect_filled(rect, R_LG, pal().surface_hover);
+        ui.painter().rect_filled(rect, radius, pal().surface_hover);
+    } else if let Some(fill) = style.fill {
+        ui.painter().rect_filled(rect, radius, fill);
     }
-    let pad = 10.0;
+    if let Some(b) = style.border {
+        ui.painter().rect_stroke(rect, radius, b, egui::StrokeKind::Inside);
+    }
+    let pad = style.padding.unwrap_or(10.0);
     let art_rect = Rect::from_min_size(rect.min + vec2(pad, pad), Vec2::splat(w - pad * 2.0));
-    let radius = if info.round { CornerRadius::same(((w - pad * 2.0) / 2.0).min(255.0) as u8) } else { R_MD };
+    let radius = if info.round { CornerRadius::same(((w - pad * 2.0) / 2.0).min(255.0) as u8) } else { r_md() };
     artwork(ui, art_rect, info.art, radius);
+    if let Some(b) = info.badge {
+        // Darken the bottom of the picture a little and put the label on it.
+        vgradient(ui, Rect::from_min_max(pos2(art_rect.left(), art_rect.bottom() - 46.0), art_rect.max), Color32::TRANSPARENT, Color32::from_black_alpha(150));
+        let g = one_line(ui, b, heavy(15.0), Color32::WHITE, art_rect.width() - 20.0);
+        let label = Rect::from_min_size(pos2(art_rect.left() + 8.0, art_rect.bottom() - 32.0), g.size() + vec2(12.0, 6.0));
+        ui.painter().rect_filled(label, CornerRadius::same(4), pal().accent);
+        ui.painter().galley(label.min + vec2(6.0, 3.0), g, Color32::WHITE);
+    }
 
     let text_w = w - pad * 2.0;
     paint_line(ui, pos2(rect.left() + pad, art_rect.bottom() + 10.0), info.title, semi(13.5), pal().text, text_w);
@@ -296,8 +350,9 @@ pub fn card(ui: &mut Ui, w: f32, info: &CardInfo) -> CardClick {
         a11y(ui, &b, WidgetType::Button, || format!("Play {}", info.title));
         let grow = if b.hovered() { 1.06 } else { 1.0 };
         ui.painter().circle_filled(c + vec2(0.0, 3.0), 22.0, Color32::from_black_alpha((90.0 * t) as u8));
-        ui.painter().circle_filled(c, 21.0 * grow, pal().accent.gamma_multiply(t));
-        ui.painter().text(c + vec2(1.5, 0.0), Align2::CENTER_CENTER, icon::PLAY, filled_icon(17.0), Color32::WHITE.gamma_multiply(t));
+        let pb = &parts().play_button;
+        ui.painter().circle_filled(c, 21.0 * grow, pb.fill.unwrap_or(pal().accent).gamma_multiply(t));
+        ui.painter().text(c + vec2(1.5, 0.0), Align2::CENTER_CENTER, icon::PLAY, filled_icon(17.0), pb.color.unwrap_or(Color32::WHITE).gamma_multiply(t));
         if b.clicked() {
             out = CardClick::Play;
         }
@@ -341,6 +396,120 @@ pub enum TrackEvent {
     RemoveFromQueue(usize),
     OpenArtist(Track),
     OpenAlbum(String),
+    ShowCredits(Track),
+    Share(Track, ShareTarget),
+    /// The song's title was clicked: open its album with the song highlighted.
+    OpenSong(Track),
+    Download(Track),
+    RemoveDownload(Track),
+}
+
+/// Where a "Copy link" from the Share menu points.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ShareTarget {
+    YouTube,
+    Spotify,
+    Deezer,
+}
+
+/// What the song menu needs to know about where it was opened.
+pub struct MenuCtx<'a> {
+    pub liked: bool,
+    pub playlists: &'a [String],
+    /// Row number in the list it was opened from (None for the player bar).
+    pub index: Option<usize>,
+    pub removable: bool,
+    pub queue_mode: bool,
+    pub downloaded: bool,
+}
+
+/// The right-click menu for a song. Used by every song list and the player bar.
+pub fn track_menu(ui: &mut Ui, t: &Track, cx: &MenuCtx, ev: &mut Vec<TrackEvent>) {
+    ui.set_min_width(220.0);
+    if let Some(i) = cx.index
+        && menu_item(ui, icon::PLAY, "Play")
+    {
+        ev.push(TrackEvent::Play(i));
+    }
+    ui.menu_button(format!("{}   {}", icon::PLUS, tr("Add to playlist")), |ui| {
+        ui.set_min_width(180.0);
+        if menu_item(ui, icon::PLUS, "New playlist…") {
+            ev.push(TrackEvent::NewPlaylistWith(t.clone()));
+        }
+        if !cx.playlists.is_empty() {
+            ui.separator();
+        }
+        for (pi, name) in cx.playlists.iter().enumerate() {
+            if menu_item(ui, icon::PLAYLIST, name) {
+                ev.push(TrackEvent::AddToPlaylist(pi, t.clone()));
+            }
+        }
+    });
+    let like_label = if cx.liked { "Remove from Liked Songs" } else { "Save to Liked Songs" };
+    if menu_item(ui, icon::HEART, like_label) {
+        ev.push(TrackEvent::ToggleLike(t.clone()));
+    }
+    if !cx.queue_mode {
+        if menu_item(ui, icon::QUEUE, "Add to queue") {
+            ev.push(TrackEvent::AddToQueue(t.clone()));
+        }
+        if menu_item(ui, icon::ARROW_BEND_DOWN_RIGHT, "Play next") {
+            ev.push(TrackEvent::PlayNext(t.clone()));
+        }
+    }
+    ui.separator();
+    if crate::deezer::is_deezer_id(&t.artist.id) && menu_item(ui, icon::USER, "Go to artist") {
+        ev.push(TrackEvent::OpenArtist(t.clone()));
+    }
+    if let Some(al) = t.album.as_ref().filter(|a| crate::deezer::is_deezer_id(&a.id))
+        && menu_item(ui, icon::VINYL_RECORD, "Go to album")
+    {
+        ev.push(TrackEvent::OpenAlbum(al.id.clone()));
+    }
+    if !crate::local::is_local(&t.id) {
+        if cx.downloaded {
+            if menu_item(ui, icon::TRASH, tr("Remove download")) {
+                ev.push(TrackEvent::RemoveDownload(t.clone()));
+            }
+        } else if menu_item(ui, icon::DOWNLOAD_SIMPLE, tr("Download")) {
+            ev.push(TrackEvent::Download(t.clone()));
+        }
+    }
+    if menu_item(ui, icon::IDENTIFICATION_CARD, "View credits") {
+        ev.push(TrackEvent::ShowCredits(t.clone()));
+    }
+    ui.separator();
+    ui.menu_button(format!("{}   {}", icon::SHARE_FAT, tr("Share")), |ui| {
+        ui.set_min_width(200.0);
+        for (glyph, label, target) in [
+            (icon::YOUTUBE_LOGO, "Copy YouTube link", ShareTarget::YouTube),
+            (icon::SPOTIFY_LOGO, "Copy Spotify link", ShareTarget::Spotify),
+            (icon::LINK, "Copy Deezer link", ShareTarget::Deezer),
+        ] {
+            if target == ShareTarget::Deezer && t.deezer_number().is_none() {
+                continue;
+            }
+            if menu_item(ui, glyph, label) {
+                ev.push(TrackEvent::Share(t.clone(), target));
+            }
+        }
+    });
+    if cx.removable {
+        ui.separator();
+        if menu_item(ui, icon::TRASH, "Remove from this playlist")
+            && let Some(i) = cx.index
+        {
+            ev.push(TrackEvent::RemoveFromPlaylist(i));
+        }
+    }
+    if cx.queue_mode {
+        ui.separator();
+        if menu_item(ui, icon::X, "Remove from queue")
+            && let Some(i) = cx.index
+        {
+            ev.push(TrackEvent::RemoveFromQueue(i));
+        }
+    }
 }
 
 pub struct TableCtx<'a> {
@@ -352,6 +521,14 @@ pub struct TableCtx<'a> {
     pub removable: bool,
     /// Set when showing the queue (enables "Remove from queue").
     pub queue_mode: bool,
+    /// Downloaded songs (shown with a small arrow).
+    pub downloads: &'a HashMap<String, std::path::PathBuf>,
+    /// When songs were added (shows the "Date added" column).
+    pub added: Option<&'a HashMap<String, u64>>,
+    /// YouTube views (shows the "Views" column).
+    pub views: Option<&'a HashMap<String, (u64, u64)>>,
+    /// A song to point out (opened by clicking its title somewhere else).
+    pub highlight: Option<(&'a str, f64)>,
     /// Number shown for the first row (queue shows "next up" starting at 1).
     pub index_offset: usize,
 }
@@ -362,34 +539,88 @@ struct Cols {
     num: Rect,
     title: Rect,
     album: Option<Rect>,
+    views: Option<Rect>,
+    date: Option<Rect>,
     like: Rect,
     time: Rect,
 }
 
-fn columns(row: Rect) -> Cols {
+fn columns(row: Rect, with_date: bool, with_views: bool) -> Cols {
     let w = row.width();
     let x0 = row.left();
     let col = |a: f32, b: f32| Rect::from_x_y_ranges(a..=b, row.y_range());
     let num = col(x0, x0 + 44.0);
     let time = col(row.right() - 64.0, row.right() - 12.0);
     let like = col(time.left() - 40.0, time.left());
+    let date = (with_date && w > 900.0).then(|| col(like.left() - 150.0, like.left() - 12.0));
+    let after_views = date.map(|d| d.left()).unwrap_or(like.left());
+    let views = (with_views && w > 640.0).then(|| col(after_views - 130.0, after_views - 20.0));
     let wide = w > 720.0;
-    let album_right = like.left() - 16.0;
-    let album_w = (w * 0.3).min(320.0);
+    let album_right = views.map(|v| v.left()).unwrap_or(after_views) - 16.0;
+    let album_w = (w * if date.is_some() { 0.24 } else { 0.3 }).min(320.0);
     let album = wide.then(|| col(album_right - album_w, album_right));
     let title_right = album.map(|a| a.left()).unwrap_or(like.left()) - 16.0;
-    Cols { num, title: col(num.right() + 4.0, title_right), album, like, time }
+    Cols { num, title: col(num.right() + 4.0, title_right), album, views, date, like, time }
 }
 
-pub fn track_table_header(ui: &mut Ui) {
+/// 5003515 → "5,003,515".
+pub fn fmt_thousands(n: u64) -> String {
+    let digits = n.to_string();
+    let mut out = String::new();
+    for (i, c) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
+}
+
+/// "Date added" like Spotify: "3 days ago" for recent songs, else the date.
+pub fn fmt_added(when: u64, now: u64) -> String {
+    let age = now.saturating_sub(when);
+    let day = 86_400;
+    match age {
+        a if a < day => "Today".into(),
+        a if a < 2 * day => "Yesterday".into(),
+        a if a < 7 * day => format!("{} days ago", a / day),
+        a if a < 28 * day => {
+            let w = a / (7 * day);
+            if w == 1 { "1 week ago".into() } else { format!("{w} weeks ago") }
+        }
+        _ => {
+            // Days since 1970 → calendar date (Howard Hinnant's algorithm).
+            let z = (when / day) as i64 + 719_468;
+            let era = z.div_euclid(146_097);
+            let doe = z - era * 146_097;
+            let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+            let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+            let mp = (5 * doy + 2) / 153;
+            let d = doy - (153 * mp + 2) / 5 + 1;
+            let m = if mp < 10 { mp + 3 } else { mp - 9 };
+            let y = yoe + era * 400 + i64::from(m <= 2);
+            const MONTHS: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+            format!("{} {d}, {y}", MONTHS[(m - 1) as usize])
+        }
+    }
+}
+
+pub fn track_table_header(ui: &mut Ui, with_date: bool, with_views: bool) {
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 32.0), Sense::hover());
-    let c = columns(rect);
+    let c = columns(rect, with_date, with_views);
     let f = med(11.5);
     let p = ui.painter();
     p.text(c.num.center(), Align2::CENTER_CENTER, "#", f.clone(), pal().text_faint);
-    p.text(c.title.left_center(), Align2::LEFT_CENTER, "TITLE", f.clone(), pal().text_faint);
+    p.text(c.title.left_center(), Align2::LEFT_CENTER, tr("Title").to_uppercase(), f.clone(), pal().text_faint);
     if let Some(a) = c.album {
-        p.text(a.left_center(), Align2::LEFT_CENTER, "ALBUM", f.clone(), pal().text_faint);
+        p.text(a.left_center(), Align2::LEFT_CENTER, tr("Album").to_uppercase(), f.clone(), pal().text_faint);
+    }
+    if let Some(d) = c.date {
+        p.text(d.left_center(), Align2::LEFT_CENTER, tr("Date added").to_uppercase(), f.clone(), pal().text_faint);
+    }
+    if let Some(v) = c.views {
+        let r = p.text(v.right_center(), Align2::RIGHT_CENTER, tr("Views").to_uppercase(), f.clone(), pal().text_faint);
+        ui.interact(r, ui.id().with("views_hdr"), Sense::hover()).on_hover_text(tr("Views on YouTube"));
     }
     p.text(c.time.right_center(), Align2::RIGHT_CENTER, icon::CLOCK_COUNTER_CLOCKWISE, regular(14.0), pal().text_faint);
     p.hline(rect.x_range(), rect.bottom(), Stroke::new(1.0, pal().border));
@@ -397,7 +628,7 @@ pub fn track_table_header(ui: &mut Ui) {
 }
 
 pub fn track_table(ui: &mut Ui, id_salt: &str, tracks: &[Track], cx: &TableCtx, events: &mut Vec<TrackEvent>) {
-    track_table_header(ui);
+    track_table_header(ui, cx.added.is_some(), cx.views.is_some());
     let base = ui.id().with(id_salt);
     ui.spacing_mut().item_spacing.y = 0.0;
     for (i, t) in tracks.iter().enumerate() {
@@ -416,13 +647,31 @@ fn track_row(ui: &mut Ui, id: egui::Id, i: usize, t: &Track, cx: &TableCtx, ev: 
         return;
     }
     let is_current = cx.now_playing == Some(t.id.as_str());
-    let hovered = resp.hovered() || resp.context_menu_opened() || resp.has_focus();
+    // The heart, artist and album links sit on top of the row, so "the row is hovered"
+    // is "the mouse is anywhere over it" (else the heart vanishes when you point at it).
+    let hovered = resp.hovered() || resp.context_menu_opened() || resp.has_focus() || ui.rect_contains_pointer(rect);
+    let style = &parts().track_row;
+    let radius = style.radius.map(CornerRadius::same).unwrap_or(r_md());
     if hovered {
-        ui.painter().rect_filled(rect, R_MD, pal().surface_hover);
+        ui.painter().rect_filled(rect, radius, style.fill.unwrap_or(pal().surface_hover));
     } else if is_current {
-        ui.painter().rect_filled(rect, R_MD, pal().accent.gamma_multiply(0.08));
+        ui.painter().rect_filled(rect, radius, pal().accent.gamma_multiply(0.08));
     }
-    let c = columns(rect);
+    if let Some(b) = style.border {
+        ui.painter().hline(rect.x_range(), rect.bottom() - 0.5, b);
+    }
+    if let Some((hid, at)) = cx.highlight
+        && hid == t.id
+    {
+        // The song you came here for: tinted, and scrolled into view once.
+        ui.painter().rect_filled(rect, radius, pal().accent.gamma_multiply(0.22));
+        let key = egui::Id::new(("highlight_scrolled", hid, at.to_bits()));
+        if !ui.ctx().data(|d| d.get_temp::<bool>(key).unwrap_or(false)) {
+            resp.scroll_to_me(Some(egui::Align::Center));
+            ui.ctx().data_mut(|d| d.insert_temp(key, true));
+        }
+    }
+    let c = columns(rect, cx.added.is_some(), cx.views.is_some());
 
     // Number / play icon / "now playing" bars
     if hovered {
@@ -441,11 +690,15 @@ fn track_row(ui: &mut Ui, id: egui::Id, i: usize, t: &Track, cx: &TableCtx, ev: 
     let tx = art.right() + 12.0;
     let tw = c.title.right() - tx;
     let title_col = if is_current { pal().accent_soft } else { pal().text };
-    paint_line(ui, pos2(tx, rect.center().y - 17.0), &t.title, med(13.5), title_col, tw);
+    let title_link = link_text(ui, id.with("title"), pos2(tx, rect.center().y - 17.0), &t.title, med(13.5), title_col, tw);
     let mut artist_x = tx;
+    if cx.downloads.contains_key(&t.id) {
+        ui.painter().text(pos2(tx + 7.0, rect.center().y + 11.0), Align2::CENTER_CENTER, icon::ARROW_CIRCLE_DOWN, filled_icon(14.0), pal().accent_soft);
+        artist_x += 19.0;
+    }
     if t.explicit {
         // "E" badge for explicit lyrics, like other music apps.
-        let badge = Rect::from_min_size(pos2(tx, rect.center().y + 4.0), vec2(14.0, 14.0));
+        let badge = Rect::from_min_size(pos2(artist_x, rect.center().y + 4.0), vec2(14.0, 14.0));
         ui.painter().rect_filled(badge, CornerRadius::same(3), pal().text_muted);
         ui.painter().text(badge.center(), Align2::CENTER_CENTER, "E", semi(9.5), pal().bg);
         artist_x += 19.0;
@@ -473,6 +726,14 @@ fn track_row(ui: &mut Ui, id: egui::Id, i: usize, t: &Track, cx: &TableCtx, ev: 
         ));
     }
 
+    if let (Some(v), Some((n, _))) = (c.views, cx.views.and_then(|m| m.get(&t.id))) {
+        ui.painter().text(v.right_center(), Align2::RIGHT_CENTER, fmt_thousands(*n), regular(12.5), pal().text_muted);
+    }
+    if let (Some(d), Some(when)) = (c.date, cx.added.and_then(|a| a.get(&t.id))) {
+        let text = fmt_added(*when, crate::app::now_unix());
+        paint_line(ui, pos2(d.left(), d.center().y - 8.0), tr(&text), regular(12.5), pal().text_muted, d.width());
+    }
+
     // Heart
     let liked = cx.liked.contains(&t.id);
     let heart = ui.interact(Rect::from_center_size(c.like.center(), Vec2::splat(28.0)), id.with("like"), Sense::click());
@@ -490,6 +751,8 @@ fn track_row(ui: &mut Ui, id: egui::Id, i: usize, t: &Track, cx: &TableCtx, ev: 
     // Interactions
     if heart.clicked() {
         ev.push(TrackEvent::ToggleLike(t.clone()));
+    } else if title_link.clicked() {
+        ev.push(TrackEvent::OpenSong(t.clone()));
     } else if artist.clicked() {
         ev.push(TrackEvent::OpenArtist(t.clone()));
     } else if album_link.as_ref().is_some_and(|r| r.clicked()) {
@@ -510,57 +773,15 @@ fn track_row(ui: &mut Ui, id: egui::Id, i: usize, t: &Track, cx: &TableCtx, ev: 
     }
 
     resp.context_menu(|ui| {
-        ui.set_min_width(200.0);
-        if menu_item(ui, icon::PLAY, "Play") {
-            ev.push(TrackEvent::Play(i));
-        }
-        if !cx.queue_mode {
-            if menu_item(ui, icon::ARROW_BEND_DOWN_RIGHT, "Play next") {
-                ev.push(TrackEvent::PlayNext(t.clone()));
-            }
-            if menu_item(ui, icon::QUEUE, "Add to queue") {
-                ev.push(TrackEvent::AddToQueue(t.clone()));
-            }
-        }
-        ui.separator();
-        let like_label = if liked { "Remove from Liked Songs" } else { "Save to Liked Songs" };
-        if menu_item(ui, icon::HEART, like_label) {
-            ev.push(TrackEvent::ToggleLike(t.clone()));
-        }
-        ui.menu_button(format!("{}   Add to playlist", icon::LIST_PLUS), |ui| {
-            ui.set_min_width(180.0);
-            if menu_item(ui, icon::PLUS, "New playlist…") {
-                ev.push(TrackEvent::NewPlaylistWith(t.clone()));
-            }
-            if !cx.playlists.is_empty() {
-                ui.separator();
-            }
-            for (pi, name) in cx.playlists.iter().enumerate() {
-                if menu_item(ui, icon::PLAYLIST, name) {
-                    ev.push(TrackEvent::AddToPlaylist(pi, t.clone()));
-                }
-            }
-        });
-        if menu_item(ui, icon::USER, "Go to artist") {
-            ev.push(TrackEvent::OpenArtist(t.clone()));
-        }
-        if let Some(al) = t.album.as_ref().filter(|a| crate::deezer::is_deezer_id(&a.id))
-            && menu_item(ui, icon::VINYL_RECORD, "Go to album")
-        {
-            ev.push(TrackEvent::OpenAlbum(al.id.clone()));
-        }
-        if cx.removable {
-            ui.separator();
-            if menu_item(ui, icon::TRASH, "Remove from this playlist") {
-                ev.push(TrackEvent::RemoveFromPlaylist(i));
-            }
-        }
-        if cx.queue_mode {
-            ui.separator();
-            if menu_item(ui, icon::X, "Remove from queue") {
-                ev.push(TrackEvent::RemoveFromQueue(i));
-            }
-        }
+        let mcx = MenuCtx {
+            liked,
+            playlists: cx.playlists,
+            index: Some(i),
+            removable: cx.removable,
+            queue_mode: cx.queue_mode,
+            downloaded: cx.downloads.contains_key(&t.id),
+        };
+        track_menu(ui, t, &mcx, ev);
     });
 }
 
@@ -575,6 +796,7 @@ pub fn resp_selected(ui: &Ui, resp: &Response, on: bool, label: &str) {
 }
 
 pub fn menu_item(ui: &mut Ui, glyph: &str, label: &str) -> bool {
+    let label = tr(label);
     let clicked = ui.add(egui::Button::new(format!("{glyph}   {label}")).frame_when_inactive(false)).clicked();
     if clicked {
         ui.close();
@@ -605,7 +827,7 @@ pub fn skeleton_rows(ui: &mut Ui, n: usize) {
     let col = pal().surface_hover.gamma_multiply(a);
     for k in 0..n {
         let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), ROW_H), Sense::hover());
-        let c = columns(rect);
+        let c = columns(rect, false, false);
         let art = Rect::from_min_size(pos2(c.title.left(), rect.center().y - 20.0), Vec2::splat(40.0));
         ui.painter().rect_filled(art, CornerRadius::same(5), col);
         let w1 = 140.0 + ((k * 37) % 90) as f32;
@@ -617,6 +839,7 @@ pub fn skeleton_rows(ui: &mut Ui, n: usize) {
 
 /// Centered message with an icon, optional button. Returns true if the button was clicked.
 pub fn empty_state(ui: &mut Ui, glyph: &str, title: &str, body: &str, button: Option<&str>) -> bool {
+    let (title, body, button) = (tr(title), tr(body), button.map(tr));
     let mut clicked = false;
     ui.add_space(60.0);
     ui.vertical_centered(|ui| {
@@ -634,6 +857,7 @@ pub fn empty_state(ui: &mut Ui, glyph: &str, title: &str, body: &str, button: Op
 }
 
 pub fn section_title(ui: &mut Ui, title: &str, action: Option<&str>) -> bool {
+    let (title, action) = (tr(title), action.map(tr));
     let mut clicked = false;
     ui.add_space(18.0);
     ui.horizontal(|ui| {
@@ -650,4 +874,18 @@ pub fn section_title(ui: &mut Ui, title: &str, action: Option<&str>) -> bool {
     });
     ui.add_space(8.0);
     clicked
+}
+
+#[cfg(test)]
+mod added_tests {
+    #[test]
+    fn date_added_reads_like_spotify() {
+        let now = 1_794_200_000; // Nov 2026
+        assert_eq!(super::fmt_added(now - 60, now), "Today");
+        assert_eq!(super::fmt_added(now - 3 * 86_400, now), "3 days ago");
+        assert_eq!(super::fmt_added(now - 15 * 86_400, now), "2 weeks ago");
+        assert_eq!(super::fmt_added(1_700_000_000, now), "Nov 14, 2023");
+        assert_eq!(super::fmt_thousands(5_003_515), "5,003,515");
+        assert_eq!(super::fmt_thousands(739), "739");
+    }
 }
