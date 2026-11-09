@@ -231,6 +231,8 @@ const STRINGS: &[(&str, [&str; 4])] = &[
     ("Popular tracks by", ["Canciones populares de", "Músicas populares de", "Titres populaires de", "Beliebte Songs von"]),
     ("Song not found", ["Canción no encontrada", "Música não encontrada", "Titre introuvable", "Song nicht gefunden"]),
     ("Open it again from a list.", ["Ábrela de nuevo desde una lista.", "Abra de novo a partir de uma lista.", "Rouvrez-le depuis une liste.", "Öffne ihn erneut aus einer Liste."]),
+    ("songs selected", ["canciones seleccionadas", "músicas selecionadas", "titres sélectionnés", "Songs ausgewählt"]),
+    ("Go to song", ["Ir a la canción", "Ir para a música", "Accéder au titre", "Zum Song"]),
     ("Open themes folder", ["Abrir carpeta de temas", "Abrir pasta de temas", "Ouvrir le dossier des thèmes", "Design-Ordner öffnen"]),
 ];
 

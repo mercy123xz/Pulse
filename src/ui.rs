@@ -213,7 +213,7 @@ fn sidebar(app: &mut App, ui: &mut Ui) {
     if compact {
         nav_heading(ui, "Playlists");
         if nav_item(ui, icon::PLUS, "Create playlist", false, None).clicked() {
-            app.new_playlist = Some((String::new(), None));
+            app.new_playlist = Some((String::new(), vec![]));
         }
         if nav_item(ui, icon::ARROW_SQUARE_IN, "Import playlist", false, None).clicked() {
             app.import_open = true;
@@ -223,7 +223,7 @@ fn sidebar(app: &mut App, ui: &mut Ui) {
             nav_heading(ui, "Playlists");
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if icon_button(ui, icon::PLUS, 14.0, pal().text_muted, tr("Create playlist")).clicked() {
-                    app.new_playlist = Some((String::new(), None));
+                    app.new_playlist = Some((String::new(), vec![]));
                 }
                 if icon_button(ui, icon::ARROW_SQUARE_IN, 14.0, pal().text_muted, tr("Import playlist")).clicked() {
                     app.import_open = true;
@@ -544,6 +544,7 @@ fn table_ctx<'a>(app: &'a App, names: &'a [String]) -> TableCtx<'a> {
         added: None,
         views: None,
         highlight: app.highlight.as_ref().map(|(id, at)| (id.as_str(), *at)),
+        selection: (app.selection.0.as_str(), &app.selection.1),
         index_offset: 0,
     }
 }
