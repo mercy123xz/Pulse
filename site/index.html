@@ -151,6 +151,22 @@ footer .wrap { display: grid; gap: .8rem; }
 footer nav { display: flex; gap: 1.2rem; flex-wrap: wrap; }
 footer a { color: var(--text); text-decoration: none; }
 footer a:hover { text-decoration: underline; }
+
+/* Hero screenshot in 3D: tilted back from its right edge, following the mouse with a soft glare. */
+.hero .window { position: relative; transform-origin: right center; transform: perspective(1800px) rotateY(var(--ry, 0deg)) rotateX(var(--rx, 0deg)); transition: transform .6s cubic-bezier(.2, .7, .2, 1), box-shadow .6s; }
+.hero .window::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: radial-gradient(600px circle at var(--gx, 30%) var(--gy, 20%), rgba(167, 139, 250, .16), transparent 55%); opacity: var(--glare, .6); transition: opacity .6s; }
+@media (min-width: 1100px) {
+  .hero .window { --ry: 7deg; --rx: 2deg; box-shadow: -40px 40px 90px rgba(0, 0, 0, .6), -10px 0 60px rgba(124, 58, 237, .18); }
+  .hero .window.is-tracking { transition: transform .12s linear, box-shadow .6s; }
+}
+@media (prefers-reduced-motion: reduce) { .hero .window, .hero .window.is-tracking { transition: none; } }
+
+/* Cursor: black arrow with a purple edge; purple over anything clickable.
+   Native cursors (no script), only for mouse users. */
+@media (pointer: fine) {
+  html { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 28 28'%3E%3Cpath d='M4 3v19.5l5.6-5.4 3.6 8.4 3.6-1.6-3.6-8.2H21z' fill='%230b0b0e' stroke='%23a78bfa' stroke-width='1.8' stroke-linejoin='round'/%3E%3C/svg%3E") 4 3, auto; }
+  a, button, summary, label, [role="button"] { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 28 28'%3E%3Cpath d='M4 3v19.5l5.6-5.4 3.6 8.4 3.6-1.6-3.6-8.2H21z' fill='%237c3aed' stroke='%23f5f3ff' stroke-width='1.8' stroke-linejoin='round'/%3E%3C/svg%3E") 4 3, pointer; }
+}
 </style>
 </head>
 <body>
@@ -412,5 +428,38 @@ footer a:hover { text-decoration: underline; }
     .catch(function () {});
 })();
 </script>
+<script>
+// Hero tilt: the screenshot leans toward the mouse a little (wide screens, mouse only,
+// and not when the system asks for less motion).
+(function () {
+  var win = document.querySelector(".hero .window");
+  if (!win || !window.matchMedia) return;
+  var wide = matchMedia("(min-width: 1100px) and (pointer: fine)");
+  var calm = matchMedia("(prefers-reduced-motion: reduce)");
+  var hero = document.querySelector(".hero");
+  var frame = 0;
+  hero.addEventListener("pointermove", function (e) {
+    if (!wide.matches || calm.matches || frame) return;
+    frame = requestAnimationFrame(function () {
+      frame = 0;
+      var r = win.getBoundingClientRect();
+      var x = Math.min(Math.max((e.clientX - r.left) / r.width, 0), 1);
+      var y = Math.min(Math.max((e.clientY - r.top) / r.height, 0), 1);
+      win.classList.add("is-tracking");
+      win.style.setProperty("--ry", (7 - (x - 0.5) * 6).toFixed(2) + "deg");
+      win.style.setProperty("--rx", (2 - (y - 0.5) * 4).toFixed(2) + "deg");
+      win.style.setProperty("--gx", (x * 100).toFixed(1) + "%");
+      win.style.setProperty("--gy", (y * 100).toFixed(1) + "%");
+      win.style.setProperty("--glare", "1");
+    });
+  });
+  hero.addEventListener("pointerleave", function () {
+    if (frame) { cancelAnimationFrame(frame); frame = 0; }
+    win.classList.remove("is-tracking");
+    ["--ry", "--rx", "--gx", "--gy", "--glare"].forEach(function (k) { win.style.removeProperty(k); });
+  });
+})();
+</script>
+<script src="ask.js" defer></script>
 </body>
 </html>
