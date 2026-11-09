@@ -393,6 +393,140 @@ fn nav_item_art(ui: &mut Ui, art: Option<&str>, glyph: &str, label: &str, select
 // Top bar: back/forward + search
 // ---------------------------------------------------------------------------
 
+/// One line in the search dropdown.
+enum Suggestion {
+    Recent(String),
+    Artist(String),
+    Song(Track),
+}
+
+/// Under the search box while it's in use: recent searches when it's empty, quick picks
+/// from the results while typing (the same reply as the results page, so no extra
+/// requests). ↑/↓ choose, Enter opens. True if Enter picked a suggestion.
+fn search_dropdown(app: &mut App, ui: &mut Ui, pill: Rect, edit: &egui::Response) -> bool {
+    let ctx = ui.ctx().clone();
+    let area_id = egui::Id::new("search_dropdown");
+    let last_rect: Option<Rect> = ui.data(|d| d.get_temp(area_id.with("rect")));
+    let over = last_rect.is_some_and(|r| ui.rect_contains_pointer(r) || ctx.pointer_hover_pos().is_some_and(|p| r.contains(p)));
+    if !edit.has_focus() && !over {
+        ui.data_mut(|d| d.remove::<Rect>(area_id.with("rect")));
+        return false;
+    }
+    let q = app.search_text.trim().to_string();
+    let mut items: Vec<(Suggestion, String, String, Option<String>)> = vec![];
+    if q.is_empty() {
+        for r in &app.saved.recent_searches {
+            items.push((Suggestion::Recent(r.clone()), r.clone(), String::new(), None));
+        }
+    } else if let Some(r) = app.search_results_for(&q) {
+        for a in r.artists.iter().take(2) {
+            items.push((Suggestion::Artist(a.id.clone()), a.name.clone(), tr("Artist").to_string(), a.picture.clone()));
+        }
+        for t in r.tracks.iter().take(5) {
+            items.push((Suggestion::Song(t.clone()), t.title.clone(), t.all_artists(), t.art_small().map(str::to_owned)));
+        }
+    }
+    let searching = !q.is_empty() && items.is_empty() && (app.search_edited_at.is_some() || matches!(app.cache.get(&format!("search:{q}")), Some(Remote::Loading)));
+    if items.is_empty() && !searching {
+        return false;
+    }
+    // Keyboard choice.
+    let sel_id = area_id.with("sel");
+    let mut sel: Option<usize> = ui.data(|d| d.get_temp(sel_id)).flatten();
+    if edit.has_focus() {
+        if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::ArrowDown)) {
+            sel = Some(sel.map_or(0, |s| (s + 1).min(items.len().saturating_sub(1))));
+        }
+        if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::ArrowUp)) {
+            sel = sel.and_then(|s| s.checked_sub(1));
+        }
+    }
+    sel = sel.filter(|s| *s < items.len());
+    let mut chosen: Option<usize> = None;
+    let enter = edit.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
+    if enter {
+        chosen = sel;
+    }
+    let mut clear_history = false;
+    let area = egui::Area::new(area_id).order(egui::Order::Foreground).fixed_pos(pill.left_bottom() + vec2(0.0, 6.0)).show(&ctx, |ui| {
+        Frame::menu(ui.style()).inner_margin(6).show(ui, |ui| {
+            ui.set_width(pill.width() - 12.0);
+            ui.spacing_mut().item_spacing.y = 1.0;
+            if q.is_empty() {
+                ui.horizontal(|ui| {
+                    menu_header(ui, "Recent searches");
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if ui.add(egui::Label::new(RichText::new(tr("Clear history")).font(med(11.5)).color(pal().text_muted)).sense(Sense::click())).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                            clear_history = true;
+                        }
+                    });
+                });
+            }
+            if searching {
+                ui.label(RichText::new(tr("Searching…")).font(regular(12.5)).color(pal().text_muted));
+            }
+            for (k, (s, title, sub, art)) in items.iter().enumerate() {
+                let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), if art.is_some() { 44.0 } else { 32.0 }), Sense::click());
+                let hot = resp.hovered() || sel == Some(k);
+                if hot {
+                    ui.painter().rect_filled(rect, r_sm(), pal().surface_hover);
+                }
+                let mut x = rect.left() + 8.0;
+                match s {
+                    Suggestion::Recent(_) => {
+                        paint_icon(ui.painter(), pos2(x + 8.0, rect.center().y), icon::CLOCK_COUNTER_CLOCKWISE, regular(15.0), pal().text_muted);
+                        x += 26.0;
+                    }
+                    _ => {
+                        let round = matches!(s, Suggestion::Artist(_));
+                        let r = Rect::from_min_size(pos2(x, rect.center().y - 17.0), Vec2::splat(34.0));
+                        artwork(ui, r, art.as_deref(), if round { CornerRadius::same(17) } else { r_sm() });
+                        x += 44.0;
+                    }
+                }
+                let w = rect.right() - x - 8.0;
+                if sub.is_empty() {
+                    paint_line(ui, pos2(x, rect.center().y - 8.0), title, med(13.0), pal().text, w);
+                } else {
+                    paint_line(ui, pos2(x, rect.center().y - 15.0), title, med(13.0), pal().text, w);
+                    paint_line(ui, pos2(x, rect.center().y + 1.0), sub, regular(11.5), pal().text_muted, w);
+                }
+                if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                    chosen = Some(k);
+                }
+            }
+        });
+    });
+    ui.data_mut(|d| {
+        d.insert_temp(area_id.with("rect"), area.response.rect);
+        d.insert_temp(sel_id, sel);
+    });
+    if clear_history {
+        app.saved.recent_searches.clear();
+    }
+    let Some(k) = chosen else { return false };
+    ui.data_mut(|d| d.insert_temp(sel_id, None::<usize>));
+    ui.data_mut(|d| d.remove::<Rect>(area_id.with("rect")));
+    ui.memory_mut(|m| m.surrender_focus(edit.id));
+    match &items[k].0 {
+        Suggestion::Recent(r) => {
+            app.search_text = r.clone();
+            app.search_edited_at = None;
+            app.remember_search(r);
+            app.submit_search(&ctx);
+        }
+        Suggestion::Artist(id) => {
+            app.remember_search(&q);
+            app.navigate(Route::Artist(id.clone()), &ctx);
+        }
+        Suggestion::Song(t) => {
+            app.remember_search(&q);
+            app.open_song(t, &ctx);
+        }
+    }
+    true
+}
+
 fn top_bar(app: &mut App, ui: &mut Ui) {
     let ctx = ui.ctx().clone();
     ui.horizontal_centered(|ui| {
@@ -439,8 +573,11 @@ fn top_bar(app: &mut App, ui: &mut Ui) {
         if resp.changed() {
             app.search_edited_at = Some(ui.input(|i| i.time));
         }
-        if resp.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
+        let picked = search_dropdown(app, ui, rect, &resp);
+        if resp.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) && !picked {
             app.search_edited_at = None;
+            let q = app.search_text.trim().to_string();
+            app.remember_search(&q);
             app.submit_search(&ctx);
         }
         // Clear button or Ctrl K hint
@@ -866,27 +1003,77 @@ fn shuffle_play(app: &mut App, tracks: &[Track], ctx: &egui::Context) {
 
 fn search(app: &mut App, ui: &mut Ui, q: &str) {
     page_title(ui, &format!("Results for “{q}”"), None);
+    let query = q.to_string();
     with_remote(app, ui, |app, ui, page| {
         let Page::Search(r) = page else { return };
-        if r.tracks.is_empty() && r.artists.is_empty() && r.albums.is_empty() && r.playlists.is_empty() {
+        if r.is_empty() {
             empty_state(ui, icon::MAGNIFYING_GLASS, "No results", "Try different words or check the spelling.", None);
             return;
         }
-        if !r.artists.is_empty() {
+        let ctx = ui.ctx().clone();
+        // Filter chips: show one kind of result (no new search needed).
+        let id = egui::Id::new(("search_filter", &query));
+        let mut filter: u8 = ui.data(|d| d.get_temp(id).unwrap_or(0));
+        let kind = |a: &AlbumInfo| a.kind();
+        let albums: Vec<AlbumInfo> = r.albums.iter().filter(|a| matches!(kind(a), "Album" | "Compilation")).cloned().collect();
+        let eps: Vec<AlbumInfo> = r.albums.iter().filter(|a| kind(a) == "EP").cloned().collect();
+        let singles: Vec<AlbumInfo> = r.albums.iter().filter(|a| kind(a) == "Single").cloned().collect();
+        let chips: [(u8, &str, bool); 7] = [
+            (0, "All", true),
+            (1, "Songs", !r.tracks.is_empty()),
+            (2, "Artists", !r.artists.is_empty()),
+            (3, "Albums", !albums.is_empty()),
+            (4, "EPs", !eps.is_empty()),
+            (5, "Singles", !singles.is_empty()),
+            (6, "Playlists", !r.playlists.is_empty()),
+        ];
+        ui.horizontal_wrapped(|ui| {
+            for (n, label, any) in chips {
+                if any && pill(ui, tr(label), filter == n).clicked() {
+                    filter = n;
+                }
+            }
+        });
+        ui.data_mut(|d| d.insert_temp(id, filter));
+        let all = filter == 0;
+
+        // Top result: the artist whose name is what you typed, else the best song.
+        if all {
+            let want = crate::youtube::norm(&query);
+            let artist = r.artists.iter().find(|a| crate::youtube::norm(&a.name) == want);
+            match (artist, r.tracks.first()) {
+                (Some(a), _) => {
+                    section_title(ui, "Top result", None);
+                    artist_grid(app, ui, std::slice::from_ref(a), Some(1));
+                }
+                (None, Some(t)) => {
+                    section_title(ui, "Top result", None);
+                    let names = app.playlist_names();
+                    let mut ev = vec![];
+                    track_table(ui, "search_top", std::slice::from_ref(t), &table_ctx(app, &names), &mut ev);
+                    app.handle_events(ev, std::slice::from_ref(t), &ctx);
+                }
+                _ => {}
+            }
+        }
+        if (all || filter == 2) && !r.artists.is_empty() {
             section_title(ui, "Artists", None);
-            artist_grid(app, ui, &r.artists, Some(1));
+            artist_grid(app, ui, &r.artists, if all { Some(1) } else { None });
         }
-        if !r.tracks.is_empty() {
+        if (all || filter == 1) && !r.tracks.is_empty() {
             section_title(ui, "Songs", None);
-            tracks_block(app, ui, "search_tracks", &r.tracks);
+            let shown = if all { &r.tracks[..r.tracks.len().min(10)] } else { &r.tracks[..] };
+            tracks_block(app, ui, "search_tracks", shown);
         }
-        if !r.albums.is_empty() {
-            section_title(ui, "Albums & singles", None);
-            album_grid(app, ui, &r.albums, Some(2));
+        for (n, title, list) in [(3, "Albums", &albums), (4, "EPs", &eps), (5, "Singles", &singles)] {
+            if (all || filter == n) && !list.is_empty() {
+                section_title(ui, title, None);
+                album_grid(app, ui, list, if all { Some(1) } else { None });
+            }
         }
-        if !r.playlists.is_empty() {
+        if (all || filter == 6) && !r.playlists.is_empty() {
             section_title(ui, "Playlists", None);
-            playlist_grid(app, ui, &r.playlists, Some(1));
+            playlist_grid(app, ui, &r.playlists, if all { Some(1) } else { None });
         }
     });
 }

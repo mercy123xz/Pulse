@@ -195,17 +195,73 @@ pub fn now_unix() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
+/// Every typed word is found in the song's title, artists or album: as part of a word
+/// ("lil" finds "Lil Baby"), or with one letter wrong in longer words ("beyonse").
+pub fn track_matches(t: &Track, words: &[String]) -> bool {
+    let mut hay = format!("{} {}", t.title, t.all_artists());
+    if let Some(a) = &t.album {
+        hay.push(' ');
+        hay.push_str(&a.title);
+    }
+    let hay = fold(&hay);
+    let hay_words: Vec<&str> = hay.split_whitespace().collect();
+    words.iter().all(|w| hay.contains(w.as_str()) || (w.chars().count() >= 5 && hay_words.iter().any(|h| one_edit_apart(w, h))))
+}
+
+/// Lowercase, without accents, punctuation turned into spaces: "Beyoncé's" → "beyonce s".
+pub fn fold(s: &str) -> String {
+    s.chars()
+        .flat_map(char::to_lowercase)
+        .map(|c| match c {
+            'à' | 'á' | 'â' | 'ã' | 'ä' | 'å' => 'a',
+            'ç' => 'c',
+            'è' | 'é' | 'ê' | 'ë' => 'e',
+            'ì' | 'í' | 'î' | 'ï' => 'i',
+            'ñ' => 'n',
+            'ò' | 'ó' | 'ô' | 'õ' | 'ö' | 'ø' => 'o',
+            'ù' | 'ú' | 'û' | 'ü' => 'u',
+            'ý' | 'ÿ' => 'y',
+            c if c.is_alphanumeric() => c,
+            _ => ' ',
+        })
+        .collect()
+}
+
+/// True when `a` and `b` differ by at most one letter (added, removed or changed).
+fn one_edit_apart(a: &str, b: &str) -> bool {
+    let (a, b): (Vec<char>, Vec<char>) = (a.chars().collect(), b.chars().collect());
+    if a.len().abs_diff(b.len()) > 1 {
+        return false;
+    }
+    let (mut i, mut j, mut edits) = (0, 0, 0);
+    while i < a.len() && j < b.len() {
+        if a[i] == b[j] {
+            i += 1;
+            j += 1;
+            continue;
+        }
+        edits += 1;
+        if edits > 1 {
+            return false;
+        }
+        match a.len().cmp(&b.len()) {
+            std::cmp::Ordering::Greater => i += 1,
+            std::cmp::Ordering::Less => j += 1,
+            std::cmp::Ordering::Equal => {
+                i += 1;
+                j += 1;
+            }
+        }
+    }
+    edits + (a.len() - i) + (b.len() - j) <= 1
+}
+
 /// The songs of a list after search, genre filter and sorting.
 pub fn apply_view(tracks: &[Track], view: &ListView, added: Option<&HashMap<String, u64>>, genres: &HashMap<String, Vec<String>>) -> Vec<Track> {
-    let q = view.search.trim().to_lowercase();
+    let words: Vec<String> = fold(&view.search).split_whitespace().map(str::to_owned).collect();
     let mut out: Vec<Track> = tracks
         .iter()
-        .filter(|t| {
-            q.is_empty()
-                || t.title.to_lowercase().contains(&q)
-                || t.artist.name.to_lowercase().contains(&q)
-                || t.album.as_ref().is_some_and(|a| a.title.to_lowercase().contains(&q))
-        })
+        .filter(|t| words.is_empty() || track_matches(t, &words))
         .filter(|t| match &view.genre {
             None => true,
             Some(g) => track_genres(t, genres).iter().any(|x| x == g),
@@ -277,6 +333,8 @@ pub struct Saved {
     pub profile: Profile,
     /// Songs whose featured artists were already looked up.
     pub featured_checked: HashSet<String>,
+    /// What you searched for lately, newest first.
+    pub recent_searches: Vec<String>,
     /// The queue when Pulse was closed, where in it you were, and how far into the song.
     pub last_queue: Vec<Track>,
     pub last_queue_pos: usize,
@@ -320,6 +378,7 @@ impl Default for Saved {
             visits: vec![],
             profile: Profile::default(),
             featured_checked: HashSet::new(),
+            recent_searches: vec![],
             last_queue: vec![],
             last_queue_pos: 0,
             last_position: 0.0,
@@ -683,6 +742,10 @@ impl App {
             return;
         }
         let old = std::mem::replace(&mut self.route, route);
+        // Leaving search for something you found there: remember the search.
+        if let (Route::Search(q), false) = (&old, matches!(self.route, Route::Search(_))) {
+            self.remember_search(&q.clone());
+        }
         // Typing in search replaces the search page instead of piling up history.
         if !matches!((&old, &self.route), (Route::Search(_), Route::Search(_))) {
             self.back.push(old);
@@ -927,6 +990,27 @@ impl App {
             return;
         }
         self.navigate(Route::Search(q), ctx);
+    }
+
+    pub fn remember_search(&mut self, q: &str) {
+        let q = q.trim();
+        if q.is_empty() {
+            return;
+        }
+        self.saved.recent_searches.retain(|r| !r.eq_ignore_ascii_case(q));
+        self.saved.recent_searches.insert(0, q.to_string());
+        self.saved.recent_searches.truncate(10);
+    }
+
+    /// The search page's results for what's typed, if they've arrived.
+    pub fn search_results_for(&self, q: &str) -> Option<&deezer::SearchResults> {
+        match self.cache.get(&format!("search:{}", q.trim())) {
+            Some(Remote::Ready(p)) => match p.as_ref() {
+                Page::Search(r) => Some(r),
+                _ => None,
+            },
+            _ => None,
+        }
     }
 
     pub fn toast(&mut self, msg: &str, ctx: &egui::Context) {
@@ -2133,6 +2217,30 @@ impl eframe::App for App {
 
     fn auto_save_interval(&self) -> Duration {
         Duration::from_secs(15)
+    }
+}
+
+#[cfg(test)]
+mod search_tests {
+    use super::*;
+
+    fn song(title: &str, artist: &str) -> Track {
+        let mut t = Track::default();
+        t.title = title.into();
+        t.artist.name = artist.into();
+        t
+    }
+
+    #[test]
+    fn local_search_matches_parts_accents_and_small_typos() {
+        let words = |q: &str| fold(q).split_whitespace().map(str::to_owned).collect::<Vec<_>>();
+        let t = song("Halo", "Beyoncé");
+        assert!(track_matches(&t, &words("beyonce")));
+        assert!(track_matches(&t, &words("beyonse halo")));
+        assert!(track_matches(&t, &words("bey")));
+        assert!(!track_matches(&t, &words("adele")));
+        assert!(one_edit_apart("drake", "drakes"));
+        assert!(!one_edit_apart("drake", "brakes"));
     }
 }
 

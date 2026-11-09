@@ -558,16 +558,47 @@ pub fn find_track(artist: &str, title: &str, duration: u32) -> Result<Option<Tra
 }
 
 pub fn search(q: &str) -> Result<SearchResults, String> {
-    let t: List<DzTrack> = get("/search/track", &[("q", q), ("limit", "40")])?;
-    let artists: List<DzArtist> = get("/search/artist", &[("q", q), ("limit", "12")]).unwrap_or_default();
-    let albums: List<DzAlbum> = get("/search/album", &[("q", q), ("limit", "12")]).unwrap_or_default();
-    let playlists: List<DzPlaylist> = get("/search/playlist", &[("q", q), ("limit", "12")]).unwrap_or_default();
+    let r = search_once(q)?;
+    if !r.is_empty() {
+        return Ok(r);
+    }
+    // Nothing found: try again more loosely (no punctuation, then without the last word,
+    // which is often half-typed or misspelled).
+    let loose: String = q.chars().map(|c| if c.is_alphanumeric() || c.is_whitespace() { c } else { ' ' }).collect();
+    let loose = loose.split_whitespace().collect::<Vec<_>>().join(" ");
+    if !loose.is_empty() && loose != q {
+        let r = search_once(&loose)?;
+        if !r.is_empty() {
+            return Ok(r);
+        }
+    }
+    match loose.rsplit_once(' ') {
+        Some((shorter, _)) if !shorter.trim().is_empty() => search_once(shorter),
+        _ => Ok(r),
+    }
+}
+
+/// Songs, artists, albums and playlists, asked for all at once.
+fn search_once(q: &str) -> Result<SearchResults, String> {
+    let (t, artists, albums, playlists) = std::thread::scope(|s| {
+        let artists = s.spawn(|| get::<List<DzArtist>>("/search/artist", &[("q", q), ("limit", "12")]).unwrap_or_default());
+        let albums = s.spawn(|| get::<List<DzAlbum>>("/search/album", &[("q", q), ("limit", "24")]).unwrap_or_default());
+        let playlists = s.spawn(|| get::<List<DzPlaylist>>("/search/playlist", &[("q", q), ("limit", "12")]).unwrap_or_default());
+        let t = get::<List<DzTrack>>("/search/track", &[("q", q), ("limit", "40")]);
+        (t, artists.join().unwrap_or_default(), albums.join().unwrap_or_default(), playlists.join().unwrap_or_default())
+    });
     Ok(SearchResults {
-        tracks: tracks(t),
+        tracks: tracks(t?),
         artists: artists.data.into_iter().map(ArtistInfo::from).collect(),
         albums: albums.data.into_iter().map(|a| album_info(a, None)).collect(),
         playlists: playlists.data.iter().map(playlist_info).collect(),
     })
+}
+
+impl SearchResults {
+    pub fn is_empty(&self) -> bool {
+        self.tracks.is_empty() && self.artists.is_empty() && self.albums.is_empty() && self.playlists.is_empty()
+    }
 }
 
 pub fn artist_page(id: &str) -> Result<ArtistPage, String> {
