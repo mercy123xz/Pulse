@@ -181,12 +181,6 @@ fn parse_time(tag: &str) -> Option<f32> {
     (m >= 0.0 && (0.0..60.0).contains(&s)).then_some(m * 60.0 + s)
 }
 
-/// A Genius search page for the song (its page has the lyrics' meanings and notes).
-pub fn genius_url(t: &Track) -> String {
-    let q = format!("{} {}", t.artist.name, crate::youtube::core_title(&t.title));
-    format!("https://genius.com/search?q={}", crate::net::encode(&q))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -30,13 +30,12 @@ pub fn panel_open(app: &App, ctx: &egui::Context) -> bool {
 }
 
 pub fn lyrics_page(app: &mut App, ui: &mut Ui) {
-    let ctx = ui.ctx().clone();
     let Some(t) = app.current.clone() else {
         empty_state(ui, icon::MICROPHONE_STAGE, "Nothing playing", "Play a song to see its lyrics here.", None);
         return;
     };
 
-    // Header: the song, the Genius link and the text options.
+    // Header: the song and the text options.
     ui.add_space(12.0);
     ui.horizontal(|ui| {
         let (r, _) = ui.allocate_exact_size(vec2(56.0, 56.0), Sense::hover());
@@ -47,10 +46,6 @@ pub fn lyrics_page(app: &mut App, ui: &mut Ui) {
             ui.label(RichText::new(t.all_artists()).font(regular(13.0)).color(pal().text_muted));
         });
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            if ghost_button(ui, icon::ARROW_SQUARE_OUT, "View on Genius").on_hover_text(tr("The song's page on Genius, with notes on what the lyrics mean")).clicked() {
-                ctx.open_url(egui::OpenUrl::new_tab(crate::lyrics::genius_url(&t)));
-            }
-            ui.add_space(8.0);
             text_options(app, ui);
         });
     });
@@ -78,7 +73,7 @@ pub fn lyrics_panel(app: &mut App, ui: &mut Ui) {
         ui.label(RichText::new(tr("Play a song to see its lyrics here.")).font(regular(13.0)).color(pal().text_muted));
         return;
     };
-    // The song, with the text options and the Genius link.
+    // The song, then the text options.
     ui.add_space(6.0);
     ui.horizontal(|ui| {
         let (r, _) = ui.allocate_exact_size(vec2(40.0, 40.0), Sense::hover());
@@ -91,14 +86,7 @@ pub fn lyrics_panel(app: &mut App, ui: &mut Ui) {
         });
     });
     ui.add_space(4.0);
-    ui.horizontal(|ui| {
-        text_options(app, ui);
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            if icon_button(ui, icon::ARROW_SQUARE_OUT, 15.0, pal().text_muted, tr("View on Genius")).clicked() {
-                ctx.open_url(egui::OpenUrl::new_tab(crate::lyrics::genius_url(&t)));
-            }
-        });
-    });
+    ui.horizontal(|ui| text_options(app, ui));
     ui.add_space(6.0);
     ui.separator();
 
@@ -169,7 +157,7 @@ fn lyrics_body(app: &mut App, ui: &mut Ui, t: &Track, size: f32, place: &str, fo
             return;
         }
         Some(Err(e)) if e.is_empty() => {
-            notice(ui, compact, icon::MICROPHONE_STAGE, "No lyrics for this song yet", "LRCLIB doesn't have them. You can still read them on Genius.", None);
+            notice(ui, compact, icon::MICROPHONE_STAGE, "No lyrics for this song yet", "LRCLIB doesn't have them yet.", None);
             return;
         }
         Some(Err(e)) => {
