@@ -11,7 +11,7 @@
 // Optional binding: RATE_LIMITER (Rate Limiting), see worker/README.md.
 
 const REPO = "mercy123xz/Pulse";
-const ALLOWED_ORIGINS = ["https://mercy123xz.github.io"];
+const ALLOWED_ORIGINS = ["https://pulse.is-a.software", "https://mercy123xz.github.io"];
 const MAX_MESSAGE = 3000;
 
 export default {
@@ -61,7 +61,7 @@ export default {
     const check = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", { method: "POST", body: form })
       .then((r) => r.json())
       .catch(() => ({ success: false }));
-    const hostOk = !check.hostname || check.hostname === "mercy123xz.github.io";
+    const hostOk = !check.hostname || ALLOWED_ORIGINS.some((o) => o === `https://${check.hostname}`);
     if (!check.success || !hostOk) return reply(403, { error: "The anti-spam check didn't pass. Please try again." });
 
     const title = `${kind === "bug" ? "[Problem]" : "[Question]"} ${quiet(oneLine(message).slice(0, 100))}`;
