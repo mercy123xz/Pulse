@@ -170,15 +170,11 @@ fn sidebar(app: &mut App, ui: &mut Ui) {
     if nav_item(ui, icon::FIRE, "Charts", app.route == Route::Charts, None).clicked() {
         app.navigate(Route::Charts, &ctx);
     }
-    let searching = matches!(app.route, Route::Search(_));
-    if nav_item(ui, icon::MAGNIFYING_GLASS, "Search", searching, None).clicked() {
-        app.focus_search = true;
-    }
 
     ui.add_space(14.0);
     nav_heading(ui, "Library");
     let liked_n = app.saved.liked.len();
-    if nav_item(ui, icon::HEART, "Liked Songs", app.route == Route::Liked, Some(liked_n)).clicked() {
+    if nav_item_art(ui, Some(LIKED_ART), icon::HEART, "Liked Songs", app.route == Route::Liked, Some(liked_n)).clicked() {
         app.navigate(Route::Liked, &ctx);
     }
     if nav_item(ui, icon::CLOCK_COUNTER_CLOCKWISE, "Recently Played", app.route == Route::Recent, None).clicked() {
@@ -246,7 +242,8 @@ fn sidebar(app: &mut App, ui: &mut Ui) {
         for i in 0..app.saved.playlists.len() {
             let name = app.saved.playlists[i].name.clone();
             let count = app.saved.playlists[i].tracks.len();
-            let resp = nav_item(ui, icon::PLAYLIST, &name, app.route == Route::Local(i), Some(count));
+            let art = app.playlist_art(i);
+            let resp = nav_item_art(ui, art.as_deref(), icon::PLAYLIST, &name, app.route == Route::Local(i), Some(count));
             if resp.clicked() {
                 app.navigate(Route::Local(i), &ctx);
             }
@@ -303,19 +300,43 @@ fn nav_heading(ui: &mut Ui, text: &str) {
 }
 
 fn nav_item(ui: &mut Ui, glyph: &str, label: &str, selected: bool, badge: Option<usize>) -> egui::Response {
-    let label = tr(label);
+    nav_item_art(ui, None, glyph, label, selected, badge)
+}
+
+/// A sidebar row. With `art` (a playlist's cover, the Liked Songs heart) the picture
+/// takes the icon's place.
+fn nav_item_art(ui: &mut Ui, art: Option<&str>, glyph: &str, label: &str, selected: bool, badge: Option<usize>) -> egui::Response {
     if compact_sidebar() {
-        // Icon only, with the name as a tooltip.
-        let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 44.0), Sense::click());
-        resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, label));
+        // Shorter words fit under the icons; the full name is in the tooltip.
+        let full = tr(label);
+        let short = tr(match label {
+            "Liked Songs" => "Liked",
+            "Recently Played" => "Recent",
+            "Local Files" => "Files",
+            "Create playlist" => "New",
+            "Import playlist" => "Import",
+            other => other,
+        });
+        // Icon over a small label, so the narrow sidebar still says what each button is.
+        let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 54.0), Sense::click());
+        resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, full));
         focus_ring(ui, &resp);
         let fill = if selected { pal().surface_active } else if resp.hovered() { pal().surface_hover } else { Color32::TRANSPARENT };
         ui.painter().rect_filled(rect, r_md(), fill);
-        let (font, col) = if selected { (filled_icon(20.0), pal().accent_soft) } else { (regular(20.0), pal().text_muted) };
-        ui.painter().text(rect.center(), Align2::CENTER_CENTER, glyph, font, col);
-        return resp.on_hover_text(label).on_hover_cursor(egui::CursorIcon::PointingHand);
+        let top = pos2(rect.center().x, rect.top() + 18.0);
+        if art.is_some() {
+            artwork(ui, Rect::from_center_size(top, Vec2::splat(24.0)), art, CornerRadius::same(5));
+        } else {
+            let (font, col) = if selected { (filled_icon(19.0), pal().accent_soft) } else { (regular(19.0), pal().text_muted) };
+            ui.painter().text(top, Align2::CENTER_CENTER, glyph, font, col);
+        }
+        let text_col = if selected || resp.hovered() { pal().text } else { pal().text_muted };
+        let g = one_line(ui, short, med(9.5), text_col, rect.width() - 6.0);
+        ui.painter().galley(pos2(rect.center().x - g.size().x / 2.0, rect.bottom() - 8.0 - g.size().y), g, text_col);
+        return resp.on_hover_text(full).on_hover_cursor(egui::CursorIcon::PointingHand);
     }
-    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 36.0), Sense::click());
+    let label = tr(label);
+    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), if art.is_some() { 40.0 } else { 36.0 }), Sense::click());
     resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, label));
     focus_ring(ui, &resp);
     let fill = if selected {
@@ -330,13 +351,18 @@ fn nav_item(ui: &mut Ui, glyph: &str, label: &str, selected: bool, badge: Option
         let bar = Rect::from_min_size(pos2(rect.left(), rect.center().y - 9.0), vec2(3.0, 18.0));
         ui.painter().rect_filled(bar, CornerRadius::same(2), pal().accent_soft);
     }
-    let icon_col = if selected { pal().accent_soft } else { pal().text_muted };
-    let font = if selected { filled_icon(17.0) } else { regular(17.0) };
-    ui.painter().text(pos2(rect.left() + 22.0, rect.center().y), Align2::CENTER_CENTER, glyph, font, icon_col);
+    let icon_c = pos2(rect.left() + 22.0, rect.center().y);
+    if art.is_some() {
+        artwork(ui, Rect::from_center_size(icon_c, Vec2::splat(28.0)), art, CornerRadius::same(5));
+    } else {
+        let icon_col = if selected { pal().accent_soft } else { pal().text_muted };
+        let font = if selected { filled_icon(17.0) } else { regular(17.0) };
+        ui.painter().text(icon_c, Align2::CENTER_CENTER, glyph, font, icon_col);
+    }
     let text_col = if selected || resp.hovered() { pal().text } else { pal().text_muted };
     let max_w = rect.width() - 80.0;
     let g = one_line(ui, label, med(13.5), text_col, max_w);
-    ui.painter().galley(pos2(rect.left() + 42.0, rect.center().y - g.size().y / 2.0), g, text_col);
+    ui.painter().galley(pos2(rect.left() + 44.0, rect.center().y - g.size().y / 2.0), g, text_col);
     if let Some(n) = badge.filter(|n| *n > 0) {
         // Hovered/selected rows have a lighter background, where faint text would be too dim.
         let badge_col = if selected || resp.hovered() { pal().text_muted } else { pal().text_faint };
@@ -363,7 +389,8 @@ fn top_bar(app: &mut App, ui: &mut Ui) {
         ui.add_space(10.0);
 
         // Search pill
-        let w = (ui.available_width() - 150.0).clamp(220.0, 440.0);
+        // Leave room for the labeled buttons on the right.
+        let w = (ui.available_width() - 380.0).clamp(200.0, 440.0);
         let (rect, _) = ui.allocate_exact_size(vec2(w, 38.0), Sense::hover());
         let id = egui::Id::new("search_box");
         let focused = ui.memory(|m| m.has_focus(id));
@@ -432,14 +459,21 @@ fn top_bar(app: &mut App, ui: &mut Ui) {
                 }
             }
             ui.add_space(4.0);
+            // Labeled, so each button says what it does (narrow windows keep just the icons).
+            let roomy = ui.available_width() > 330.0;
             let on_settings = app.route == Route::Settings;
-            let gear_col = if on_settings { pal().accent_soft } else { pal().text_muted };
-            if icon_button(ui, icon::GEAR_SIX, 18.0, gear_col, tr("Settings")).clicked() {
+            let settings = if roomy {
+                labeled_button(ui, icon::GEAR_SIX, tr("Settings"), on_settings)
+            } else {
+                icon_button(ui, icon::GEAR_SIX, 18.0, if on_settings { pal().accent_soft } else { pal().text_muted }, tr("Settings"))
+            };
+            if settings.clicked() {
                 app.navigate(Route::Settings, &ctx);
             }
             if app.theme_has_light_and_dark() {
-                let (glyph, tip) = if app.saved.light_mode { (icon::MOON, "Switch to dark mode") } else { (icon::SUN, "Switch to light mode") };
-                if icon_button(ui, glyph, 17.0, pal().text_muted, tr(tip)).clicked() {
+                let (glyph, label, tip) = if app.saved.light_mode { (icon::MOON, "Dark", "Switch to dark mode") } else { (icon::SUN, "Light", "Switch to light mode") };
+                let r = if roomy { labeled_button(ui, glyph, tr(label), false).on_hover_text(tr(tip)) } else { icon_button(ui, glyph, 17.0, pal().text_muted, tr(tip)) };
+                if r.clicked() {
                     app.toggle_theme(&ctx);
                 }
             }
@@ -703,7 +737,17 @@ fn album_grid_visits(app: &mut App, ui: &mut Ui, items: &[crate::app::Visit], ro
     let ctx = ui.ctx().clone();
     let mut action = None;
     card_grid(ui, items, rows, |ui, w, v| {
-        let info = CardInfo { id: egui::Id::new(("visit", format!("{:?}", v.place))), art: v.image.as_deref(), title: &v.title, subtitle: tr(&v.subtitle).to_string(), round: v.round, badge: None };
+        let current = match &v.place {
+            crate::app::Place::Yours(name) => app.saved.playlists.iter().position(|p| p.name == *name).and_then(|i| app.playlist_art(i)),
+            _ => None,
+        };
+        let art = if v.place == crate::app::Place::Liked { Some(LIKED_ART) } else { current.as_deref().or(v.image.as_deref()) };
+        // Orbits saved before the rename were called "Daily Mix 01".
+        let title = match &v.place {
+            crate::app::Place::Mix(id) => app.saved.played_artists.iter().find(|a| a.place == crate::app::Place::Artist(id.clone())).map(|a| personal::orbit_title(&a.title)).unwrap_or_else(|| v.title.clone()),
+            _ => v.title.clone(),
+        };
+        let info = CardInfo { id: egui::Id::new(("visit", format!("{:?}", v.place))), art, title: &title, subtitle: tr(&v.subtitle).to_string(), round: v.round, badge: None };
         match card(ui, w, &info) {
             CardClick::Open => action = Some((v.place.clone(), false)),
             CardClick::Play => action = Some((v.place.clone(), true)),
@@ -1102,11 +1146,15 @@ fn local_collection(app: &mut App, ui: &mut Ui, title: &str, sub: &str, glyph: &
     let kind = if playlist.is_some() { "Playlist" } else { "Library" };
     // Cover: your own picture, else the first song's artwork.
     let custom = playlist.and_then(|i| app.saved.playlists.get(i)).and_then(|p| p.cover.as_ref()).map(|c| crate::settings::file_uri(c));
-    let art = custom.clone().or_else(|| if playlist.is_some() { tracks.first().and_then(|t| t.art_big()).map(str::to_owned) } else { None });
+    let art = custom.clone().or_else(|| match playlist {
+        Some(_) => tracks.iter().find_map(|t| t.art_big()).map(str::to_owned),
+        None if app.route == Route::Liked => Some(LIKED_ART.to_owned()),
+        None => None,
+    });
     let clicks = hero(ui, &Hero { editable: playlist.is_some(), kind: tr(kind), title: tr(title), subtitle: sub, art: art.as_deref(), glyph, round: false, banner: None, links: &[] });
     match (&app.route, playlist) {
         (_, Some(_)) => app.note_visit(crate::app::Place::Yours(title.to_string()), title, "Playlist", art.as_deref(), false),
-        (Route::Liked, _) => app.note_visit(crate::app::Place::Liked, tr("Liked Songs"), "Playlist", None, false),
+        (Route::Liked, _) => app.note_visit(crate::app::Place::Liked, tr("Liked Songs"), "Playlist", Some(LIKED_ART), false),
         _ => {}
     }
     if let Some(i) = playlist {

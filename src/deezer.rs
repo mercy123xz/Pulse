@@ -715,7 +715,7 @@ pub fn playlist(id: &str) -> Result<(PlaylistInfo, Vec<Track>), String> {
 
 /// Songs similar to `t`, for autoplay: the artist's radio, or a search by name
 /// for songs saved by older versions of Pulse.
-/// A Daily Mix: songs like an artist's (their radio) mixed with their own hits,
+/// An Orbit: songs like an artist's (their radio) mixed with their own hits,
 /// shuffled the same way all day so the mix stays put until tomorrow.
 pub fn mix(artist_id: &str) -> Result<Vec<Track>, String> {
     let radio: List<DzTrack> = get(&format!("/artist/{artist_id}/radio"), &[("limit", "40")]).unwrap_or_default();

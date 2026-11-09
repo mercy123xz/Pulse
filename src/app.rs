@@ -28,7 +28,7 @@ pub enum Route {
     Local(usize),
     LocalFiles,
     Settings,
-    /// A Daily Mix built around one of your most-played artists (Deezer artist id).
+    /// An Orbit: a mix built around one of your most-played artists (Deezer artist id).
     Mix(String),
     /// A song's own page (its id, "dz:…" or an imported song's id).
     Song(String),
@@ -1248,6 +1248,12 @@ impl App {
     }
 
     /// Remembers a page you opened (for "Recents"). Cheap to call every frame.
+    /// A playlist's picture: your own cover, else its first song's artwork.
+    pub fn playlist_art(&self, i: usize) -> Option<String> {
+        let p = self.saved.playlists.get(i)?;
+        p.cover.as_ref().map(|c| crate::settings::file_uri(c)).or_else(|| p.tracks.iter().find_map(|t| t.art_small()).map(str::to_owned))
+    }
+
     pub fn note_visit(&mut self, place: Place, title: &str, subtitle: &str, image: Option<&str>, round: bool) {
         if self.saved.visits.first().is_some_and(|v| v.place == place) {
             return;
