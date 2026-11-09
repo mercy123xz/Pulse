@@ -154,6 +154,8 @@ pub struct Settings {
     pub lyrics_size: u8,
     pub lyrics_center: bool,
     pub mini_lyrics: bool,
+    /// The lyrics panel beside the page is open.
+    pub lyrics_panel: bool,
     pub hardware_acceleration: bool,
     /// Theme name and its color scheme.
     pub theme: String,
@@ -189,6 +191,7 @@ impl Default for Settings {
             lyrics_size: 1,
             lyrics_center: true,
             mini_lyrics: false,
+            lyrics_panel: false,
             hardware_acceleration: true,
             theme: "Default".into(),
             scheme: String::new(),

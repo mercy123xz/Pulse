@@ -44,6 +44,18 @@ pub fn draw(app: &mut App, ui: &mut Ui) {
     if let Some(b) = pt.sidebar.border {
         ui.painter().vline(side.response.rect.right(), side.response.rect.y_range(), b);
     }
+    // Lyrics beside whatever page is open.
+    if lyrics_page::panel_open(app, ui.ctx()) {
+        let panel = egui::Panel::right("lyrics_panel")
+            .exact_size(lyrics_page::PANEL_WIDTH)
+            .resizable(false)
+            .frame(Frame::new().fill(sidebar_fill).inner_margin(Margin { left: 16, right: 14, top: 16, bottom: 0 }))
+            .show_separator_line(false)
+            .show(ui, |ui| lyrics_page::lyrics_panel(app, ui));
+        if !lay.inset {
+            ui.painter().vline(panel.response.rect.left(), panel.response.rect.y_range(), Stroke::new(1.0, pal().border));
+        }
+    }
 
     let header_fill = pt.header.fill.unwrap_or(pal().bg);
     if lay.inset {
@@ -148,11 +160,7 @@ fn shortcuts(app: &mut App, ctx: &egui::Context) {
             app.cycle_repeat();
         }
         if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::L)) {
-            if app.route == Route::Lyrics {
-                app.go_back(ctx);
-            } else {
-                app.navigate(Route::Lyrics, ctx);
-            }
+            lyrics_page::toggle(app, ctx);
         }
         if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::M)) {
             app.toggle_mute();
@@ -1945,12 +1953,9 @@ fn player_bar(app: &mut App, ui: &mut Ui) {
         app.toggle_mute();
     }
     let on_lyrics = app.route == Route::Lyrics;
-    if icon_button(&mut rui, icon::MICROPHONE_STAGE, 17.0, if on_lyrics { pal().accent_soft } else { pal().text_muted }, tr("Lyrics (L)")).clicked() {
-        if on_lyrics {
-            app.go_back(&ctx);
-        } else {
-            app.navigate(Route::Lyrics, &ctx);
-        }
+    let lyrics_on = on_lyrics || lyrics_page::panel_open(app, &ctx);
+    if icon_button(&mut rui, icon::MICROPHONE_STAGE, 17.0, if lyrics_on { pal().accent_soft } else { pal().text_muted }, tr("Lyrics (L)")).clicked() {
+        lyrics_page::toggle(app, &ctx);
     }
     let mini_on = app.saved.settings.mini_open;
     if icon_button(&mut rui, icon::PICTURE_IN_PICTURE, 17.0, if mini_on { pal().accent_soft } else { pal().text_muted }, tr("Mini player (Ctrl+M)")).clicked() {
