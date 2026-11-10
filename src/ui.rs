@@ -1,11 +1,11 @@
 //! Everything you see: sidebar, top bar, pages, the player bar and pop-ups.
 
 use crate::app::{App, Page, Remote, Repeat, Route};
-use crate::deezer::{AlbumInfo, ArtistInfo, PlaylistInfo, Track};
 use crate::audio::LoadState;
+use crate::deezer::{AlbumInfo, ArtistInfo, PlaylistInfo, Track};
+use crate::i18n::tr;
 use crate::theme::*;
 use crate::widgets::*;
-use crate::i18n::tr;
 
 mod diag_page;
 mod lyrics_page;
@@ -14,9 +14,9 @@ mod personal;
 mod settings_page;
 mod song_page;
 
-pub use personal::ProfileForm;
 use egui::{Align, Align2, Color32, CornerRadius, Frame, Key, Layout, Margin, Rect, RichText, Sense, Stroke, Ui, Vec2, pos2, vec2};
 use egui_phosphor::regular as icon;
+pub use personal::ProfileForm;
 
 pub fn draw(app: &mut App, ui: &mut Ui) {
     let ctx = ui.ctx().clone();
@@ -164,14 +164,11 @@ fn update_banner(app: &mut App, ui: &mut Ui) {
 
 fn main_scroll(app: &mut App, ui: &mut Ui) {
     update_banner(app, ui);
-    egui::ScrollArea::vertical()
-        .id_salt(("page", format!("{:?}", app.route)))
-        .auto_shrink(false)
-        .show(ui, |ui| {
-            Frame::new().inner_margin(Margin { left: 28, right: 28, top: 4, bottom: 32 }).show(ui, |ui| {
-                page(app, ui);
-            });
+    egui::ScrollArea::vertical().id_salt(("page", format!("{:?}", app.route))).auto_shrink(false).show(ui, |ui| {
+        Frame::new().inner_margin(Margin { left: 28, right: 28, top: 4, bottom: 32 }).show(ui, |ui| {
+            page(app, ui);
         });
+    });
 }
 
 fn shortcuts(app: &mut App, ctx: &egui::Context) {
@@ -418,7 +415,13 @@ fn nav_item_art(ui: &mut Ui, art: Option<&str>, glyph: &str, label: &str, select
         let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 54.0), Sense::click());
         resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, full));
         focus_ring(ui, &resp);
-        let fill = if selected { pal().surface_active } else if resp.hovered() { pal().surface_hover } else { Color32::TRANSPARENT };
+        let fill = if selected {
+            pal().surface_active
+        } else if resp.hovered() {
+            pal().surface_hover
+        } else {
+            Color32::TRANSPARENT
+        };
         ui.painter().rect_filled(rect, r_md(), fill);
         let top = pos2(rect.center().x, rect.top() + 18.0);
         if art.is_some() {
@@ -505,7 +508,8 @@ fn search_dropdown(app: &mut App, ui: &mut Ui, pill: Rect, edit: &egui::Response
             items.push((Suggestion::Song(Box::new(t.clone())), t.title.clone(), t.all_artists(), t.art_small().map(str::to_owned)));
         }
     }
-    let searching = !q.is_empty() && items.is_empty() && (app.search_edited_at.is_some() || matches!(app.cache.get(&format!("search:{q}")), Some(Remote::Loading)));
+    let searching =
+        !q.is_empty() && items.is_empty() && (app.search_edited_at.is_some() || matches!(app.cache.get(&format!("search:{q}")), Some(Remote::Loading)));
     if items.is_empty() && !searching {
         return false;
     }
@@ -535,7 +539,11 @@ fn search_dropdown(app: &mut App, ui: &mut Ui, pill: Rect, edit: &egui::Response
                 ui.horizontal(|ui| {
                     menu_header(ui, "Recent searches");
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if ui.add(egui::Label::new(RichText::new(tr("Clear history")).font(med(11.5)).color(pal().text_muted)).sense(Sense::click())).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                        if ui
+                            .add(egui::Label::new(RichText::new(tr("Clear history")).font(med(11.5)).color(pal().text_muted)).sense(Sense::click()))
+                            .on_hover_cursor(egui::CursorIcon::PointingHand)
+                            .clicked()
+                        {
                             clear_history = true;
                         }
                     });
@@ -723,8 +731,13 @@ fn top_bar(app: &mut App, ui: &mut Ui) {
                 app.toggle_gaming(&ctx);
             }
             if app.theme_has_light_and_dark() {
-                let (glyph, label, tip) = if app.saved.light_mode { (icon::MOON, "Dark", "Switch to dark mode") } else { (icon::SUN, "Light", "Switch to light mode") };
-                let r = if roomy { labeled_button(ui, glyph, tr(label), false).on_hover_text(tr(tip)) } else { icon_button(ui, glyph, 17.0, pal().text_muted, tr(tip)) };
+                let (glyph, label, tip) =
+                    if app.saved.light_mode { (icon::MOON, "Dark", "Switch to dark mode") } else { (icon::SUN, "Light", "Switch to light mode") };
+                let r = if roomy {
+                    labeled_button(ui, glyph, tr(label), false).on_hover_text(tr(tip))
+                } else {
+                    icon_button(ui, glyph, 17.0, pal().text_muted, tr(tip))
+                };
                 if r.clicked() {
                     app.toggle_theme(&ctx);
                 }
@@ -902,7 +915,8 @@ fn welcome_banner(ui: &mut Ui) {
     ui.painter().text(rect.right_center() - vec2(40.0, 0.0), Align2::RIGHT_CENTER, icon::VINYL_RECORD, regular(96.0), pal().accent_soft.gamma_multiply(0.25));
 }
 
-/// Today's top songs, popular albums, artists and playlists.
+/// Today's top songs, then rows built from what you play ("Listeners of X also listen
+/// to", "Songs like Y"); until you've played something, popular albums, artists and playlists.
 fn home_discovery(app: &mut App, ui: &mut Ui) {
     with_remote(app, ui, |app, ui, page| {
         let Page::Home(chart) = page else { return };
@@ -912,6 +926,12 @@ fn home_discovery(app: &mut App, ui: &mut Ui) {
             app.navigate(Route::Charts, &ctx);
         }
         tracks_block(app, ui, "home_top", &chart.tracks);
+        if !chart.for_you.is_empty() {
+            for (k, row) in chart.for_you.iter().enumerate() {
+                suggestion_row(app, ui, &format!("home_for_you_{k}"), row);
+            }
+            return;
+        }
         if !chart.albums.is_empty() {
             section_title(ui, "Popular albums", None);
             album_grid(app, ui, &chart.albums, Some(2));
@@ -925,6 +945,20 @@ fn home_discovery(app: &mut App, ui: &mut Ui) {
             playlist_grid(app, ui, &chart.playlists, Some(1));
         }
     });
+}
+
+/// One row of suggestions: artists that listeners of X also play, or songs like Y.
+fn suggestion_row(app: &mut App, ui: &mut Ui, salt: &str, row: &crate::deezer::Suggestion) {
+    match row {
+        crate::deezer::Suggestion::AlsoListen(name, artists) => {
+            section_title(ui, &tr("Listeners of {} also listen to").replace("{}", name), None);
+            artist_grid(app, ui, artists, Some(1));
+        }
+        crate::deezer::Suggestion::SongsLike(name, tracks) => {
+            section_title(ui, &tr("Songs like {}").replace("{}", name), None);
+            tracks_block(app, ui, salt, &tracks[..tracks.len().min(10)]);
+        }
+    }
 }
 
 /// "Play" pressed on a card: open the page and start playing once its songs load.
@@ -977,7 +1011,13 @@ fn playlist_grid(app: &mut App, ui: &mut Ui, playlists: &[PlaylistInfo], rows: O
     let mut action = None;
     let mut preview = None;
     card_grid(ui, playlists, rows, |ui, w, p| {
-        let sub = if !p.creator.is_empty() { format!("Playlist · {}", p.creator) } else if p.nb_tracks > 0 { song_count(p.nb_tracks as usize) } else { "Playlist".to_string() };
+        let sub = if !p.creator.is_empty() {
+            format!("Playlist · {}", p.creator)
+        } else if p.nb_tracks > 0 {
+            song_count(p.nb_tracks as usize)
+        } else {
+            "Playlist".to_string()
+        };
         let info = CardInfo { id: egui::Id::new(("pl", &p.id)), art: p.picture.as_deref(), title: &p.title, subtitle: sub, round: false, badge: None };
         match card(ui, w, &info) {
             CardClick::Open => action = Some((p.id.clone(), false)),
@@ -1009,10 +1049,23 @@ fn album_grid_visits(app: &mut App, ui: &mut Ui, items: &[crate::app::Visit], ro
         let art = if v.place == crate::app::Place::Liked { Some(LIKED_ART) } else { current.as_deref().or(v.image.as_deref()) };
         // Orbits saved before the rename were called "Daily Mix 01".
         let title = match &v.place {
-            crate::app::Place::Mix(id) => app.saved.played_artists.iter().find(|a| a.place == crate::app::Place::Artist(id.clone())).map(|a| personal::orbit_title(&a.title)).unwrap_or_else(|| v.title.clone()),
+            crate::app::Place::Mix(id) => app
+                .saved
+                .played_artists
+                .iter()
+                .find(|a| a.place == crate::app::Place::Artist(id.clone()))
+                .map(|a| personal::orbit_title(&a.title))
+                .unwrap_or_else(|| v.title.clone()),
             _ => v.title.clone(),
         };
-        let info = CardInfo { id: egui::Id::new(("visit", format!("{:?}", v.place))), art, title: &title, subtitle: tr(&v.subtitle).to_string(), round: v.round, badge: None };
+        let info = CardInfo {
+            id: egui::Id::new(("visit", format!("{:?}", v.place))),
+            art,
+            title: &title,
+            subtitle: tr(&v.subtitle).to_string(),
+            round: v.round,
+            badge: None,
+        };
         match card(ui, w, &info) {
             CardClick::Open => action = Some((v.place.clone(), false)),
             CardClick::Play => action = Some((v.place.clone(), true)),
@@ -1159,10 +1212,24 @@ fn search(app: &mut App, ui: &mut Ui, q: &str) {
             section_title(ui, "Artists", None);
             artist_grid(app, ui, &r.artists, if all { Some(1) } else { None });
         }
+        // Searched for an artist: who their listeners also play.
+        if let Some((name, related, _)) = &r.around
+            && (all || filter == 2)
+            && !related.is_empty()
+        {
+            suggestion_row(app, ui, "search_also", &crate::deezer::Suggestion::AlsoListen(name.clone(), related.clone()));
+        }
         if (all || filter == 1) && !r.tracks.is_empty() {
             section_title(ui, "Songs", None);
             let shown = if all { &r.tracks[..r.tracks.len().min(10)] } else { &r.tracks[..] };
             tracks_block(app, ui, "search_tracks", shown);
+        }
+        // ...and songs by others that sound like theirs.
+        if let Some((name, _, songs)) = &r.around
+            && (all || filter == 1)
+            && songs.len() >= 3
+        {
+            suggestion_row(app, ui, "search_like", &crate::deezer::Suggestion::SongsLike(name.clone(), songs.clone()));
         }
         for (n, title, list) in [(3, "Albums", &albums), (4, "EPs", &eps), (5, "Singles", &singles)] {
             if (all || filter == n) && !list.is_empty() {
@@ -1340,12 +1407,27 @@ fn hero_full_bleed(ui: &mut Ui, h: &Hero, radius: CornerRadius) -> HeroClicks {
 
 fn remote_playlist(app: &mut App, ui: &mut Ui) {
     with_remote(app, ui, |app, ui, page| {
-        let Page::Playlist { info, tracks } = page else { return };
+        let Page::Playlist { info, tracks } = page else {
+            return;
+        };
         let mut sub = format!("{} · {}", song_count(tracks.len()), total_time(tracks));
         if !info.creator.is_empty() {
             sub = format!("{} · {sub}", info.creator);
         }
-        hero(ui, &Hero { editable: false, kind: "Playlist", title: &info.title, subtitle: &sub, art: info.picture.as_deref(), glyph: icon::PLAYLIST, round: false, banner: None, links: &[] });
+        hero(
+            ui,
+            &Hero {
+                editable: false,
+                kind: "Playlist",
+                title: &info.title,
+                subtitle: &sub,
+                art: info.picture.as_deref(),
+                glyph: icon::PLAYLIST,
+                round: false,
+                banner: None,
+                links: &[],
+            },
+        );
         app.note_visit(crate::app::Place::Playlist(info.id.clone()), &info.title, &format!("Playlist · {}", info.creator), info.picture.as_deref(), false);
         let ctx = ui.ctx().clone();
         autoplay_page(app, &ctx, tracks);
@@ -1356,7 +1438,9 @@ fn remote_playlist(app: &mut App, ui: &mut Ui) {
 
 fn album_page(app: &mut App, ui: &mut Ui) {
     with_remote(app, ui, |app, ui, page| {
-        let Page::Album { info, tracks } = page else { return };
+        let Page::Album { info, tracks } = page else {
+            return;
+        };
         let linked = crate::deezer::is_deezer_id(&info.artist.id);
         let mut sub = if linked { String::new() } else { info.artist.name.clone() };
         if let Some(y) = info.year() {
@@ -1366,8 +1450,27 @@ fn album_page(app: &mut App, ui: &mut Ui) {
         let sub = if linked { sub } else { sub.trim_start_matches(" · ").to_string() };
         let names = [info.artist.name.as_str()];
         let links: &[&str] = if linked { &names } else { &[] };
-        let clicks = hero(ui, &Hero { editable: false, kind: info.kind(), title: &info.title, subtitle: &sub, art: info.cover.as_deref(), glyph: icon::VINYL_RECORD, round: false, banner: None, links });
-        app.note_visit(crate::app::Place::Album(info.id.clone()), &info.title, &format!("{} · {}", info.kind(), info.artist.name), info.cover.as_deref(), false);
+        let clicks = hero(
+            ui,
+            &Hero {
+                editable: false,
+                kind: info.kind(),
+                title: &info.title,
+                subtitle: &sub,
+                art: info.cover.as_deref(),
+                glyph: icon::VINYL_RECORD,
+                round: false,
+                banner: None,
+                links,
+            },
+        );
+        app.note_visit(
+            crate::app::Place::Album(info.id.clone()),
+            &info.title,
+            &format!("{} · {}", info.kind(), info.artist.name),
+            info.cover.as_deref(),
+            false,
+        );
         let ctx = ui.ctx().clone();
         if clicks.link.is_some() {
             app.navigate(Route::Artist(info.artist.id.clone()), &ctx);
@@ -1412,8 +1515,27 @@ fn artist(app: &mut App, ui: &mut Ui) {
     with_remote(app, ui, |app, ui, page| {
         let Page::Artist(p) = page else { return };
         let sub = format!("{} fans · {} releases", fmt_count(p.artist.fans), p.artist.albums);
-        hero(ui, &Hero { editable: false, kind: "Artist", title: &p.artist.name, subtitle: &sub, art: p.artist.picture_xl.as_deref(), glyph: icon::USER, round: true, banner: None, links: &[] });
-        app.note_visit(crate::app::Place::Artist(p.artist.id.clone()), &p.artist.name, "Artist", p.artist.picture.as_deref().or(p.artist.picture_xl.as_deref()), true);
+        hero(
+            ui,
+            &Hero {
+                editable: false,
+                kind: "Artist",
+                title: &p.artist.name,
+                subtitle: &sub,
+                art: p.artist.picture_xl.as_deref(),
+                glyph: icon::USER,
+                round: true,
+                banner: None,
+                links: &[],
+            },
+        );
+        app.note_visit(
+            crate::app::Place::Artist(p.artist.id.clone()),
+            &p.artist.name,
+            "Artist",
+            p.artist.picture.as_deref().or(p.artist.picture_xl.as_deref()),
+            true,
+        );
         action_row(app, ui, &p.top);
         let ctx = ui.ctx().clone();
 
@@ -1436,7 +1558,11 @@ fn artist(app: &mut App, ui: &mut Ui) {
         // "Fans also like", already on this page, so the preview costs no extra requests.
         section_title(ui, "Artist radio", None);
         let with: Vec<&str> = p.related.iter().take(3).map(|a| a.name.as_str()).collect();
-        let preview = if with.is_empty() { format!("{} {}", p.artist.name, tr("and similar artists")) } else { format!("{}, {} {}", p.artist.name, with.join(", "), tr("and more")) };
+        let preview = if with.is_empty() {
+            format!("{} {}", p.artist.name, tr("and similar artists"))
+        } else {
+            format!("{}, {} {}", p.artist.name, with.join(", "), tr("and more"))
+        };
         ui.horizontal(|ui| {
             let (r, resp) = ui.allocate_exact_size(Vec2::splat(56.0), Sense::click());
             artwork(ui, r, p.artist.picture.as_deref(), r_md());
@@ -1459,8 +1585,12 @@ fn artist(app: &mut App, ui: &mut Ui) {
             section_title(ui, "Discography", None);
             album_grid(app, ui, &p.releases, None);
         }
+        if p.songs_like.len() >= 3 {
+            section_title(ui, &tr("Songs like {}").replace("{}", &p.artist.name), None);
+            tracks_block(app, ui, "artist_like", &p.songs_like[..p.songs_like.len().min(10)]);
+        }
         if !p.related.is_empty() {
-            section_title(ui, "Fans also like", None);
+            section_title(ui, &tr("Listeners of {} also listen to").replace("{}", &p.artist.name), None);
             artist_grid(app, ui, &p.related, Some(1));
         }
     });
@@ -1506,7 +1636,20 @@ fn local_collection(app: &mut App, ui: &mut Ui, title: &str, sub: &str, glyph: &
         None if app.route == Route::Liked => Some(LIKED_ART.to_owned()),
         None => None,
     });
-    let clicks = hero(ui, &Hero { editable: playlist.is_some(), kind: tr(kind), title: tr(title), subtitle: sub, art: art.as_deref(), glyph, round: false, banner: None, links: &[] });
+    let clicks = hero(
+        ui,
+        &Hero {
+            editable: playlist.is_some(),
+            kind: tr(kind),
+            title: tr(title),
+            subtitle: sub,
+            art: art.as_deref(),
+            glyph,
+            round: false,
+            banner: None,
+            links: &[],
+        },
+    );
     match (&app.route, playlist) {
         (_, Some(_)) => app.note_visit(crate::app::Place::Yours(title.to_string()), title, "Playlist", art.as_deref(), false),
         (Route::Liked, _) => app.note_visit(crate::app::Place::Liked, tr("Liked Songs"), "Playlist", Some(LIKED_ART), false),
@@ -1692,12 +1835,7 @@ fn list_toolbar(app: &mut App, ui: &mut Ui, tracks: &[Track], playlist: Option<u
             // Search: an icon that opens into a box.
             if app.list_view.search_open || !app.list_view.search.is_empty() {
                 let id = ui.id().with("list_search");
-                let r = ui.add(
-                    egui::TextEdit::singleline(&mut app.list_view.search)
-                        .id(id)
-                        .hint_text(tr("Search in playlist"))
-                        .desired_width(200.0),
-                );
+                let r = ui.add(egui::TextEdit::singleline(&mut app.list_view.search).id(id).hint_text(tr("Search in playlist")).desired_width(200.0));
                 if app.list_view.search_open && !r.has_focus() && app.list_view.search.is_empty() && r.lost_focus() {
                     app.list_view.search_open = false;
                 }
@@ -1785,11 +1923,7 @@ fn player_bar(app: &mut App, ui: &mut Ui) {
     let left_w = (full.width() * 0.28).clamp(220.0, 360.0);
     let right_w = left_w.min(260.0);
     let controls_left = layout().player == crate::theme::PlayerStyle::ControlsLeft;
-    let center_w = if controls_left {
-        (full.width() * 0.34).clamp(300.0, 520.0)
-    } else {
-        (full.width() - left_w - right_w - 32.0).clamp(280.0, 640.0)
-    };
+    let center_w = if controls_left { (full.width() * 0.34).clamp(300.0, 520.0) } else { (full.width() - left_w - right_w - 32.0).clamp(280.0, 640.0) };
     // Where the song info and the controls go: song left + controls centred (normal),
     // or controls left + song next to them.
     let (left, center) = if controls_left {
@@ -2042,7 +2176,9 @@ fn dialog_frame() -> Frame {
 
 /// "Pulse closed unexpectedly last time", with the report to copy.
 fn crash_dialog(app: &mut App, ctx: &egui::Context) {
-    let Some((file, report)) = app.crash_notice.clone() else { return };
+    let Some((file, report)) = app.crash_notice.clone() else {
+        return;
+    };
     let mut close = false;
     egui::Modal::new(egui::Id::new("crash_notice")).frame(dialog_frame()).show(ctx, |ui| {
         ui.set_width(440.0);
@@ -2081,7 +2217,9 @@ fn crash_dialog(app: &mut App, ctx: &egui::Context) {
 
 /// Asks before a backup replaces your library.
 fn restore_dialog(app: &mut App, ctx: &egui::Context) {
-    let Some((label, lib)) = app.pending_restore.take() else { return };
+    let Some((label, lib)) = app.pending_restore.take() else {
+        return;
+    };
     let (mut keep, mut restore) = (true, false);
     egui::Modal::new(egui::Id::new("confirm_restore")).frame(dialog_frame()).show(ctx, |ui| {
         ui.set_width(400.0);
@@ -2171,12 +2309,8 @@ fn dialogs(app: &mut App, ctx: &egui::Context) {
                 ui.set_width(360.0);
                 ui.label(RichText::new("New playlist").font(heavy(20.0)));
                 ui.add_space(12.0);
-                let r = ui.add(
-                    egui::TextEdit::singleline(&mut name)
-                        .hint_text("My awesome playlist")
-                        .desired_width(f32::INFINITY)
-                        .margin(Margin::symmetric(10, 8)),
-                );
+                let r = ui
+                    .add(egui::TextEdit::singleline(&mut name).hint_text("My awesome playlist").desired_width(f32::INFINITY).margin(Margin::symmetric(10, 8)));
                 r.request_focus();
                 if ui.input(|i| i.key_pressed(Key::Enter)) {
                     create = true;
@@ -2251,8 +2385,16 @@ fn import_dialog(app: &mut App, ctx: &egui::Context) {
         ui.set_width(440.0);
         ui.label(RichText::new(tr("Import a playlist")).font(heavy(20.0)).color(pal().text));
         ui.add_space(4.0);
-        ui.label(RichText::new(tr("Paste a link to a playlist or album from YouTube, Spotify or SoundCloud. Pulse finds each song and makes a playlist of it.")).font(regular(12.5)).color(pal().text_muted));
-        ui.label(RichText::new(tr("Spotify playlist over 100 songs? Open it in Spotify, press Ctrl+A, then Ctrl+C, and paste here.")).font(regular(12.5)).color(pal().text_muted));
+        ui.label(
+            RichText::new(tr("Paste a link to a playlist or album from YouTube, Spotify or SoundCloud. Pulse finds each song and makes a playlist of it."))
+                .font(regular(12.5))
+                .color(pal().text_muted),
+        );
+        ui.label(
+            RichText::new(tr("Spotify playlist over 100 songs? Open it in Spotify, press Ctrl+A, then Ctrl+C, and paste here."))
+                .font(regular(12.5))
+                .color(pal().text_muted),
+        );
         ui.add_space(10.0);
         if let Some(job) = &app.import_running {
             let p = job.progress.lock().unwrap().clone();
@@ -2304,7 +2446,9 @@ fn import_dialog(app: &mut App, ctx: &egui::Context) {
 
 /// The "View credits" window.
 fn credits_dialog(app: &mut App, ctx: &egui::Context) {
-    let Some((t, data)) = &app.credits else { return };
+    let Some((t, data)) = &app.credits else {
+        return;
+    };
     let mut close = false;
     let modal = egui::Modal::new(egui::Id::new("credits")).show(ctx, |ui| {
         ui.set_width(380.0);
@@ -2381,13 +2525,20 @@ fn toast(app: &App, ctx: &egui::Context) {
     let age = ctx.input(|i| i.time) - at;
     let still = reduce_motion();
     let end = crate::app::toast_secs(msg);
-    let alpha = if still { 1.0 } else if age < 0.15 { age / 0.15 } else if age > end - 0.5 { (end - age) / 0.5 } else { 1.0 }.clamp(0.0, 1.0) as f32;
+    let alpha = if still {
+        1.0
+    } else if age < 0.15 {
+        age / 0.15
+    } else if age > end - 0.5 {
+        (end - age) / 0.5
+    } else {
+        1.0
+    }
+    .clamp(0.0, 1.0) as f32;
     let screen = ctx.content_rect();
-    egui::Area::new(egui::Id::new("toast"))
-        .order(egui::Order::Foreground)
-        .anchor(Align2::CENTER_BOTTOM, vec2(0.0, -104.0))
-        .interactable(false)
-        .show(ctx, |ui| {
+    egui::Area::new(egui::Id::new("toast")).order(egui::Order::Foreground).anchor(Align2::CENTER_BOTTOM, vec2(0.0, -104.0)).interactable(false).show(
+        ctx,
+        |ui| {
             ui.set_max_width(screen.width() * 0.6);
             ui.multiply_opacity(alpha);
             Frame::new()
@@ -2398,7 +2549,8 @@ fn toast(app: &App, ctx: &egui::Context) {
                 .show(ui, |ui| {
                     ui.label(RichText::new(msg).font(med(13.0)).color(pal().bg));
                 });
-        });
+        },
+    );
     // Redraw quickly only while it fades in or out; in between, wake up when the fade-out
     // starts (it used to redraw 33 times a second the whole time it showed).
     let next = if still {

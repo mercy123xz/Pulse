@@ -82,9 +82,7 @@ impl Track {
         self.id.strip_prefix("dz:").and_then(|s| s.parse().ok())
     }
     pub fn art_small(&self) -> Option<&str> {
-        self.cover_small
-            .as_deref()
-            .or_else(|| self.artwork.as_ref().and_then(|a| a.small.as_deref().or(a.medium.as_deref())))
+        self.cover_small.as_deref().or_else(|| self.artwork.as_ref().and_then(|a| a.small.as_deref().or(a.medium.as_deref())))
     }
     pub fn art_big(&self) -> Option<&str> {
         self.cover_big.as_deref().or_else(|| self.art_small())
@@ -152,6 +150,17 @@ pub struct Chart {
     pub albums: Vec<AlbumInfo>,
     pub artists: Vec<ArtistInfo>,
     pub playlists: Vec<PlaylistInfo>,
+    /// Built from what you play: "Listeners of X also listen to" and "Songs like Y".
+    pub for_you: Vec<Suggestion>,
+}
+
+/// A row of suggestions built around one artist or song.
+#[derive(Debug, Clone)]
+pub enum Suggestion {
+    /// Artists whose listeners also play `.0` (an artist's name).
+    AlsoListen(String, Vec<ArtistInfo>),
+    /// Songs by other artists that sound like `.0` (a song or artist name).
+    SongsLike(String, Vec<Track>),
 }
 
 #[derive(Debug, Clone, Default)]
@@ -160,6 +169,8 @@ pub struct SearchResults {
     pub artists: Vec<ArtistInfo>,
     pub albums: Vec<AlbumInfo>,
     pub playlists: Vec<PlaylistInfo>,
+    /// When the top result is an artist: who their listeners also play, and songs like theirs.
+    pub around: Option<(String, Vec<ArtistInfo>, Vec<Track>)>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -169,6 +180,8 @@ pub struct ArtistPage {
     /// Albums, EPs and singles, newest first.
     pub releases: Vec<AlbumInfo>,
     pub related: Vec<ArtistInfo>,
+    /// Songs by other artists that sound like this one.
+    pub songs_like: Vec<Track>,
 }
 
 /// Deezer's genres (id, name), as used by the charts.
@@ -337,12 +350,7 @@ fn artist_ref(a: &DzArtist) -> ArtistRef {
 fn featured_from(main: &ArtistRef, contributors: &[DzArtist]) -> Vec<ArtistRef> {
     let mut seen = std::collections::HashSet::new();
     seen.insert(main.id.clone());
-    contributors
-        .iter()
-        .filter(|c| c.id != 0 && !c.name.is_empty())
-        .map(artist_ref)
-        .filter(|a| seen.insert(a.id.clone()))
-        .collect()
+    contributors.iter().filter(|c| c.id != 0 && !c.name.is_empty()).map(artist_ref).filter(|a| seen.insert(a.id.clone())).collect()
 }
 
 /// Featured artists of one song, from its full details (lists don't include them).
@@ -444,12 +452,7 @@ fn get<T: for<'de> Deserialize<'de>>(path: &str, query: &[(&str, &str)]) -> Resu
             req = req.query(*k, *v);
         }
         let mut resp = req.call().map_err(crate::net::friendly_error)?;
-        let text = resp
-            .body_mut()
-            .with_config()
-            .limit(20 * 1024 * 1024)
-            .read_to_string()
-            .map_err(|e| format!("Couldn't read Deezer's reply ({e})"))?;
+        let text = resp.body_mut().with_config().limit(20 * 1024 * 1024).read_to_string().map_err(|e| format!("Couldn't read Deezer's reply ({e})"))?;
         if attempt < 3 && is_busy_reply(&text) {
             std::thread::sleep(std::time::Duration::from_millis(wait));
             wait *= 2;
@@ -510,14 +513,103 @@ fn tracks(list: List<DzTrack>) -> Vec<Track> {
 }
 
 /// Home page: top songs, albums, artists and playlists.
-pub fn chart() -> Result<Chart, String> {
-    let c: DzChart = get("/chart/0", &[])?;
+/// The home page: today's charts, plus rows built from what you play. `artists` are
+/// (Deezer id, name) of your top artists; `songs` are songs you played lately.
+pub fn home(artists: &[(String, String)], songs: &[Track]) -> Result<Chart, String> {
+    let (c, for_you) = std::thread::scope(|s| {
+        let rows: Vec<_> = artists
+            .iter()
+            .take(2)
+            .map(|(id, name)| s.spawn(move || Suggestion::AlsoListen(name.clone(), related_artists(id, 12))))
+            .chain(songs.iter().take(2).map(|t| s.spawn(move || Suggestion::SongsLike(t.title.clone(), songs_like(t)))))
+            .collect();
+        let c = get::<DzChart>("/chart/0", &[]);
+        let rows: Vec<Suggestion> = rows.into_iter().filter_map(|h| h.join().ok()).collect();
+        (c, rows)
+    });
+    let c = c?;
+    // Artists first, then songs, alternating so the page doesn't read as two lists.
+    let (mut a, mut b): (Vec<_>, Vec<_>) = for_you
+        .into_iter()
+        .filter(|r| match r {
+            Suggestion::AlsoListen(_, v) => v.len() >= 3,
+            Suggestion::SongsLike(_, v) => v.len() >= 3,
+        })
+        .partition(|r| matches!(r, Suggestion::AlsoListen(..)));
+    let mut for_you = vec![];
+    while !a.is_empty() || !b.is_empty() {
+        if !a.is_empty() {
+            for_you.push(a.remove(0));
+        }
+        if !b.is_empty() {
+            for_you.push(b.remove(0));
+        }
+    }
     Ok(Chart {
         tracks: tracks(c.tracks),
         albums: c.albums.data.into_iter().map(|a| album_info(a, None)).collect(),
         artists: c.artists.data.into_iter().map(ArtistInfo::from).collect(),
         playlists: c.playlists.data.iter().map(playlist_info).collect(),
+        for_you,
     })
+}
+
+/// Artists whose listeners also play this one.
+pub fn related_artists(artist_id: &str, limit: usize) -> Vec<ArtistInfo> {
+    let found = get::<List<DzArtist>>(&format!("/artist/{artist_id}/related"), &[("limit", &limit.to_string())])
+        .map(|l| l.data.into_iter().map(ArtistInfo::from).collect())
+        .unwrap_or_default();
+    one_per_name(found)
+}
+
+/// Deezer sometimes has two profiles with the same name ("che" and "Che"): keep the
+/// better-known one, in the first one's place.
+pub fn one_per_name(artists: Vec<ArtistInfo>) -> Vec<ArtistInfo> {
+    let mut out: Vec<ArtistInfo> = vec![];
+    for a in artists {
+        let key = crate::youtube::norm(&a.name);
+        match out.iter_mut().find(|b| crate::youtube::norm(&b.name) == key) {
+            Some(b) if a.fans > b.fans => *b = a,
+            Some(_) => {}
+            None => out.push(a),
+        }
+    }
+    out
+}
+
+/// Up to 20 songs by other artists that sound like `t` (from its artist's radio).
+pub fn songs_like(t: &Track) -> Vec<Track> {
+    let mut out = similar_to(t).unwrap_or_default();
+    other_artists_only(&mut out, &t.artist.id, &t.artist.name);
+    out.truncate(20);
+    out
+}
+
+/// Up to 20 songs by other artists that sound like this artist's.
+pub fn songs_like_artist(artist_id: &str, name: &str) -> Vec<Track> {
+    let mut out = get::<List<DzTrack>>(&format!("/artist/{artist_id}/radio"), &[("limit", "40")]).map(tracks).unwrap_or_default();
+    if out.is_empty() {
+        out = similar_artists_songs(artist_id);
+    }
+    other_artists_only(&mut out, artist_id, name);
+    out.truncate(20);
+    out
+}
+
+/// Drops the artist's own songs and repeats, and keeps at most two songs per artist,
+/// so "songs like" shows a spread of other artists.
+pub fn other_artists_only(list: &mut Vec<Track>, artist_id: &str, name: &str) {
+    let me = crate::youtube::norm(name);
+    let mut per_artist: std::collections::HashMap<String, usize> = Default::default();
+    let mut seen = std::collections::HashSet::new();
+    list.retain(|t| {
+        if t.artist.id == artist_id || crate::youtube::norm(&t.artist.name) == me || !seen.insert(t.id.clone()) {
+            return false;
+        }
+        let n = per_artist.entry(t.artist.id.clone()).or_default();
+        *n += 1;
+        *n <= 2
+    });
 }
 
 /// Top 100 songs, overall (genre 0) or in a genre.
@@ -588,13 +680,21 @@ fn search_once(q: &str) -> Result<SearchResults, String> {
         let t = get::<List<DzTrack>>("/search/track", &[("q", q), ("limit", "40")]);
         (t, artists.join().unwrap_or_default(), albums.join().unwrap_or_default(), playlists.join().unwrap_or_default())
     });
+    let mut ranked = rank_artists(q, artists.data.into_iter().map(ArtistInfo::from).collect());
+    ranked.truncate(12);
+    // Searched for an artist: also who their listeners play, and songs like theirs.
+    let around = ranked.first().filter(|a| name_match(&a.name, q) >= 2).map(|a| {
+        let (related, songs) = std::thread::scope(|s| {
+            let related = s.spawn(|| related_artists(&a.id, 12));
+            let songs = songs_like_artist(&a.id, &a.name);
+            (related.join().unwrap_or_default(), songs)
+        });
+        (a.name.clone(), related, songs)
+    });
     Ok(SearchResults {
         tracks: tracks(t?),
-        artists: {
-            let mut a = rank_artists(q, artists.data.into_iter().map(ArtistInfo::from).collect());
-            a.truncate(12);
-            a
-        },
+        artists: ranked,
+        around,
         albums: albums.data.into_iter().map(|a| album_info(a, None)).collect(),
         playlists: playlists.data.iter().map(playlist_info).collect(),
     })
@@ -670,7 +770,8 @@ pub fn artist_page(id: &str) -> Result<ArtistPage, String> {
     let me = artist_ref(&artist);
     let top: List<DzTrack> = get(&format!("/artist/{id}/top"), &[("limit", "50")]).unwrap_or_default();
     let albums: List<DzAlbum> = get(&format!("/artist/{id}/albums"), &[("limit", "100")]).unwrap_or_default();
-    let related: List<DzArtist> = get(&format!("/artist/{id}/related"), &[("limit", "12")]).unwrap_or_default();
+    let related = related_artists(id, 12);
+    let songs_like = songs_like_artist(id, &artist.name);
     let mut releases: Vec<AlbumInfo> = albums.data.into_iter().map(|a| album_info(a, Some(&me))).collect();
     sort_newest_first(&mut releases);
     // The 10 most popular songs, most popular first (by Deezer's popularity score).
@@ -685,12 +786,7 @@ pub fn artist_page(id: &str) -> Result<ArtistPage, String> {
     {
         latest.nb_tracks = full.nb_tracks;
     }
-    Ok(ArtistPage {
-        artist: artist.into(),
-        top,
-        releases,
-        related: related.data.into_iter().map(ArtistInfo::from).collect(),
-    })
+    Ok(ArtistPage { artist: artist.into(), top, releases, related, songs_like })
 }
 
 /// Newest release first (Deezer returns them in no useful order).
@@ -898,14 +994,10 @@ pub fn mix(artist_id: &str) -> Result<Vec<Track>, String> {
 
 /// Fallback radio: a few songs from each of the artist's similar artists.
 fn similar_artists_songs(artist_id: &str) -> Vec<Track> {
-    let Ok(related) = get::<List<DzArtist>>(&format!("/artist/{artist_id}/related"), &[("limit", "5")]) else { return vec![] };
-    related
-        .data
-        .iter()
-        .take(5)
-        .filter_map(|a| get::<List<DzTrack>>(&format!("/artist/{}/top", a.id), &[("limit", "6")]).ok())
-        .flat_map(tracks)
-        .collect()
+    let Ok(related) = get::<List<DzArtist>>(&format!("/artist/{artist_id}/related"), &[("limit", "5")]) else {
+        return vec![];
+    };
+    related.data.iter().take(5).filter_map(|a| get::<List<DzTrack>>(&format!("/artist/{}/top", a.id), &[("limit", "6")]).ok()).flat_map(tracks).collect()
 }
 
 pub fn similar_to(t: &Track) -> Result<Vec<Track>, String> {
@@ -939,9 +1031,41 @@ mod tests {
     }
 
     #[test]
+    fn songs_like_leave_out_the_artist_and_spread_the_rest() {
+        let t = |id: &str, artist_id: &str, name: &str| {
+            let mut t = Track { id: id.into(), ..Default::default() };
+            t.artist.id = artist_id.into();
+            t.artist.name = name.into();
+            t
+        };
+        let mut radio = vec![
+            t("1", "9", "OsamaSon"),
+            t("2", "5", "nine vicious"),
+            t("3", "5", "nine vicious"),
+            t("4", "5", "nine vicious"),
+            t("2", "5", "nine vicious"),
+            t("5", "6", "Nettspend"),
+            t("6", "77", "Osamason"),
+        ];
+        other_artists_only(&mut radio, "9", "OsamaSon");
+        let ids: Vec<&str> = radio.iter().map(|t| t.id.as_str()).collect();
+        assert_eq!(ids, ["2", "3", "5"], "no OsamaSon, no repeats, two per artist");
+        let merged = one_per_name(vec![artist("che", 9_000), artist("Nettspend", 50_000), artist("Che", 120_000)]);
+        assert_eq!(merged.iter().map(|a| (a.name.as_str(), a.fans)).collect::<Vec<_>>(), [("Che", 120_000), ("Nettspend", 50_000)]);
+    }
+
+    #[test]
     fn popular_artists_come_first() {
         // Deezer's own order for "tyler" (November 2026), with fan counts.
-        let found = [("Tyler", 373), ("Tyler & Ryan", 800), ("Bonnie Tyler", 600_274), ("Brian Tyler", 113_199), ("Tyler, The Creator", 1_394_763), ("Taylor Swift", 12_777_520), ("Tyler Childers", 42_449)];
+        let found = [
+            ("Tyler", 373),
+            ("Tyler & Ryan", 800),
+            ("Bonnie Tyler", 600_274),
+            ("Brian Tyler", 113_199),
+            ("Tyler, The Creator", 1_394_763),
+            ("Taylor Swift", 12_777_520),
+            ("Tyler Childers", 42_449),
+        ];
         let ranked = rank_artists("tyler", found.iter().map(|(n, f)| artist(n, *f)).collect());
         assert_eq!(ranked[0].name, "Tyler, The Creator");
         assert!(name_match(&ranked[0].name, "tyler") >= 2);
@@ -1029,7 +1153,8 @@ mod artist_ranking_tests {
     #[test]
     fn the_artist_you_most_likely_mean_comes_first() {
         // The order Deezer might send them in.
-        let tyler = vec![a("Tyler", 2_100), a("Tyler Childers", 400_000), a("Steven Tyler", 90_000), a("Tyler, The Creator", 6_800_000), a("Bonnie Tyler", 1_200_000)];
+        let tyler =
+            vec![a("Tyler", 2_100), a("Tyler Childers", 400_000), a("Steven Tyler", 90_000), a("Tyler, The Creator", 6_800_000), a("Bonnie Tyler", 1_200_000)];
         assert_eq!(rank_artists("tyler", tyler)[0].name, "Tyler, The Creator");
 
         let taylor = vec![a("Taylor", 900), a("Taylor Swift", 31_000_000), a("James Taylor", 700_000), a("Taylor Swift Tribute Band", 1_200)];

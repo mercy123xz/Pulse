@@ -181,6 +181,8 @@ const STRINGS: &[(&str, [&str; 4])] = &[
     ("Theme notes", ["Notas del tema", "Notas do tema", "Remarques sur le thème", "Hinweise zum Design"]),
     ("Import playlist", ["Importar playlist", "Importar playlist", "Importer une playlist", "Playlist importieren"]),
     ("Spotify playlist over 100 songs? Open it in Spotify, press Ctrl+A, then Ctrl+C, and paste here.", ["¿Lista de Spotify con más de 100 canciones? Ábrela en Spotify, pulsa Ctrl+A, luego Ctrl+C, y pégala aquí.", "Playlist do Spotify com mais de 100 músicas? Abra no Spotify, aperte Ctrl+A, depois Ctrl+C, e cole aqui.", "Playlist Spotify de plus de 100 titres ? Ouvrez-la dans Spotify, faites Ctrl+A, puis Ctrl+C, et collez ici.", "Spotify-Playlist mit über 100 Songs? Öffne sie in Spotify, drücke Strg+A, dann Strg+C, und füge sie hier ein."]),
+    ("Listeners of {} also listen to", ["Quienes escuchan a {} también escuchan", "Quem ouve {} também ouve", "Les auditeurs de {} écoutent aussi", "Hörer von {} hören auch"]),
+    ("Songs like {}", ["Canciones como {}", "Músicas como {}", "Titres comme {}", "Songs wie {}"]),
     ("Import a playlist", ["Importar una playlist", "Importar uma playlist", "Importer une playlist", "Eine Playlist importieren"]),
     ("Cancel", ["Cancelar", "Cancelar", "Annuler", "Abbrechen"]),
     ("Bring in a playlist from YouTube, Spotify or SoundCloud.", ["Trae una playlist de YouTube, Spotify o SoundCloud.", "Traga uma playlist do YouTube, Spotify ou SoundCloud.", "Importez une playlist depuis YouTube, Spotify ou SoundCloud.", "Hole eine Playlist von YouTube, Spotify oder SoundCloud."]),

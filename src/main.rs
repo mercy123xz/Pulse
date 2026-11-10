@@ -42,7 +42,7 @@ fn main() -> eframe::Result {
         viewport: egui::ViewportBuilder::default()
             .with_title("Pulse")
             .with_app_id("pulse-player")
-            .with_inner_size([1280.0, 800.0])
+            .with_inner_size([1280.0, std::env::var("PULSE_DEBUG_HEIGHT").ok().and_then(|h| h.parse().ok()).unwrap_or(800.0)])
             .with_min_inner_size([980.0, 620.0])
             .with_icon(app_icon()),
         ..Default::default()
