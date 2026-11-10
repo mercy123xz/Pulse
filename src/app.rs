@@ -5,7 +5,7 @@ use crate::audio::{AudioEngine, LoadState, Resolver, StreamSource};
 use crate::deezer::{self, AlbumInfo, ArtistPage, Chart, PlaylistInfo, SearchResults, Track};
 use crate::widgets::{ShareTarget, TrackEvent};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -422,6 +422,58 @@ fn offline_source(track: &Track, downloaded: Option<&std::path::Path>) -> Option
     }))
 }
 
+/// Loads one song ahead of time: its audio link, then (when played songs are kept) the
+/// song itself, so it plays from the disk.
+fn warm_one(
+    t: &Track,
+    ids: &Arc<Mutex<HashMap<String, String>>>,
+    prefetched: &Arc<Mutex<HashMap<String, (StreamSource, Instant)>>>,
+    quality: crate::settings::Quality,
+    failed: &Sender<String>,
+) {
+    let fresh = prefetched.lock().unwrap().get(&t.id).filter(|(_, at)| at.elapsed() < LINK_LIFETIME).map(|(s, _)| s.clone());
+    let src = match fresh {
+        Some(s) => s,
+        None => {
+            let known = ids.lock().unwrap().get(&t.id).cloned();
+            match crate::youtube::resolve(t, known, quality, &|_| {}) {
+                Ok((src, video)) => {
+                    ids.lock().unwrap().insert(t.id.clone(), video);
+                    let mut p = prefetched.lock().unwrap();
+                    p.retain(|_, (_, at)| at.elapsed() < LINK_LIFETIME);
+                    p.insert(t.id.clone(), (src.clone(), Instant::now()));
+                    src
+                }
+                Err(_) => {
+                    let _ = failed.send(t.id.clone());
+                    return;
+                }
+            }
+        }
+    };
+    if !crate::audiocache::enabled() || crate::audiocache::has(&t.id) || src.url.starts_with("file://") {
+        return;
+    }
+    let ext = if src.codec == crate::audio::Codec::Mp3 { "mp3" } else { "m4a" };
+    keep_ahead(&src, &crate::audiocache::path_for(&t.id, ext));
+}
+
+/// Downloads a song into the kept-songs store at `dest`. False if it couldn't.
+fn keep_ahead(src: &StreamSource, dest: &std::path::Path) -> bool {
+    let Some(folder) = dest.parent() else { return false };
+    if std::fs::create_dir_all(folder).is_err() {
+        return false;
+    }
+    let tmp = dest.with_extension("ahead");
+    match crate::downloads::fetch(&src.url, &src.headers, src.content_length, &tmp, &|_| {}) {
+        Ok(_) => crate::audiocache::adopt(&tmp, dest),
+        Err(_) => {
+            let _ = std::fs::remove_file(&tmp);
+            false
+        }
+    }
+}
+
 /// Asks for a copy of the song to be kept once it has fully downloaded (see `audiocache`).
 fn kept_for_next_time(mut src: StreamSource, track: &Track) -> StreamSource {
     if crate::audiocache::enabled() && src.keep_as.is_none() {
@@ -519,8 +571,14 @@ pub struct App {
     preloading: Arc<std::sync::atomic::AtomicUsize>,
     /// Audio links found ahead of time for upcoming songs (song id → link, found at).
     prefetched: Arc<Mutex<HashMap<String, (StreamSource, Instant)>>>,
-    /// Songs whose audio link is being found ahead of time (one at a time).
+    /// Songs being loaded ahead of time right now (see `warm`).
     prefetching: Arc<Mutex<HashSet<String>>>,
+    /// Songs waiting to be loaded ahead of time, most wanted first.
+    warm_queue: Arc<Mutex<VecDeque<Track>>>,
+    /// True while the loading-ahead worker runs (there is only ever one).
+    warm_busy: Arc<std::sync::atomic::AtomicBool>,
+    /// The list whose first songs were last loaded ahead (their ids), so it's done once per visit.
+    warmed_list: Vec<String>,
     /// Songs whose lookup failed ahead of time (not retried in the background).
     prefetch_failed: HashSet<String>,
     prefetch_failed_tx: Sender<String>,
@@ -688,6 +746,9 @@ impl App {
             preloading: Default::default(),
             prefetched: Arc::new(Mutex::new(HashMap::new())),
             prefetching: Arc::new(Mutex::new(HashSet::new())),
+            warm_queue: Default::default(),
+            warm_busy: Default::default(),
+            warmed_list: vec![],
             prefetch_failed: HashSet::new(),
             prefetch_failed_tx,
             prefetch_failed_rx,
@@ -2311,43 +2372,87 @@ impl App {
         })
     }
 
-    /// Finds the next song's audio link in the background, so it starts instantly.
-    /// Finds the next two songs' audio links in the background, one at a time,
-    /// so pressing Next (or the song ending) starts them right away.
+    /// Loads the next two songs in the queue ahead of time, so pressing Next (or the song
+    /// ending) starts them right away.
     fn prefetch_next(&mut self) {
-        if !self.prefetching.lock().unwrap().is_empty() {
-            return; // one lookup at a time keeps it light
-        }
         let upcoming: Vec<Track> = self.queue.iter().skip(self.queue_pos + 1).take(2).cloned().collect();
-        let Some(next) = upcoming.into_iter().find(|t| {
-            !self.prefetched.lock().unwrap().get(&t.id).is_some_and(|(_, at)| at.elapsed() < LINK_LIFETIME)
-                && !crate::local::is_local(&t.id)
-                && !self.saved.downloads.contains_key(&t.id)
-                && !self.prefetch_failed.contains(&t.id)
-                && !crate::audiocache::has(&t.id)
-        }) else {
+        self.warm(upcoming, true);
+    }
+
+    /// Opening a playlist, album or Orbit loads its first songs ahead of time, so the one
+    /// you press starts at once. Done once per visit; not in Gaming and Ultra-low modes.
+    pub fn warm_list(&mut self, tracks: &[Track]) {
+        let first: Vec<String> = tracks.iter().take(3).map(|t| t.id.clone()).collect();
+        if first.is_empty() || first == self.warmed_list {
             return;
-        };
-        self.prefetching.lock().unwrap().insert(next.id.clone());
+        }
+        self.warmed_list = first;
+        if crate::perf::mode() != crate::perf::Mode::Normal {
+            return;
+        }
+        // A new list replaces the last one's songs that haven't started yet.
+        self.warm_queue.lock().unwrap().clear();
+        self.warm(tracks.iter().take(3).cloned().collect(), false);
+    }
+
+    /// Does a song still need loading ahead?
+    fn needs_warming(&self, t: &Track) -> bool {
+        let link_ready = self.prefetched.lock().unwrap().get(&t.id).is_some_and(|(_, at)| at.elapsed() < LINK_LIFETIME);
+        !crate::local::is_local(&t.id)
+            && !self.saved.downloads.contains_key(&t.id)
+            && !self.prefetch_failed.contains(&t.id)
+            && !crate::audiocache::has(&t.id)
+            && self.current.as_ref().is_none_or(|c| c.id != t.id)
+            && !self.prefetching.lock().unwrap().contains(&t.id)
+            // Without kept songs only the link is fetched ahead.
+            && (crate::audiocache::enabled() || !link_ready)
+    }
+
+    /// Adds songs to be loaded ahead (at the front when `first`) and starts the worker.
+    /// The worker finds each song's audio link, then (when played songs are kept) downloads
+    /// the song into that store, one song at a time so it never competes much with playback.
+    fn warm(&mut self, tracks: Vec<Track>, first: bool) {
+        let wanted: Vec<Track> = tracks.into_iter().filter(|t| self.needs_warming(t)).collect();
+        if wanted.is_empty() {
+            return;
+        }
+        {
+            let mut q = self.warm_queue.lock().unwrap();
+            q.retain(|t| !wanted.iter().any(|w| w.id == t.id));
+            if first {
+                for t in wanted.into_iter().rev() {
+                    q.push_front(t);
+                }
+            } else {
+                q.extend(wanted);
+            }
+            q.truncate(8);
+        }
+        if self.warm_busy.swap(true, std::sync::atomic::Ordering::AcqRel) {
+            return; // the worker is running and will get to them
+        }
+        let queue = self.warm_queue.clone();
+        let busy = self.warm_busy.clone();
         let ids = self.youtube_ids.clone();
         let prefetched = self.prefetched.clone();
-        let busy = self.prefetching.clone();
+        let in_flight = self.prefetching.clone();
         let failed = self.prefetch_failed_tx.clone();
         let quality = self.saved.settings.stream_quality;
         std::thread::spawn(move || {
-            let known = ids.lock().unwrap().get(&next.id).cloned();
-            match crate::youtube::resolve(&next, known, quality, &|_| {}) {
-                Ok((src, video)) => {
-                    ids.lock().unwrap().insert(next.id.clone(), video);
-                    let mut p = prefetched.lock().unwrap();
-                    p.retain(|_, (_, at)| at.elapsed() < LINK_LIFETIME);
-                    p.insert(next.id.clone(), (src, Instant::now()));
-                }
-                Err(_) => {
-                    let _ = failed.send(next.id.clone());
-                }
+            loop {
+                let next = queue.lock().unwrap().pop_front();
+                let Some(t) = next else {
+                    busy.store(false, std::sync::atomic::Ordering::Release);
+                    // Songs added just as it was finishing: carry on, unless another worker took them.
+                    if queue.lock().unwrap().is_empty() || busy.swap(true, std::sync::atomic::Ordering::AcqRel) {
+                        break;
+                    }
+                    continue;
+                };
+                in_flight.lock().unwrap().insert(t.id.clone());
+                warm_one(&t, &ids, &prefetched, quality, &failed);
+                in_flight.lock().unwrap().remove(&t.id);
             }
-            busy.lock().unwrap().remove(&next.id);
         });
     }
 
@@ -2726,5 +2831,37 @@ mod share_tests {
         assert!(share_link(&t, ShareTarget::YouTube, None).starts_with("https://www.youtube.com/results?search_query="));
         assert!(share_link(&t, ShareTarget::Spotify, None).contains("Song%20A"));
         assert_eq!(share_link(&t, ShareTarget::Deezer, None), "https://www.deezer.com/track/123");
+    }
+}
+
+#[cfg(test)]
+mod ahead_tests {
+    use super::*;
+
+    #[test]
+    fn songs_loaded_ahead_land_in_the_kept_songs() {
+        let song: Vec<u8> = (0..3_000_000u32).map(|i| (i % 251) as u8).collect();
+        let url = crate::audio::tests::slow_server(song.clone(), 40_000_000, true);
+        let src = StreamSource {
+            url,
+            headers: vec![],
+            codec: crate::audio::Codec::Mp4,
+            content_length: Some(song.len() as u64),
+            notice: None,
+            duration: None,
+            keep_as: None,
+        };
+        let dir = std::env::temp_dir().join(format!("pulse-ahead-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        crate::audiocache::set_limit_mb(1024);
+        let dest = dir.join("dz_1.m4a");
+        assert!(keep_ahead(&src, &dest));
+        assert_eq!(std::fs::read(&dest).unwrap(), song);
+        assert!(!dest.with_extension("ahead").exists(), "no half file left behind");
+        // A server that's gone: nothing kept, nothing left behind.
+        let gone = StreamSource { url: "http://127.0.0.1:9/x".into(), ..src };
+        assert!(!keep_ahead(&gone, &dir.join("dz_2.m4a")));
+        assert!(!dir.join("dz_2.m4a").exists() && !dir.join("dz_2.ahead").exists());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

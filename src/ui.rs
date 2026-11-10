@@ -1390,6 +1390,7 @@ fn album_page(app: &mut App, ui: &mut Ui) {
 
 fn action_row(app: &mut App, ui: &mut Ui, tracks: &[Track]) {
     let ctx = ui.ctx().clone();
+    app.warm_list(tracks);
     let playing_this = app.is_playing() && app.current.as_ref().is_some_and(|c| tracks.iter().any(|t| t.id == c.id));
     ui.horizontal(|ui| {
         if play_button(ui, 52.0, playing_this).clicked() {
@@ -1582,6 +1583,7 @@ fn local_collection(app: &mut App, ui: &mut Ui, title: &str, sub: &str, glyph: &
         ui.label(RichText::new(tr("No songs match.")).color(pal().text_muted));
         return;
     }
+    app.warm_list(&view);
     let names = app.playlist_names();
     let mut cx = table_ctx(app, &names);
     cx.removable = playlist.is_some();

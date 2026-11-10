@@ -70,6 +70,21 @@ pub fn store(path: &Path, bytes: &[u8]) {
     store_with_limit(path, bytes, limit);
 }
 
+/// Keeps a song that was downloaded straight to a file (`from`), moving it to `path`.
+/// The file is removed if it can't be kept.
+pub fn adopt(from: &Path, path: &Path) -> bool {
+    let limit = LIMIT_MB.load(Ordering::Relaxed) * 1024 * 1024;
+    let size = std::fs::metadata(from).map(|m| m.len()).unwrap_or(0);
+    let Some(folder) = path.parent() else { return false };
+    let ok = limit > 0 && size > 0 && size <= limit / 2 && std::fs::create_dir_all(folder).is_ok() && std::fs::rename(from, path).is_ok();
+    if ok {
+        crate::artcache::trim_dir(folder, limit);
+    } else {
+        let _ = std::fs::remove_file(from);
+    }
+    ok
+}
+
 fn store_with_limit(path: &Path, bytes: &[u8], limit: u64) {
     let Some(folder) = path.parent() else { return };
     if std::fs::create_dir_all(folder).is_err() {
