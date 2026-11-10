@@ -23,7 +23,7 @@ const FIRST_CHUNK: u64 = 1024 * 1024;
 /// Size of the pieces fetched side by side after the first one.
 const PIECE: u64 = 1024 * 1024;
 /// How many pieces download at the same time (kept small: light on the PC and the network).
-const PARALLEL: usize = 3;
+const PARALLEL: usize = 4;
 
 // ---------------------------------------------------------------------------
 // Where a song's audio is
@@ -74,6 +74,11 @@ pub struct StreamSource {
     pub content_length: Option<u64>,
     /// Something worth telling the user once playback starts.
     pub notice: Option<String>,
+    /// The song's length, if whoever found the audio knows it (a song that starts while
+    /// it downloads can't always tell from the file).
+    pub duration: Option<Duration>,
+    /// Keep a copy here once all of it has downloaded, so it starts at once next time.
+    pub keep_as: Option<std::path::PathBuf>,
 }
 
 /// Works out where the audio is. Gets a callback for showing progress
@@ -96,12 +101,21 @@ struct BufState {
 struct StreamBuffer {
     state: Mutex<BufState>,
     changed: Condvar,
+    /// How many readers are open. The download stops when the last one goes.
+    readers: std::sync::atomic::AtomicUsize,
 }
 
 /// The decoder's view of the buffer: a normal `Read + Seek` "file".
 pub struct StreamReader {
     buf: Arc<StreamBuffer>,
     pos: u64,
+}
+
+impl StreamReader {
+    fn new(buf: &Arc<StreamBuffer>) -> Self {
+        buf.readers.fetch_add(1, Ordering::SeqCst);
+        StreamReader { buf: buf.clone(), pos: 0 }
+    }
 }
 
 impl Read for StreamReader {
@@ -152,8 +166,10 @@ impl Seek for StreamReader {
 impl Drop for StreamReader {
     fn drop(&mut self) {
         // Song was skipped or finished: tell the download thread to stop.
-        self.buf.state.lock().unwrap().cancelled = true;
-        self.buf.changed.notify_all();
+        if self.buf.readers.fetch_sub(1, Ordering::SeqCst) == 1 {
+            self.buf.state.lock().unwrap().cancelled = true;
+            self.buf.changed.notify_all();
+        }
     }
 }
 
@@ -164,7 +180,7 @@ fn open_streaming_decoder(
     src: &StreamSource,
     still_wanted: impl Fn() -> bool + Send + 'static,
     buffered: Arc<Mutex<f32>>,
-) -> Result<Decoder<StreamReader>, String> {
+) -> Result<StreamDecoder, String> {
     if let Some(path) = src.url.strip_prefix("file://") {
         // A song on this computer: read it all at once.
         let bytes = std::fs::read(path).map_err(|e| format!("Couldn't open {path} ({e})"))?;
@@ -177,7 +193,8 @@ fn open_streaming_decoder(
             st.done = true;
         }
         *buffered.lock().unwrap() = 1.0;
-        return build_decoder(StreamReader { buf, pos: 0 }, src.codec, Some(total));
+        let inner = build_decoder(StreamReader::new(&buf), src.codec, Some(total), true)?;
+        return Ok(StreamDecoder::new(inner, None, src.duration));
     }
     let first = crate::net::get_range(&src.url, &src.headers, 0, Some(FIRST_CHUNK - 1))?;
     if !still_wanted() {
@@ -195,6 +212,7 @@ fn open_streaming_decoder(
         let headers = src.headers.clone();
         let partial = first.partial;
         let body = first.body;
+        let keep_as = src.keep_as.clone();
         std::thread::spawn(move || {
             let parallel_from = match total {
                 Some(t) if partial && t > FIRST_CHUNK => Some(FIRST_CHUNK),
@@ -209,16 +227,111 @@ fn open_streaming_decoder(
             }
             let mut st = buf.state.lock().unwrap();
             st.done = true;
+            // All of it arrived (not skipped, not cut short): keep a copy for next time.
+            let whole = !st.cancelled && !st.bytes.is_empty() && total.is_none_or(|t| st.bytes.len() as u64 == t);
+            let copy = keep_as.filter(|_| whole).map(|p| (p, st.bytes.clone()));
             if !st.cancelled {
                 st.total = Some(st.bytes.len() as u64);
             }
             *buffered.lock().unwrap() = 1.0;
             drop(st);
             buf.changed.notify_all();
+            if let Some((path, bytes)) = copy {
+                crate::audiocache::store(&path, &bytes);
+            }
         });
     }
 
-    build_decoder(StreamReader { buf, pos: 0 }, src.codec, total)
+    // An MP4 is opened "forward only": it starts as soon as its first part is here. (Opened
+    // the usual way, the decoder first walks through the whole file, so nothing played until
+    // every byte had arrived.) Going back in the song opens it again, see `StreamDecoder`.
+    let keep = StreamReader::new(&buf); // keeps the download alive if the first try fails
+    let forward = src.codec == Codec::Mp4;
+    let inner = match build_decoder(StreamReader::new(&buf), src.codec, total, !forward) {
+        Ok(d) => d,
+        // A file with its index at the end can't start early: wait for all of it.
+        Err(_) if forward => return Ok(StreamDecoder::new(build_decoder(StreamReader::new(&buf), src.codec, total, true)?, None, src.duration)),
+        Err(e) => return Err(e),
+    };
+    drop(keep);
+    Ok(StreamDecoder::new(inner, forward.then_some(Reopen { buf, codec: src.codec, total }), src.duration))
+}
+
+/// What's needed to open a song again from its start.
+struct Reopen {
+    buf: Arc<StreamBuffer>,
+    codec: Codec,
+    total: Option<u64>,
+}
+
+/// A song's decoder. For audio that plays while it downloads, going back in the song opens
+/// the (already downloaded) audio again from the start and moves forward from there.
+pub struct StreamDecoder {
+    inner: Decoder<StreamReader>,
+    reopen: Option<Reopen>,
+    /// Where the last jump landed, and the samples played since.
+    base: Duration,
+    samples: u64,
+    /// The length to report when the file itself doesn't say.
+    known_duration: Option<Duration>,
+}
+
+impl StreamDecoder {
+    fn new(inner: Decoder<StreamReader>, reopen: Option<Reopen>, known_duration: Option<Duration>) -> Self {
+        StreamDecoder { inner, reopen, base: Duration::ZERO, samples: 0, known_duration }
+    }
+
+    fn played(&self) -> Duration {
+        let per_sec = self.inner.sample_rate().get() as u64 * self.inner.channels().get() as u64;
+        self.base + Duration::from_secs_f64(self.samples as f64 / per_sec.max(1) as f64)
+    }
+}
+
+impl Iterator for StreamDecoder {
+    type Item = f32;
+
+    fn next(&mut self) -> Option<f32> {
+        let s = self.inner.next();
+        self.samples += s.is_some() as u64;
+        s
+    }
+}
+
+impl Source for StreamDecoder {
+    fn current_span_len(&self) -> Option<usize> {
+        self.inner.current_span_len()
+    }
+
+    fn channels(&self) -> rodio::ChannelCount {
+        self.inner.channels()
+    }
+
+    fn sample_rate(&self) -> rodio::SampleRate {
+        self.inner.sample_rate()
+    }
+
+    fn total_duration(&self) -> Option<Duration> {
+        self.inner.total_duration().filter(|d| !d.is_zero()).or(self.known_duration)
+    }
+
+    fn try_seek(&mut self, pos: Duration) -> Result<(), rodio::source::SeekError> {
+        if let Some(r) = &self.reopen
+            && pos < self.played()
+        {
+            // Once everything has arrived, open it for jumping anywhere.
+            let done = r.buf.state.lock().unwrap().done;
+            let fresh = build_decoder(StreamReader::new(&r.buf), r.codec, r.total, done)
+                .map_err(|e| rodio::source::SeekError::Other(Arc::new(io::Error::other(e))))?;
+            self.inner = fresh;
+            if done {
+                self.reopen = None;
+            }
+        }
+        self.inner.try_seek(pos)?;
+        self.base = pos;
+        self.samples = 0;
+        Ok(())
+    }
 }
 
 /// Reads `body` into the buffer, resuming with range requests if the connection drops,
@@ -397,17 +510,20 @@ impl ParallelPieces {
     }
 }
 
-fn build_decoder(reader: StreamReader, codec: Codec, total: Option<u64>) -> Result<Decoder<StreamReader>, String> {
+/// `anywhere`: the decoder may jump around the file (it then needs all of it to open an MP4).
+fn build_decoder(reader: StreamReader, codec: Codec, total: Option<u64>, anywhere: bool) -> Result<Decoder<StreamReader>, String> {
     let (hint, mime) = codec.hint();
     let mut builder = Decoder::builder()
         .with_data(reader)
         .with_hint(hint)
         .with_mime_type(mime)
-        .with_seekable(true)
+        .with_seekable(anywhere)
         .with_coarse_seek(total.is_some() && codec == Codec::Mp3);
     if let Some(t) = total {
         builder = builder.with_byte_len(t);
     }
+    // Last, because giving the size switches jumping around back on.
+    builder = builder.with_seekable(anywhere);
     builder.build().map_err(|e| format!("Couldn't decode this song ({e})"))
 }
 
@@ -432,7 +548,7 @@ impl LoadState {
     }
 }
 
-type Dec = Decoder<StreamReader>;
+type Dec = StreamDecoder;
 
 /// Times the steps of starting a song, from the progress messages it reports.
 struct Steps {
@@ -513,6 +629,8 @@ struct Shared {
     paused: bool,
     volume: f32,
     buffered: Arc<Mutex<f32>>,
+    /// A jump to a part of the song that hasn't downloaded yet: made once it has.
+    pending_seek: Option<Duration>,
     ctx: Option<egui::Context>,
 }
 
@@ -568,6 +686,7 @@ impl AudioEngine {
                 paused: false,
                 volume: 1.0,
                 buffered: Arc::new(Mutex::new(0.0)),
+                pending_seek: None,
                 ctx: None,
             })),
             effects: Arc::new(SharedEffects::default()),
@@ -608,6 +727,7 @@ impl AudioEngine {
             sh.queued = None;
             sh.fading_out = None;
             sh.advanced = None;
+            sh.pending_seek = None;
             sh.paused = start_paused;
             sh.ctx = Some(ctx.clone());
             // Already opened ahead of time (pressing Next, or the song ended)? Use it.
@@ -774,6 +894,10 @@ impl AudioEngine {
     pub fn play(&self) {
         let mut sh = self.shared.lock().unwrap();
         sh.paused = false;
+        // Waiting for a jump: the music starts again when the jump is made.
+        if sh.pending_seek.is_some() {
+            return;
+        }
         for d in &sh.decks {
             d.play();
         }
@@ -804,6 +928,7 @@ impl AudioEngine {
         sh.fading_out = None;
         sh.prepared = None;
         sh.next = None;
+        sh.pending_seek = None;
         *self.load_state.lock().unwrap() = (self.generation.load(Ordering::SeqCst), LoadState::Idle);
     }
 
@@ -818,17 +943,37 @@ impl AudioEngine {
 
     pub fn position(&self) -> Duration {
         let sh = self.shared.lock().unwrap();
+        if let Some(to) = sh.pending_seek {
+            return to;
+        }
         match &sh.playing {
             Some(p) => sh.decks[p.deck].get_pos(),
             None => Duration::ZERO,
         }
     }
 
+    /// Jumps to a place in the song. A place that hasn't downloaded yet is jumped to as
+    /// soon as it has: the music waits meanwhile (see `seeking`), the window doesn't.
     pub fn seek(&self, to: Duration) {
-        let sh = self.shared.lock().unwrap();
-        if let Some(p) = &sh.playing {
-            let _ = sh.decks[p.deck].try_seek(to);
+        let mut sh = self.shared.lock().unwrap();
+        let Some(p) = &sh.playing else { return };
+        let (deck, duration) = (p.deck, p.duration);
+        let have = *sh.buffered.lock().unwrap();
+        if arrived(to, duration, have) {
+            sh.pending_seek = None;
+            let _ = sh.decks[deck].try_seek(to);
+            if !sh.paused {
+                sh.decks[deck].play();
+            }
+        } else {
+            sh.pending_seek = Some(to);
+            sh.decks[deck].pause();
         }
+    }
+
+    /// True while a jump waits for its part of the song to download.
+    pub fn seeking(&self) -> bool {
+        self.shared.lock().unwrap().pending_seek.is_some()
     }
 
     /// True when the current song has played to the end.
@@ -839,6 +984,17 @@ impl AudioEngine {
         let sh = self.shared.lock().unwrap();
         sh.queued.is_none() && sh.playing.as_ref().is_some_and(|p| sh.decks[p.deck].empty())
     }
+}
+
+/// Whether the part of a song at `to` has downloaded, given how much of the file is here
+/// (0.0 – 1.0). A song's bytes are spread evenly enough over its length for this, with a
+/// little extra asked for so the jump doesn't land right on the edge.
+fn arrived(to: Duration, duration: Duration, have: f32) -> bool {
+    if have >= 1.0 || duration.is_zero() {
+        return true;
+    }
+    let at = (to.as_secs_f32() / duration.as_secs_f32()).clamp(0.0, 1.0);
+    have >= (at + 0.04).min(1.0)
 }
 
 /// One check of the monitor thread: finish fades, notice gapless switches,
@@ -864,7 +1020,25 @@ fn monitor_step(sh: &mut Shared, fx: &Effects, effects: &Arc<SharedEffects>, sha
         }
     }
 
-    let Some(p) = &sh.playing else { return };
+    let Some(p) = &sh.playing else {
+        sh.pending_seek = None;
+        return;
+    };
+    // A jump that was waiting for its part of the song: make it once that part is here.
+    if let Some(to) = sh.pending_seek {
+        let have = *sh.buffered.lock().unwrap();
+        if !arrived(to, p.duration, have) {
+            return;
+        }
+        sh.pending_seek = None;
+        let _ = sh.decks[p.deck].try_seek(to);
+        if !sh.paused {
+            sh.decks[p.deck].play();
+        }
+        if let Some(ctx) = &sh.ctx {
+            ctx.request_repaint();
+        }
+    }
     let pos = sh.decks[p.deck].get_pos();
     let remaining = p.duration.saturating_sub(pos);
     let (cur_deck, cur_ctl) = (p.deck, p.ctl.clone());
@@ -943,7 +1117,7 @@ fn monitor_step(sh: &mut Shared, fx: &Effects, effects: &Arc<SharedEffects>, sha
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
     use rodio::Source;
     use std::io::Write;
@@ -952,7 +1126,7 @@ mod tests {
 
     /// Serves a file over HTTP, deliberately slowly, to imitate a real network.
     /// With `ranges`, it answers Range requests with 206 like YouTube's servers do.
-    fn slow_server(data: Vec<u8>, bytes_per_sec: usize, ranges: bool) -> String {
+    pub fn slow_server(data: Vec<u8>, bytes_per_sec: usize, ranges: bool) -> String {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
         std::thread::spawn(move || {
@@ -1000,7 +1174,7 @@ mod tests {
     }
 
     fn source(url: String, codec: Codec) -> StreamSource {
-        StreamSource { url, headers: vec![], codec, content_length: None, notice: None }
+        StreamSource { url, headers: vec![], codec, content_length: None, notice: None, duration: None, keep_as: None }
     }
 
     fn check_stream_and_seek(file: &str, codec: Codec, ranges: bool) {
@@ -1018,11 +1192,8 @@ mod tests {
         assert_eq!(first.len(), 44_100 * 2, "decoded the first second");
         assert!(first.iter().any(|s| s.abs() > 0.05), "real audio, not silence");
         println!("{file}: ready after {ready_after:?}, buffered {:.0}%", *buffered.lock().unwrap() * 100.0);
-        if codec == Codec::Mp3 {
-            // MP3 starts while downloading. Symphonia reads an M4A's whole fragment index
-            // first, so M4A starts once the file is in (a second or two for a song).
-            assert!(*buffered.lock().unwrap() < 1.0, "playback starts before the download finishes");
-        }
+        // Every kind of song starts while it's still downloading.
+        assert!(*buffered.lock().unwrap() < 1.0, "playback starts before the download finishes");
 
         // Jump to 20 s of 30 s: waits for that part to download, then carries on.
         dec.try_seek(Duration::from_secs(20)).expect("seek");
@@ -1030,6 +1201,39 @@ mod tests {
         println!("{file}: samples after seeking to 20 s: {rest} (~{:.1} s)", rest as f32 / 88_200.0);
         assert!(rest > 88_200 * 8 && rest < 88_200 * 11, "about 10 s should remain");
         assert!((*buffered.lock().unwrap() - 1.0).abs() < 1e-6, "download completed");
+    }
+
+    /// Going back in a song that's still arriving, then forward again, then back once it's all here.
+    fn check_going_back(file: &str, codec: Codec) {
+        let Ok(data) = std::fs::read(file) else {
+            eprintln!("skipping: {file} not found");
+            return;
+        };
+        let url = slow_server(data, 250_000, true);
+        let buffered = Arc::new(Mutex::new(0.0));
+        let mut dec = open_streaming_decoder(&source(url, codec), || true, buffered.clone()).expect("decoder");
+        let secs = |n: usize| n as f32 / 88_200.0;
+        assert_eq!((&mut dec).take(88_200 * 3).count(), 88_200 * 3, "3 s play");
+        dec.try_seek(Duration::from_secs(1)).expect("back while downloading");
+        assert!(*buffered.lock().unwrap() < 1.0, "still downloading when going back");
+        assert_eq!((&mut dec).take(88_200 * 2).count(), 88_200 * 2, "plays on after going back");
+        dec.try_seek(Duration::from_secs(25)).expect("forward");
+        let n = (&mut dec).take(88_200).count();
+        assert_eq!(n, 88_200, "plays after jumping ahead");
+        dec.try_seek(Duration::from_secs(10)).expect("back after everything arrived");
+        let rest = dec.count();
+        assert!((secs(rest) - 20.0).abs() < 1.5, "about 20 s remain after going back to 10 s, got {:.1}", secs(rest));
+    }
+
+    #[test]
+    fn going_back_in_a_streaming_m4a() {
+        check_going_back("/tmp/test_dash.m4a", Codec::Mp4);
+        check_going_back("/tmp/test_plain.m4a", Codec::Mp4);
+    }
+
+    #[test]
+    fn going_back_in_a_streaming_mp3() {
+        check_going_back("/tmp/test.mp3", Codec::Mp3);
     }
 
     /// A 4-minute song from a server that limits each connection's speed (like YouTube):
@@ -1048,10 +1252,50 @@ mod tests {
         let dec = open_streaming_decoder(&source(url, Codec::Mp4), || true, buffered.clone()).expect("decoder");
         let ready = t0.elapsed().as_secs_f32();
         println!("ready after {ready:.1} s (one connection would need ~{one_connection:.1} s)");
-        assert!(ready < one_connection * 0.6, "parallel pieces should be much faster");
+        assert!(ready < 1.0, "starts on the first part, long before the download ends");
+        assert!(*buffered.lock().unwrap() < 0.6, "still downloading when it starts");
         let samples = dec.count();
         let secs = samples as f32 / 88_200.0;
         assert!((secs - 240.0).abs() < 1.0, "whole song decoded in order: {secs:.1} s");
+    }
+
+    /// A song that has fully played through is kept, byte for byte, for next time.
+    #[test]
+    fn a_fully_downloaded_song_is_kept_for_next_time() {
+        let Ok(data) = std::fs::read("/tmp/test_dash.m4a") else {
+            eprintln!("skipping: /tmp/test_dash.m4a not found");
+            return;
+        };
+        let dir = std::env::temp_dir().join(format!("pulse-keep-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut src = source(slow_server(data.clone(), 2_000_000, true), Codec::Mp4);
+        src.keep_as = Some(dir.join("song.m4a"));
+        let dec = open_streaming_decoder(&src, || true, Arc::new(Mutex::new(0.0))).expect("decoder");
+        assert!(dec.count() > 88_200 * 25, "played to the end");
+        let t0 = Instant::now();
+        while !dir.join("song.m4a").is_file() && t0.elapsed() < Duration::from_secs(5) {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert_eq!(std::fs::read(dir.join("song.m4a")).expect("kept"), data);
+
+        // Skipped before it finished: nothing is kept.
+        let mut src = source(slow_server(data, 100_000, true), Codec::Mp4);
+        src.keep_as = Some(dir.join("skipped.m4a"));
+        let dec = open_streaming_decoder(&src, || true, Arc::new(Mutex::new(0.0))).expect("decoder");
+        drop(dec);
+        std::thread::sleep(Duration::from_millis(400));
+        assert!(!dir.join("skipped.m4a").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_jump_waits_only_for_parts_that_have_not_arrived() {
+        let song = Duration::from_secs(200);
+        assert!(arrived(Duration::from_secs(20), song, 0.5), "already here");
+        assert!(!arrived(Duration::from_secs(150), song, 0.5), "not here yet");
+        assert!(!arrived(Duration::from_secs(100), song, 0.5), "too close to the edge");
+        assert!(arrived(Duration::from_secs(199), song, 1.0), "everything is here");
+        assert!(arrived(Duration::from_secs(5), Duration::ZERO, 0.0), "unknown length: just try");
     }
 
     #[test]

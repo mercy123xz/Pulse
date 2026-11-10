@@ -142,6 +142,8 @@ pub struct Settings {
     pub moving_background: bool,
     /// Most disk space for saved pictures, in MB.
     pub art_cache_mb: u64,
+    /// Most disk space for songs kept after playing, in MB (0: don't keep them).
+    pub replay_cache_mb: u64,
     /// Gaming Mode / Ultra-low resource, and the extras you kept on in them.
     pub perf_mode: crate::perf::Mode,
     pub perf_keep: Vec<String>,
@@ -189,6 +191,7 @@ impl Default for Settings {
             reduce_motion: false,
             moving_background: true,
             art_cache_mb: 300,
+            replay_cache_mb: 1000,
             perf_mode: crate::perf::Mode::Normal,
             perf_keep: vec![],
             mini_open: false,

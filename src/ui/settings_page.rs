@@ -119,6 +119,14 @@ pub fn settings_page(app: &mut App, ui: &mut Ui) {
             }
         }
     });
+    row(ui, tr("Space for played songs"), tr("Songs you've played are kept for a while, so they start at once next time. The ones you haven't played for longest go first."), |ui| {
+        for mb in [0u64, 500, 1000, 3000] {
+            let label = if mb == 0 { tr("Off").to_string() } else if mb >= 1000 { format!("{} GB", mb / 1000) } else { format!("{mb} MB") };
+            if ui.selectable_label(s.replay_cache_mb == mb, label).clicked() {
+                s.replay_cache_mb = mb;
+            }
+        }
+    });
     let offline = s.offline_dir();
     row(ui, tr("Offline storage location"), &offline.display().to_string(), |ui| {
         #[cfg(windows)]

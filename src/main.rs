@@ -4,6 +4,7 @@
 mod app;
 mod artcache;
 mod audio;
+mod audiocache;
 mod backdrop;
 mod backup;
 mod crash;

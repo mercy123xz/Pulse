@@ -414,7 +414,18 @@ fn offline_source(track: &Track, downloaded: Option<&std::path::Path>) -> Option
         codec: crate::audio::Codec::from_extension(ext).unwrap_or(crate::audio::Codec::Mp4),
         content_length: None,
         notice: None,
+        duration: None,
+        keep_as: None,
     }))
+}
+
+/// Asks for a copy of the song to be kept once it has fully downloaded (see `audiocache`).
+fn kept_for_next_time(mut src: StreamSource, track: &Track) -> StreamSource {
+    if crate::audiocache::enabled() && src.keep_as.is_none() {
+        let ext = if src.codec == crate::audio::Codec::Mp3 { "mp3" } else { "m4a" };
+        src.keep_as = Some(crate::audiocache::path_for(&track.id, ext));
+    }
+    src
 }
 
 /// Result of checking an imported song again: (its id, the Deezer song if found now,
@@ -586,9 +597,10 @@ pub struct App {
 
     // downloads
     pub download_queue: std::collections::VecDeque<Track>,
-    /// The song downloading now and how far along it is.
-    pub downloading: Option<(Track, Arc<Mutex<f32>>)>,
-    download_rx: Option<Receiver<DownloadResult>>,
+    /// The songs downloading now and how far along each is.
+    pub downloading: Vec<(Track, Arc<Mutex<f32>>)>,
+    download_tx: Sender<DownloadResult>,
+    download_rx: Receiver<DownloadResult>,
 
     /// Search / genre / sort of the list on screen (reset when the page changes).
     pub list_view: ListView,
@@ -625,6 +637,7 @@ impl App {
         crate::theme::set_reduce_motion(saved.settings.reduce_motion || !crate::perf::on(crate::perf::Extra::Animations));
         let (tx, rx) = channel();
         let (views_tx, views_rx) = channel();
+        let (download_tx, download_rx) = channel();
         let (prefetch_failed_tx, prefetch_failed_rx) = channel();
         let (featured_tx, featured_rx) = channel();
         let (lyrics_tx, lyrics_rx) = channel();
@@ -713,8 +726,9 @@ impl App {
             local_scanning: false,
             local_rx: None,
             download_queue: Default::default(),
-            downloading: None,
-            download_rx: None,
+            downloading: vec![],
+            download_tx,
+            download_rx,
             list_view: ListView::default(),
             import_open: false,
             import_url: String::new(),
@@ -738,6 +752,7 @@ impl App {
         crate::single::listen(cc.egui_ctx.clone());
         app.apply_perf(&cc.egui_ctx);
         crate::artcache::set_limit_mb(app.saved.settings.art_cache_mb);
+        crate::audiocache::set_limit_mb(app.saved.settings.replay_cache_mb);
         std::thread::spawn(crate::artcache::trim_disk);
         app.apply_theme(&cc.egui_ctx);
         // First launch: offer to make a profile.
@@ -1584,6 +1599,10 @@ impl App {
             };
             self.toast(crate::i18n::tr(msg), ctx);
         }
+        if s.replay_cache_mb != before.replay_cache_mb {
+            crate::audiocache::set_limit_mb(s.replay_cache_mb);
+            self.cache_size = None;
+        }
         if s.art_cache_mb != before.art_cache_mb {
             crate::artcache::set_limit_mb(s.art_cache_mb);
             std::thread::spawn(crate::artcache::trim_disk);
@@ -2047,7 +2066,7 @@ impl App {
     pub fn download(&mut self, tracks: &[Track], ctx: &egui::Context) {
         let mut added = 0;
         for t in tracks {
-            let busy = self.downloading.as_ref().is_some_and(|(d, _)| d.id == t.id);
+            let busy = self.downloading.iter().any(|(d, _)| d.id == t.id);
             if crate::local::is_local(&t.id) || busy || self.saved.downloads.contains_key(&t.id) || self.download_queue.iter().any(|q| q.id == t.id) {
                 continue;
             }
@@ -2072,35 +2091,35 @@ impl App {
         self.saved.downloads.contains_key(id)
     }
 
-    /// Runs one download at a time and records finished ones (called every frame).
+    /// Runs a few downloads at a time and records finished ones (called every frame).
     fn run_downloads(&mut self, ctx: &egui::Context) {
-        if let Some(rx) = &self.download_rx
-            && let Ok((t, result)) = rx.try_recv()
-        {
-            self.download_rx = None;
-            self.downloading = None;
+        while let Ok((t, result)) = self.download_rx.try_recv() {
+            self.downloading.retain(|(d, _)| d.id != t.id);
             match result {
                 Ok((path, video)) => {
-                    self.youtube_ids.lock().unwrap().insert(t.id.clone(), video);
+                    if !video.is_empty() {
+                        self.youtube_ids.lock().unwrap().insert(t.id.clone(), video);
+                    }
                     self.saved.downloads.insert(t.id, path);
                 }
                 Err(e) => self.toast(&format!("Couldn't download “{}”: {e}", t.title), ctx),
             }
         }
-        if self.downloading.is_none()
-            && let Some(t) = self.download_queue.pop_front()
-        {
+        // Three songs side by side; one at a time in Gaming and Ultra-low resource modes.
+        let at_once = if crate::perf::mode() == crate::perf::Mode::Normal { 3 } else { 1 };
+        while self.downloading.len() < at_once {
+            let Some(t) = self.download_queue.pop_front() else { break };
             let progress = Arc::new(Mutex::new(0.0));
-            let (tx, rx) = channel();
-            self.download_rx = Some(rx);
-            self.downloading = Some((t.clone(), progress.clone()));
+            self.downloading.push((t.clone(), progress.clone()));
             let known = self.youtube_ids.lock().unwrap().get(&t.id).cloned();
             let quality = self.saved.settings.download_quality;
             let dir = self.saved.settings.offline_dir();
+            let tx = self.download_tx.clone();
             let ctx = ctx.clone();
             std::thread::spawn(move || {
                 let r = crate::downloads::download(&t, known, quality, &dir, &|p| {
-                    *progress.lock().unwrap() = p;
+                    let mut at = progress.lock().unwrap();
+                    *at = p.max(*at);
                     ctx.request_repaint_after(Duration::from_millis(200));
                 });
                 let _ = tx.send((t, r));
@@ -2205,16 +2224,20 @@ impl App {
             if let Some(src) = offline_source(&track, offline.as_deref()) {
                 return src;
             }
+            // Played before and still kept: starts at once, nothing to look up.
+            if let Some(src) = offline_source(&track, crate::audiocache::find(&track.id).as_deref()) {
+                return src;
+            }
             if let Some((src, at)) = prefetched.lock().unwrap().remove(&track.id)
                 && at.elapsed() < LINK_LIFETIME
             {
-                return Ok(src);
+                return Ok(kept_for_next_time(src, &track));
             }
             let known = ids.lock().unwrap().get(&track.id).cloned();
             match crate::youtube::resolve(&track, known, quality, status) {
                 Ok((src, video)) => {
                     ids.lock().unwrap().insert(track.id.clone(), video);
-                    Ok(src)
+                    Ok(kept_for_next_time(src, &track))
                 }
                 Err(e) => {
                     // A saved video id may have gone away: forget it so the next try searches again.
@@ -2238,6 +2261,7 @@ impl App {
                 && !crate::local::is_local(&t.id)
                 && !self.saved.downloads.contains_key(&t.id)
                 && !self.prefetch_failed.contains(&t.id)
+                && !crate::audiocache::has(&t.id)
         }) else {
             return;
         };

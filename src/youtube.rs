@@ -567,6 +567,8 @@ struct VideoInfo {
     requested_downloads: Vec<Format>,
     /// Unix time when a fresh link starts working (YouTube sometimes delays it).
     available_at: Option<i64>,
+    /// The video's length in seconds.
+    duration: Option<f64>,
 }
 
 /// How long to wait before a link with `available_at` works. Errors if it's far off.
@@ -599,6 +601,8 @@ fn source_from_info(json: &str) -> Result<StreamSource, String> {
         codec,
         content_length: f.filesize.or(f.filesize_approx),
         notice: None,
+        duration: info.duration.filter(|d| *d > 0.0 && d.is_finite()).map(Duration::from_secs_f64),
+        keep_as: None,
     })
 }
 

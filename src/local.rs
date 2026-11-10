@@ -94,7 +94,7 @@ pub fn source(t: &Track) -> Result<StreamSource, String> {
     }
     let ext = Path::new(path).extension().and_then(|x| x.to_str()).unwrap_or("");
     let codec = Codec::from_extension(ext).ok_or("Pulse can't play this kind of file.")?;
-    Ok(StreamSource { url: format!("file://{path}"), headers: vec![], codec, content_length: None, notice: None })
+    Ok(StreamSource { url: format!("file://{path}"), headers: vec![], codec, content_length: None, notice: None, duration: None, keep_as: None })
 }
 
 #[cfg(test)]

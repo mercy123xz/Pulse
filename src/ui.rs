@@ -285,11 +285,12 @@ fn sidebar(app: &mut App, ui: &mut Ui) {
         }
     }
     // Download progress
-    if let Some((t, p)) = &app.downloading
+    if let Some((t, _)) = app.downloading.first()
         && !compact
     {
-        let p = *p.lock().unwrap();
-        let left = app.download_queue.len();
+        // One line for everything downloading now: the first song's name and how far along they are together.
+        let p = app.downloading.iter().map(|(_, p)| *p.lock().unwrap()).sum::<f32>() / app.downloading.len() as f32;
+        let left = app.download_queue.len() + app.downloading.len() - 1;
         ui.add_space(4.0);
         ui.horizontal(|ui| {
             ui.add_space(12.0);
@@ -1641,7 +1642,7 @@ fn list_toolbar(app: &mut App, ui: &mut Ui, tracks: &[Track], playlist: Option<u
         let online: Vec<Track> = tracks.iter().filter(|t| !crate::local::is_local(&t.id)).cloned().collect();
         if !online.is_empty() {
             let all = online.iter().all(|t| app.is_downloaded(&t.id));
-            let busy = !all && online.iter().any(|t| app.download_queue.iter().any(|q| q.id == t.id) || app.downloading.as_ref().is_some_and(|(d, _)| d.id == t.id));
+            let busy = !all && online.iter().any(|t| app.download_queue.iter().any(|q| q.id == t.id) || app.downloading.iter().any(|(d, _)| d.id == t.id));
             if busy {
                 ui.add_space(6.0);
                 ui.spinner().on_hover_text(tr("Downloading…"));
@@ -1917,7 +1918,7 @@ fn player_bar(app: &mut App, ui: &mut Ui) {
             app.previous(&ctx);
         }
         let ui = &mut slot(0, 40.0);
-        let loading = app.audio.load_state().is_busy() && app.current.is_some();
+        let loading = (app.audio.load_state().is_busy() || app.audio.seeking()) && app.current.is_some();
         let (r, resp) = ui.allocate_exact_size(Vec2::splat(40.0), Sense::click());
         let resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand);
         let playing = app.is_playing();

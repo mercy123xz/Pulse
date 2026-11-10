@@ -251,7 +251,7 @@ pub fn trim_disk() {
 }
 
 /// Removes the least recently used files until the folder is under 80% of `limit` bytes.
-fn trim_dir(folder: &std::path::Path, limit: u64) {
+pub fn trim_dir(folder: &std::path::Path, limit: u64) {
     let Ok(read) = std::fs::read_dir(folder) else { return };
     let mut files: Vec<(SystemTime, u64, PathBuf)> = read
         .flatten()
