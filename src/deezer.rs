@@ -581,7 +581,8 @@ pub fn search(q: &str) -> Result<SearchResults, String> {
 /// Songs, artists, albums and playlists, asked for all at once.
 fn search_once(q: &str) -> Result<SearchResults, String> {
     let (t, artists, albums, playlists) = std::thread::scope(|s| {
-        let artists = s.spawn(|| get::<List<DzArtist>>("/search/artist", &[("q", q), ("limit", "12")]).unwrap_or_default());
+        // More than are shown, so the best known one is among them (see `rank_artists`).
+        let artists = s.spawn(|| get::<List<DzArtist>>("/search/artist", &[("q", q), ("limit", "30")]).unwrap_or_default());
         let albums = s.spawn(|| get::<List<DzAlbum>>("/search/album", &[("q", q), ("limit", "24")]).unwrap_or_default());
         let playlists = s.spawn(|| get::<List<DzPlaylist>>("/search/playlist", &[("q", q), ("limit", "12")]).unwrap_or_default());
         let t = get::<List<DzTrack>>("/search/track", &[("q", q), ("limit", "40")]);
@@ -589,10 +590,73 @@ fn search_once(q: &str) -> Result<SearchResults, String> {
     });
     Ok(SearchResults {
         tracks: tracks(t?),
-        artists: artists.data.into_iter().map(ArtistInfo::from).collect(),
+        artists: {
+            let mut a = rank_artists(q, artists.data.into_iter().map(ArtistInfo::from).collect());
+            a.truncate(12);
+            a
+        },
         albums: albums.data.into_iter().map(|a| album_info(a, None)).collect(),
         playlists: playlists.data.iter().map(playlist_info).collect(),
     })
+}
+
+/// How well an artist's name matches what was typed: 3 the same, 2 the name starts with it
+/// ("tyler" → "Tyler, The Creator"), 1 a word in the name starts with it ("Steven Tyler"),
+/// 0 neither (Deezer's looser matches).
+pub fn name_match(name: &str, typed: &str) -> u8 {
+    // Lowercase, no accents, letters and digits only: "Beyoncé" and "beyonce" are the same.
+    let key = |s: &str| crate::app::fold(s).chars().filter(|c| c.is_alphanumeric()).collect::<String>();
+    let (n, q) = (key(name), key(typed));
+    if q.is_empty() {
+        return 0;
+    }
+    if n == q || n.strip_prefix("the").is_some_and(|rest| rest == q) {
+        return 3;
+    }
+    if n.starts_with(&q) || n.strip_prefix("the").is_some_and(|rest| rest.starts_with(&q)) {
+        return 2;
+    }
+    let words = crate::app::fold(name);
+    let first = crate::app::fold(typed);
+    let first = first.split_whitespace().next().unwrap_or_default();
+    if !first.is_empty() && words.split_whitespace().any(|w| w.starts_with(first)) {
+        return 1;
+    }
+    0
+}
+
+/// Puts the artists you most likely mean first: a name that matches what you typed,
+/// weighed against how many fans the artist has. Typing "tyler" puts Tyler, The Creator
+/// (millions of fans) above a small artist called just "Tyler".
+pub fn rank_artists(typed: &str, mut artists: Vec<ArtistInfo>) -> Vec<ArtistInfo> {
+    let score = |a: &ArtistInfo| {
+        let m = match name_match(&a.name, typed) {
+            3 => 3.0,
+            2 => 2.5,
+            1 => 1.0,
+            _ => -2.0,
+        };
+        m + ((a.fans + 1) as f64).log10()
+    };
+    // Stable, so artists that score the same keep Deezer's order.
+    artists.sort_by(|a, b| score(b).total_cmp(&score(a)));
+    artists
+}
+
+/// Finds an artist's Deezer page from their name (for songs that came from YouTube or an
+/// import, which don't know it). None when no artist by that name turns up.
+pub fn find_artist(name: &str) -> Result<Option<String>, String> {
+    // YouTube channels: "The Weeknd - Topic", "TheWeekndVEVO".
+    let mut clean = name.trim().trim_end_matches(" - Topic").trim().to_string();
+    if let Some(stripped) = clean.strip_suffix("VEVO") {
+        clean = stripped.trim().to_string();
+    }
+    if clean.is_empty() {
+        return Ok(None);
+    }
+    let found: List<DzArtist> = get("/search/artist", &[("q", &clean), ("limit", "10")])?;
+    let ranked = rank_artists(&clean, found.data.into_iter().map(ArtistInfo::from).collect());
+    Ok(ranked.into_iter().find(|a| name_match(&a.name, &clean) >= 2).map(|a| a.id))
 }
 
 impl SearchResults {
@@ -870,6 +934,23 @@ pub fn similar_to(t: &Track) -> Result<Vec<Track>, String> {
 
 #[cfg(test)]
 mod tests {
+    fn artist(name: &str, fans: u64) -> ArtistInfo {
+        ArtistInfo { id: name.into(), name: name.into(), picture: None, picture_xl: None, fans, albums: 0 }
+    }
+
+    #[test]
+    fn popular_artists_come_first() {
+        // Deezer's own order for "tyler" (November 2026), with fan counts.
+        let found = [("Tyler", 373), ("Tyler & Ryan", 800), ("Bonnie Tyler", 600_274), ("Brian Tyler", 113_199), ("Tyler, The Creator", 1_394_763), ("Taylor Swift", 12_777_520), ("Tyler Childers", 42_449)];
+        let ranked = rank_artists("tyler", found.iter().map(|(n, f)| artist(n, *f)).collect());
+        assert_eq!(ranked[0].name, "Tyler, The Creator");
+        assert!(name_match(&ranked[0].name, "tyler") >= 2);
+        let ranked = rank_artists("taylor", vec![artist("Taylor", 90), artist("Taylor Swift", 12_777_520), artist("James Taylor", 300_000)]);
+        assert_eq!(ranked[0].name, "Taylor Swift");
+        assert_eq!(name_match("Beyoncé", "beyonce"), 3);
+        assert_eq!(name_match("The Weeknd", "weeknd"), 3);
+    }
+
     use super::*;
 
     // Trimmed copies of real Deezer replies (captured November 2026).
@@ -930,5 +1011,51 @@ mod tests {
         assert_eq!(t.art_small(), Some("https://a/150.jpg"));
         assert!(!t.has_artist_page());
         assert_eq!(t.deezer_id(), None);
+    }
+}
+
+#[cfg(test)]
+mod artist_ranking_tests {
+    use super::*;
+
+    fn a(name: &str, fans: u64) -> ArtistInfo {
+        ArtistInfo { id: name.to_string(), name: name.to_string(), fans, ..Default::default() }
+    }
+
+    fn names(v: &[ArtistInfo]) -> Vec<&str> {
+        v.iter().map(|a| a.name.as_str()).collect()
+    }
+
+    #[test]
+    fn the_artist_you_most_likely_mean_comes_first() {
+        // The order Deezer might send them in.
+        let tyler = vec![a("Tyler", 2_100), a("Tyler Childers", 400_000), a("Steven Tyler", 90_000), a("Tyler, The Creator", 6_800_000), a("Bonnie Tyler", 1_200_000)];
+        assert_eq!(rank_artists("tyler", tyler)[0].name, "Tyler, The Creator");
+
+        let taylor = vec![a("Taylor", 900), a("Taylor Swift", 31_000_000), a("James Taylor", 700_000), a("Taylor Swift Tribute Band", 1_200)];
+        let r = rank_artists("taylor", taylor);
+        assert_eq!(names(&r)[..2], ["Taylor Swift", "James Taylor"]);
+
+        // A full name typed exactly still wins over a bigger artist that only starts with it.
+        let drake = vec![a("Drake Bell", 900_000), a("Drake", 25_000_000), a("Drake White", 50_000)];
+        assert_eq!(rank_artists("drake", drake)[0].name, "Drake");
+        let weeknd = vec![a("The Weeknd Tribute", 300), a("The Weeknd", 40_000_000)];
+        assert_eq!(rank_artists("the weeknd", weeknd)[0].name, "The Weeknd");
+        assert_eq!(rank_artists("weeknd", vec![a("Weekend", 3_000), a("The Weeknd", 40_000_000)])[0].name, "The Weeknd");
+
+        // A small artist with exactly the name typed beats a famous one that doesn't match.
+        let r = rank_artists("Ivy", vec![a("Ariana Grande", 30_000_000), a("Ivy", 5_000)]);
+        assert_eq!(r[0].name, "Ivy");
+    }
+
+    #[test]
+    fn names_match_by_how_much_they_share() {
+        assert_eq!(name_match("Tyler, The Creator", "tyler the creator"), 3);
+        assert_eq!(name_match("The Weeknd", "weeknd"), 3);
+        assert_eq!(name_match("Tyler, The Creator", "tyler"), 2);
+        assert_eq!(name_match("Steven Tyler", "tyler"), 1);
+        assert_eq!(name_match("Beyoncé", "beyonce"), 3);
+        assert_eq!(name_match("Adele", "tyler"), 0);
+        assert_eq!(name_match("Adele", ""), 0);
     }
 }

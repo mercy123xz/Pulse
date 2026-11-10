@@ -346,6 +346,8 @@ pub struct Saved {
     pub profile: Profile,
     /// Songs whose featured artists were already looked up.
     pub featured_checked: HashSet<String>,
+    /// Artist pages found by name for songs that didn't know them (name → Deezer artist id).
+    pub artist_ids: HashMap<String, String>,
     /// What you searched for lately, newest first.
     pub recent_searches: Vec<String>,
     /// The queue when Pulse was closed, where in it you were, and how far into the song.
@@ -391,6 +393,7 @@ impl Default for Saved {
             visits: vec![],
             profile: Profile::default(),
             featured_checked: HashSet::new(),
+            artist_ids: HashMap::new(),
             recent_searches: vec![],
             last_queue: vec![],
             last_queue_pos: 0,
@@ -578,6 +581,8 @@ pub struct App {
     pub lyrics: HashMap<String, LyricsState>,
     lyrics_tx: Sender<(String, Result<Option<crate::lyrics::Lyrics>, String>)>,
     lyrics_rx: Receiver<(String, Result<Option<crate::lyrics::Lyrics>, String>)>,
+    /// An artist being looked up by name after you clicked it (the name, and the answer).
+    artist_lookup: Option<(String, Receiver<Option<String>>)>,
     /// When each loaded page was last opened, so the oldest can be let go of.
     cache_used: HashMap<String, Instant>,
     /// Size of the cache folders, measured when Settings opens.
@@ -710,6 +715,7 @@ impl App {
             lyrics: HashMap::new(),
             lyrics_tx,
             lyrics_rx,
+            artist_lookup: None,
             cache_used: HashMap::new(),
             song_tracks: HashMap::new(),
             rematch_tried: HashSet::new(),
@@ -1042,6 +1048,7 @@ impl App {
             self.trim_page_cache();
         }
         self.receive_credits();
+        self.receive_artist_lookup(ctx);
         self.receive_import(ctx);
         self.receive_rematches();
         self.run_featured(ctx);
@@ -2193,15 +2200,65 @@ impl App {
         self.saved.playlists.iter().map(|p| p.name.clone()).collect()
     }
 
-    /// Opens the artist's page (or searches their name for songs saved by Pulse 0.1).
+    /// Opens the song's artist's page.
     pub fn open_artist(&mut self, t: &Track, ctx: &egui::Context) {
-        if t.has_artist_page() {
-            self.navigate(Route::Artist(t.artist.id.clone()), ctx);
-        } else {
-            self.search_text = t.artist.name.clone();
-            self.navigate(Route::Search(t.artist.name.clone()), ctx);
+        let a = t.artist.clone();
+        self.open_artist_ref(&a, ctx);
+    }
+
+    /// Opens an artist's page. Songs from imports and YouTube only know the artist's name:
+    /// the page is then looked up by name (once; the answer is remembered), and only if no
+    /// artist by that name turns up does it search for them instead.
+    pub fn open_artist_ref(&mut self, a: &deezer::ArtistRef, ctx: &egui::Context) {
+        if deezer::is_deezer_id(&a.id) {
+            self.navigate(Route::Artist(a.id.clone()), ctx);
+            return;
+        }
+        if let Some(id) = self.saved.artist_ids.get(&a.name).cloned() {
+            self.navigate(Route::Artist(id), ctx);
+            return;
+        }
+        if a.name.trim().is_empty() {
+            return;
+        }
+        let (tx, rx) = channel();
+        self.artist_lookup = Some((a.name.clone(), rx));
+        let (name, ctx2) = (a.name.clone(), ctx.clone());
+        std::thread::spawn(move || {
+            let _ = tx.send(deezer::find_artist(&name).ok().flatten());
+            ctx2.request_repaint();
+        });
+    }
+
+    /// The answer to an artist looked up by name: open their page, else search for them.
+    fn receive_artist_lookup(&mut self, ctx: &egui::Context) {
+        let Some((name, rx)) = &self.artist_lookup else { return };
+        let Ok(found) = rx.try_recv() else { return };
+        let name = name.clone();
+        self.artist_lookup = None;
+        match found {
+            Some(id) => {
+                self.saved.artist_ids.insert(name.clone(), id.clone());
+                // Every saved song by them links straight to the page from now on.
+                let lists = self.saved.playlists.iter_mut().flat_map(|p| p.tracks.iter_mut());
+                let others = self.saved.liked.iter_mut().chain(self.saved.recent.iter_mut()).chain(self.queue.iter_mut()).chain(self.current.iter_mut());
+                for t in lists.chain(others) {
+                    if t.artist.name == name && !deezer::is_deezer_id(&t.artist.id) {
+                        t.artist.id = id.clone();
+                    }
+                    for f in t.featured.iter_mut().filter(|f| f.name == name && !deezer::is_deezer_id(&f.id)) {
+                        f.id = id.clone();
+                    }
+                }
+                self.navigate(Route::Artist(id), ctx);
+            }
+            None => {
+                self.search_text = name.clone();
+                self.navigate(Route::Search(name), ctx);
+            }
         }
     }
+
 
     pub fn toggle_autoplay(&mut self) {
         self.saved.autoplay = !self.saved.autoplay;
@@ -2522,7 +2579,7 @@ impl App {
                     }
                 }
                 TrackEvent::OpenArtist(t) => self.open_artist(&t, ctx),
-                TrackEvent::OpenArtistById(id) => self.navigate(Route::Artist(id), ctx),
+                TrackEvent::OpenArtistRef(a) => self.open_artist_ref(&a, ctx),
                 TrackEvent::OpenAlbum(id) => self.navigate(Route::Album(id), ctx),
                 TrackEvent::ShowCredits(t) => self.show_credits(t, ctx),
                 TrackEvent::OpenSong(t) => self.open_song(&t, ctx),

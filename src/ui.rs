@@ -1136,10 +1136,10 @@ fn search(app: &mut App, ui: &mut Ui, q: &str) {
         ui.data_mut(|d| d.insert_temp(id, filter));
         let all = filter == 0;
 
-        // Top result: the artist whose name is what you typed, else the best song.
+        // Top result: the best-ranked artist (popular and matching what you typed: "tyler" is
+        // Tyler, The Creator, not a small artist called just "Tyler"), else the best song.
         if all {
-            let want = crate::youtube::norm(&query);
-            let artist = r.artists.iter().find(|a| crate::youtube::norm(&a.name) == want);
+            let artist = r.artists.first().filter(|a| crate::deezer::name_match(&a.name, &query) >= 2);
             match (artist, r.tracks.first()) {
                 (Some(a), _) => {
                     section_title(ui, "Top result", None);
@@ -1866,8 +1866,8 @@ fn player_bar(app: &mut App, ui: &mut Ui) {
             if a.clicked() {
                 app.open_artist(&t, &ctx);
             }
-            if let Some(id) = feat {
-                app.navigate(Route::Artist(id), &ctx);
+            if let Some(a) = feat {
+                app.open_artist_ref(&a, &ctx);
             }
         }
         let liked = app.liked_ids.contains(&t.id);

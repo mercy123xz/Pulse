@@ -272,7 +272,7 @@ pub fn ghost_button(ui: &mut Ui, glyph: &str, label: &str) -> Response {
 /// A text "link" (e.g. artist name) that underlines on hover.
 /// The song's artists as links: "Main, Featured 1, Featured 2". Returns the main
 /// artist's link and, if a featured artist was clicked, that artist's id.
-pub fn artist_links(ui: &Ui, id: egui::Id, pos: Pos2, t: &Track, font: FontId, color: Color32, max_w: f32) -> (Response, Option<String>) {
+pub fn artist_links(ui: &Ui, id: egui::Id, pos: Pos2, t: &Track, font: FontId, color: Color32, max_w: f32) -> (Response, Option<crate::deezer::ArtistRef>) {
     let main = link_text(ui, id.with("artist"), pos, &t.artist.name, font.clone(), color, max_w);
     let mut x = main.rect.right();
     let mut clicked = None;
@@ -285,8 +285,8 @@ pub fn artist_links(ui: &Ui, id: egui::Id, pos: Pos2, t: &Track, font: FontId, c
         x = comma.right();
         let r = link_text(ui, id.with(("feat", k)), pos2(x, pos.y), &a.name, font.clone(), color, pos.x + max_w - x);
         x = r.rect.right();
-        if r.clicked() && crate::deezer::is_deezer_id(&a.id) {
-            clicked = Some(a.id.clone());
+        if r.clicked() {
+            clicked = Some(a.clone());
         }
     }
     (main, clicked)
@@ -504,7 +504,7 @@ pub enum TrackEvent {
     /// "Go to song": the song's own page.
     OpenSongPage(Track),
     /// A featured artist's name was clicked (Deezer artist id).
-    OpenArtistById(String),
+    OpenArtistRef(crate::deezer::ArtistRef),
     RemoveFromPlaylist(usize),
     RemoveFromQueue(usize),
     OpenArtist(Track),
@@ -941,7 +941,7 @@ fn track_row(ui: &mut Ui, id: egui::Id, list: &str, i: usize, t: &Track, tracks:
     }
     let (artist, featured_click) = artist_links(ui, id, pos2(artist_x, rect.center().y + 3.0), t, regular(12.5), pal().text_muted, tw - (artist_x - tx));
     if let Some(a) = featured_click {
-        ev.push(TrackEvent::OpenArtistById(a));
+        ev.push(TrackEvent::OpenArtistRef(a));
     }
 
     let mut album_link = None;
