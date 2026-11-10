@@ -443,6 +443,11 @@ pub fn cache_dirs() -> Vec<std::path::PathBuf> {
     vec![crate::youtube::tools_dir().join("cache"), crate::settings::data_dir().join("cache")]
 }
 
+/// How long a message stays up: 3.5 seconds, longer for long ones (time to read them).
+pub fn toast_secs(msg: &str) -> f64 {
+    3.5 + (msg.chars().count().saturating_sub(70) as f64 * 0.06).min(9.0)
+}
+
 /// Total size of the cache folders.
 pub fn cache_size() -> u64 {
     cache_dirs().iter().map(|d| crate::settings::folder_size(d)).sum()
@@ -1153,8 +1158,8 @@ impl App {
             self.last_title = title;
         }
 
-        if let Some((_, at)) = &self.toast
-            && ctx.input(|i| i.time) - at > 3.5
+        if let Some((msg, at)) = &self.toast
+            && ctx.input(|i| i.time) - at > toast_secs(msg)
         {
             self.toast = None;
         }
@@ -1303,7 +1308,7 @@ impl App {
 
     pub fn toast(&mut self, msg: &str, ctx: &egui::Context) {
         self.toast = Some((msg.to_string(), ctx.input(|i| i.time)));
-        ctx.request_repaint_after(Duration::from_millis(3600));
+        ctx.request_repaint_after(Duration::from_secs_f64(toast_secs(msg) + 0.1));
     }
 
     // ---------------------------------------------------------------- playback
@@ -2050,7 +2055,8 @@ impl App {
                 self.navigate(Route::Local(i), ctx);
                 let extra = if imp.matched < total { format!(" ({} not found on Deezer, they'll still play)", total - imp.matched) } else { String::new() };
                 let from = imp.owner.map(|o| format!(" from {o}")).unwrap_or_default();
-                self.toast(&format!("Imported “{name}”{from}: {total} songs{extra}"), ctx);
+                let note = imp.note.map(|n| format!("\n{n}")).unwrap_or_default();
+                self.toast(&format!("Imported “{name}”{from}: {total} songs{extra}{note}"), ctx);
             }
             Err(e) => self.toast(&e, ctx),
         }

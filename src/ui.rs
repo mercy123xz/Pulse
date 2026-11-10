@@ -2250,6 +2250,7 @@ fn import_dialog(app: &mut App, ctx: &egui::Context) {
         ui.label(RichText::new(tr("Import a playlist")).font(heavy(20.0)).color(pal().text));
         ui.add_space(4.0);
         ui.label(RichText::new(tr("Paste a link to a playlist or album from YouTube, Spotify or SoundCloud. Pulse finds each song and makes a playlist of it.")).font(regular(12.5)).color(pal().text_muted));
+        ui.label(RichText::new(tr("Spotify playlist over 100 songs? Open it in Spotify, press Ctrl+A, then Ctrl+C, and paste here.")).font(regular(12.5)).color(pal().text_muted));
         ui.add_space(10.0);
         if let Some(job) = &app.import_running {
             let p = job.progress.lock().unwrap().clone();
@@ -2377,7 +2378,8 @@ fn toast(app: &App, ctx: &egui::Context) {
     let Some((msg, at)) = &app.toast else { return };
     let age = ctx.input(|i| i.time) - at;
     let still = reduce_motion();
-    let alpha = if still { 1.0 } else if age < 0.15 { age / 0.15 } else if age > 3.0 { (3.5 - age) / 0.5 } else { 1.0 }.clamp(0.0, 1.0) as f32;
+    let end = crate::app::toast_secs(msg);
+    let alpha = if still { 1.0 } else if age < 0.15 { age / 0.15 } else if age > end - 0.5 { (end - age) / 0.5 } else { 1.0 }.clamp(0.0, 1.0) as f32;
     let screen = ctx.content_rect();
     egui::Area::new(egui::Id::new("toast"))
         .order(egui::Order::Foreground)

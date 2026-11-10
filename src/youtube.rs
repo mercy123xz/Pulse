@@ -538,8 +538,8 @@ pub fn playlist(url: &str, status: &dyn Fn(&str)) -> Result<(String, Vec<SearchE
         entries: Vec<Option<SearchEntry>>,
     }
     let mut args = base_args(&tools);
-    args.extend(["--flat-playlist".into(), "-J".into(), "--playlist-end".into(), "1000".into(), url.to_string()]);
-    let out = run(&tools.ytdlp, &args, Duration::from_secs(120))?;
+    args.extend(["--flat-playlist".into(), "-J".into(), "--playlist-end".into(), "5000".into(), url.to_string()]);
+    let out = run(&tools.ytdlp, &args, Duration::from_secs(300))?;
     let p: Playlist = serde_json::from_str(&out).map_err(|e| format!("Unexpected YouTube reply ({e})"))?;
     let entries: Vec<SearchEntry> = p.entries.into_iter().flatten().filter(|e| !e.id.is_empty()).collect();
     Ok((p.title.unwrap_or_else(|| "YouTube playlist".into()), entries))

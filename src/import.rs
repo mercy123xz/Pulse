@@ -3,7 +3,9 @@
 //! Pulse reads the song list from public pages (no accounts or keys):
 //! - YouTube / YouTube Music: through yt-dlp.
 //! - Spotify: the public embed page of a playlist or album (what websites show
-//!   when they embed a Spotify player) lists its songs.
+//!   when they embed a Spotify player) lists its songs, up to 100. For longer playlists
+//!   you can paste the songs themselves: in Spotify, Ctrl+A then Ctrl+C on a playlist copies
+//!   a link to every song, and Pulse reads each song's public embed page.
 //! - SoundCloud: the public playlist page names the first songs; the rest are
 //!   looked up one by one through SoundCloud's public oEmbed address (what
 //!   websites use to embed a SoundCloud player).
@@ -64,6 +66,27 @@ pub struct Imported {
     pub owner: Option<String>,
     pub tracks: Vec<(Track, Option<String>)>,
     pub matched: usize,
+    /// Something to tell you afterwards (songs Spotify's link left out).
+    pub note: Option<String>,
+}
+
+/// Spotify ids (22 letters and digits) of every song link in the text, in order, once each.
+/// Spotify copies songs as one link per line; a one-line text box may run them together.
+pub fn spotify_track_ids(text: &str) -> Vec<String> {
+    let mut ids: Vec<String> = vec![];
+    for marker in ["track/", "track:"] {
+        let mut rest = text;
+        while let Some(i) = rest.find(marker) {
+            rest = &rest[i + marker.len()..];
+            let id: String = rest.chars().take(22).collect();
+            if id.len() == 22 && id.chars().all(|c| c.is_ascii_alphanumeric()) && !ids.contains(&id) {
+                ids.push(id);
+            }
+        }
+    }
+    // Keep the order they were pasted in, whichever spelling they used.
+    ids.sort_by_key(|id| text.find(id.as_str()));
+    ids
 }
 
 pub fn detect(url: &str) -> Result<Source, String> {
@@ -92,9 +115,24 @@ pub fn run(url: &str, progress: &Arc<Mutex<Progress>>, cancel: &AtomicBool) -> R
         return shared(url, &set, cancel);
     }
     set(&format!("Reading the {} playlist…", source.name()), 0, 0);
+    let mut note = None;
     let (name, items) = match source {
         Source::YouTube => youtube(url, &|s| set(s, 0, 0))?,
-        Source::Spotify => spotify(url)?,
+        Source::Spotify if spotify_track_ids(url).len() > 1 => spotify_songs(&spotify_track_ids(url), &|done, total| set("Reading the Spotify songs…", done, total), cancel)?,
+        Source::Spotify => {
+            let (name, items) = spotify(url)?;
+            if items.len() >= 100
+                && let Some(("playlist", id)) = spotify_id(url).as_ref().map(|(k, id)| (*k, id.clone()))
+                && let Some(total) = spotify_playlist_size(&id)
+                && total > items.len()
+            {
+                note = Some(format!(
+                    "Spotify's link only shares the first {} of {total} songs. To bring them all: open the playlist in Spotify, press Ctrl+A, then Ctrl+C, and paste here.",
+                    items.len()
+                ));
+            }
+            (name, items)
+        }
         Source::SoundCloud => soundcloud(url, &|done, total| set("Reading the SoundCloud playlist…", done, total), cancel)?,
         Source::Shared => unreachable!("share codes return early"),
     };
@@ -137,7 +175,7 @@ pub fn run(url: &str, progress: &Arc<Mutex<Progress>>, cancel: &AtomicBool) -> R
         }
     }
     set("Done", total, total);
-    Ok(Imported { name, owner: None, tracks, matched })
+    Ok(Imported { name, owner: None, tracks, matched, note })
 }
 
 /// A Pulse share code: Deezer songs are fetched by number, the rest are in the code.
@@ -161,7 +199,7 @@ fn shared(code: &str, set: &dyn Fn(&str, usize, usize), cancel: &AtomicBool) -> 
         }
     }
     let matched = tracks.len();
-    Ok(Imported { name: s.n, owner: Some(s.o).filter(|o| !o.is_empty()), tracks, matched })
+    Ok(Imported { name: s.n, owner: Some(s.o).filter(|o| !o.is_empty()), tracks, matched, note: None })
 }
 
 /// A song that isn't on Deezer: kept with what the other service said about it.
@@ -294,6 +332,46 @@ fn spotify(url: &str) -> Result<(String, Vec<Item>), String> {
     let (kind, id) = spotify_id(url).ok_or("That doesn't look like a Spotify playlist or album link.")?;
     let html = crate::net::get_page(&format!("https://open.spotify.com/embed/{kind}/{id}"))?;
     parse_spotify_embed(&html)
+}
+
+/// Songs pasted from Spotify (links copied with Ctrl+A, Ctrl+C), read one by one from each
+/// song's public embed page.
+fn spotify_songs(ids: &[String], progress: &dyn Fn(usize, usize), cancel: &AtomicBool) -> Result<(String, Vec<Item>), String> {
+    let mut items = vec![];
+    for (i, id) in ids.iter().enumerate() {
+        if cancel.load(Ordering::Relaxed) {
+            return Err("Import cancelled.".into());
+        }
+        progress(i, ids.len());
+        if let Ok(html) = crate::net::get_page(&format!("https://open.spotify.com/embed/track/{id}"))
+            && let Ok((_, found)) = parse_spotify_embed(&html)
+        {
+            items.extend(found);
+        }
+        // Gentle on Spotify: a few pages a second.
+        std::thread::sleep(std::time::Duration::from_millis(150));
+    }
+    if items.is_empty() {
+        return Err("Pulse couldn't read those Spotify songs.".into());
+    }
+    Ok(("Spotify songs".into(), items))
+}
+
+/// How many songs a public Spotify playlist has, from its page's description
+/// ("Playlist · Spotify · 150 items · 2.1M saves").
+fn spotify_playlist_size(id: &str) -> Option<usize> {
+    let html = crate::net::get_page(&format!("https://open.spotify.com/playlist/{id}")).ok()?;
+    playlist_size_from_page(&html)
+}
+
+pub fn playlist_size_from_page(html: &str) -> Option<usize> {
+    let desc = between(html, "<meta property=\"og:description\" content=\"", "\"")
+        .or_else(|| between(html, "<meta name=\"description\" content=\"", "\""))?;
+    desc.split('·').find_map(|part| {
+        let mut w = part.split_whitespace();
+        let n = w.next()?.replace(',', "");
+        matches!(w.next()?, "items" | "songs" | "item" | "song").then(|| n.parse().ok()).flatten()
+    })
 }
 
 pub fn parse_spotify_embed(html: &str) -> Result<(String, Vec<Item>), String> {
@@ -465,6 +543,19 @@ mod tests {
         assert_eq!(split_video_title("Tame Impala - Dracula (Official Video)", "TameImpalaVEVO"), ("Tame Impala".into(), "Dracula".into()));
         assert_eq!(split_video_title("Dracula", "Tame Impala - Topic"), ("Tame Impala".into(), "Dracula".into()));
         assert_eq!(split_video_title("Song (feat. X) [Lyrics]", "Chan"), ("Chan".into(), "Song (feat. X)".into()));
+    }
+
+    #[test]
+    fn reads_pasted_spotify_songs() {
+        let lines = "https://open.spotify.com/track/190jyVPHYjAqEaOGmMzdyk\nhttps://open.spotify.com/track/0VjIjW4GlUZAMYd2vXMi3b?si=x\n";
+        assert_eq!(spotify_track_ids(lines), ["190jyVPHYjAqEaOGmMzdyk", "0VjIjW4GlUZAMYd2vXMi3b"]);
+        // Run together by a one-line box, plus the app's "spotify:track:" form and a repeat.
+        let joined = "https://open.spotify.com/track/190jyVPHYjAqEaOGmMzdykspotify:track:0VjIjW4GlUZAMYd2vXMi3b https://open.spotify.com/track/190jyVPHYjAqEaOGmMzdyk";
+        assert_eq!(spotify_track_ids(joined), ["190jyVPHYjAqEaOGmMzdyk", "0VjIjW4GlUZAMYd2vXMi3b"]);
+        assert!(spotify_track_ids("https://open.spotify.com/playlist/37i9dQZF1DX5Ejj0EkURtP").is_empty());
+        let page = r#"<meta property="og:description" content="Playlist · Spotify · 1,150 items · 2.1M saves">"#;
+        assert_eq!(playlist_size_from_page(page), Some(1150));
+        assert_eq!(playlist_size_from_page("<html></html>"), None);
     }
 
     #[test]
