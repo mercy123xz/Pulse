@@ -79,20 +79,61 @@ impl ArtLoader {
     }
 }
 
+/// No picture is drawn bigger than this many pixels a side (covers are shown at 320 at most).
+const MAX_SIDE: u32 = 1280;
+/// Pictures with more pixels than this aren't opened at all (decoding them needs gigabytes).
+const MAX_PIXELS: u64 = 120_000_000;
+
+/// Makes sure a picture is safe to draw: a very large one is made smaller first.
+/// A graphics card takes pictures only up to a certain size (8192 pixels a side with
+/// DirectX), and a bigger one used to close Pulse.
+pub fn fit(bytes: Vec<u8>) -> Result<Vec<u8>, String> {
+    let dims = image::ImageReader::new(std::io::Cursor::new(&bytes)).with_guessed_format().ok().and_then(|r| r.into_dimensions().ok());
+    let Some((w, h)) = dims else { return Ok(bytes) };
+    if w.max(h) <= MAX_SIDE {
+        return Ok(bytes);
+    }
+    if too_many_pixels(w, h) {
+        return Err(format!("picture too large ({w}×{h})"));
+    }
+    let img = image::load_from_memory(&bytes).map_err(|e| e.to_string())?.thumbnail(MAX_SIDE, MAX_SIDE);
+    let mut out = std::io::Cursor::new(Vec::new());
+    img.write_to(&mut out, image::ImageFormat::Png).map_err(|e| e.to_string())?;
+    Ok(out.into_inner())
+}
+
+fn too_many_pixels(w: u32, h: u32) -> bool {
+    w as u64 * h as u64 > MAX_PIXELS
+}
+
+/// The file a `file://` address points at ("file:///C:/Users/…" on Windows, "file:///home/…" elsewhere).
+fn local_path(uri: &str) -> Option<PathBuf> {
+    let rest = uri.strip_prefix("file://")?;
+    let b = rest.as_bytes();
+    // "/C:/…": drop the slash before the drive letter.
+    let rest = if b.len() > 2 && b[0] == b'/' && b[1].is_ascii_alphabetic() && b[2] == b':' { &rest[1..] } else { rest };
+    Some(PathBuf::from(rest))
+}
+
 /// The disk copy, else a download (saved for next time).
 fn fetch(uri: &str) -> Result<Vec<u8>, String> {
+    // Your own pictures (playlist covers, profile picture) are read where they are.
+    if let Some(file) = local_path(uri) {
+        return fit(std::fs::read(&file).map_err(|e| e.to_string())?);
+    }
     let path = file_for(uri);
     if let Ok(b) = std::fs::read(&path) {
         // Mark it used, so cleanup removes old ones first.
         if let Ok(f) = std::fs::File::options().append(true).open(&path) {
             let _ = f.set_modified(SystemTime::now());
         }
-        return Ok(b);
+        return fit(b);
     }
     let bytes = crate::net::download(uri, |_, _| {})?;
     if bytes.is_empty() {
         return Err("empty picture".into());
     }
+    let bytes = fit(bytes)?;
     let _ = std::fs::create_dir_all(dir());
     let tmp = path.with_extension("part");
     if std::fs::write(&tmp, &bytes).is_ok() {
@@ -120,7 +161,7 @@ impl BytesLoader for ArtLoader {
     }
 
     fn load(&self, ctx: &egui::Context, uri: &str) -> BytesLoadResult {
-        if !(uri.starts_with("https://") || uri.starts_with("http://")) {
+        if !(uri.starts_with("https://") || uri.starts_with("http://") || uri.starts_with("file://")) {
             return Err(LoadError::NotSupported);
         }
         let mut map = self.entries.lock().unwrap();
@@ -265,5 +306,43 @@ mod tests {
         trim_dir(&tmp, 2000);
         assert!(!old.exists() && new.exists());
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+}
+
+#[cfg(test)]
+mod fit_tests {
+    use super::*;
+
+    fn png(w: u32, h: u32) -> Vec<u8> {
+        let mut out = std::io::Cursor::new(vec![]);
+        image::RgbImage::new(w, h).write_to(&mut out, image::ImageFormat::Png).unwrap();
+        out.into_inner()
+    }
+
+    fn size(b: &[u8]) -> (u32, u32) {
+        image::ImageReader::new(std::io::Cursor::new(b)).with_guessed_format().unwrap().into_dimensions().unwrap()
+    }
+
+    #[test]
+    fn big_pictures_are_made_smaller_and_others_left_alone() {
+        let small = png(600, 600);
+        assert_eq!(fit(small.clone()).unwrap(), small);
+        assert_eq!(size(&fit(png(9000, 4500)).unwrap()), (1280, 640));
+        assert_eq!(size(&fit(png(300, 17000)).unwrap()).1, 1280);
+        // Not a picture: passed on as it is (it just won't show).
+        assert_eq!(fit(b"<html>".to_vec()).unwrap(), b"<html>");
+    }
+
+    #[test]
+    fn a_picture_that_claims_to_be_enormous_is_refused() {
+        assert!(!too_many_pixels(9000, 9000));
+        assert!(too_many_pixels(60000, 60000));
+    }
+
+    #[test]
+    fn file_addresses_become_paths() {
+        assert_eq!(local_path("file:///C:/Users/a/x.png").unwrap(), PathBuf::from("C:/Users/a/x.png"));
+        assert_eq!(local_path("file:///home/a/x.png").unwrap(), PathBuf::from("/home/a/x.png"));
+        assert!(local_path("https://x/y.png").is_none());
     }
 }

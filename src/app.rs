@@ -755,6 +755,16 @@ impl App {
         if let Some(err) = app.audio.device_error.clone() {
             app.toast(&err, &cc.egui_ctx);
         }
+        // Developer check: PULSE_DEBUG_OPEN=playlist:0 (or liked, recent, queue, settings) starts on that page.
+        if let Ok(page) = std::env::var("PULSE_DEBUG_OPEN") {
+            app.route = match page.as_str() {
+                "liked" => Route::Liked,
+                "recent" => Route::Recent,
+                "queue" => Route::Queue,
+                "settings" => Route::Settings,
+                p => p.strip_prefix("playlist:").and_then(|n| n.parse().ok()).map(Route::Local).unwrap_or(Route::Home),
+            };
+        }
         app.ensure_loaded(&cc.egui_ctx);
         app
     }
