@@ -9,7 +9,9 @@ use crate::widgets::*;
 
 mod diag_page;
 mod lyrics_page;
+pub mod intro;
 mod online;
+pub mod pick_artists;
 pub mod mini;
 mod personal;
 mod settings_page;
@@ -88,6 +90,7 @@ pub fn draw(app: &mut App, ui: &mut Ui) {
 
     dialogs(app, &ctx);
     toast(app, &ctx);
+    intro::show(app, &ctx);
 }
 
 /// What the player bar says while a song loads.
@@ -2473,6 +2476,15 @@ fn dialogs(app: &mut App, ctx: &egui::Context) {
     import_dialog(app, ctx);
     online::account_dialog(app, ctx);
     personal::profile_dialog(app, ctx);
+    // "Pick artists you like": once, when you're starting out, after the other welcome windows.
+    if app.picker.is_none() && !app.saved.artists_picked && app.account_dialog.is_none() && app.profile_editing.is_none() && app.intro.is_none() {
+        if app.saved.followed_artists.is_empty() && app.saved.played_artists.len() < 5 {
+            pick_artists::open(app, ctx);
+        } else {
+            app.saved.artists_picked = true; // you already have artists to start from
+        }
+    }
+    pick_artists::show(app, ctx);
     if let Some(idx) = app.confirm_delete.take() {
         let name = app.saved.playlists.get(idx).map(|p| p.name.clone()).unwrap_or_default();
         let (mut keep, mut delete) = (true, false);

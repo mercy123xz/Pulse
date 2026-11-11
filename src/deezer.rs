@@ -567,6 +567,18 @@ pub fn related_artists(artist_id: &str, limit: usize) -> Vec<ArtistInfo> {
     one_per_name(found)
 }
 
+/// The most popular artists right now: overall (genre 0) or in one of `GENRES`.
+/// For "Pick artists you like".
+pub fn popular_artists(genre: u32, limit: usize) -> Result<Vec<ArtistInfo>, String> {
+    let path = if genre == 0 { "/chart/0/artists".to_string() } else { format!("/genre/{genre}/artists") };
+    get::<List<DzArtist>>(&path, &[("limit", &limit.to_string())]).map(|l| one_per_name(l.data.into_iter().map(ArtistInfo::from).collect()))
+}
+
+/// Artists whose name matches what was typed, best known first.
+pub fn find_artists(q: &str) -> Result<Vec<ArtistInfo>, String> {
+    get::<List<DzArtist>>("/search/artist", &[("q", q), ("limit", "24")]).map(|l| one_per_name(l.data.into_iter().map(ArtistInfo::from).collect()))
+}
+
 /// Deezer sometimes has two profiles with the same name ("che" and "Che"): keep the
 /// better-known one, in the first one's place.
 pub fn one_per_name(artists: Vec<ArtistInfo>) -> Vec<ArtistInfo> {

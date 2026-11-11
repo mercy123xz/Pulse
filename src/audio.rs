@@ -658,12 +658,71 @@ impl Drop for AudioEngine {
     }
 }
 
+/// The first-launch intro's beat, "bum, ba-dum-dum-DUM": when each hit lands (seconds
+/// after the start), its note (Hz), whether it has a bass thump, its loudness, and the
+/// chord on the last one. The intro's bars bounce at the same times.
+pub const INTRO_HITS: [(f32, f32, bool, f32); 5] = [(0.0, 65.4, true, 0.9), (0.42, 164.8, false, 0.45), (0.56, 196.0, false, 0.5), (0.7, 261.6, false, 0.55), (0.9, 130.8, true, 1.0)];
+const INTRO_CHORD: [f32; 3] = [261.6, 329.6, 392.0];
+
+/// The intro's beat as samples (mono), made here: there's no sound file.
+pub fn intro_samples(rate: u32) -> Vec<f32> {
+    let rate_f = rate as f32;
+    let mut out = vec![0f32; (rate_f * 2.0) as usize];
+    // One plucked note: a quick bounce down in pitch, a fast attack, then it dies away.
+    let mut note = |at: f32, freq: f32, triangle: bool, gain: f32, len: f32, bounce: bool| {
+        let start = (at * rate_f) as usize;
+        let mut phase = 0f32;
+        for i in 0..((len + 0.05) * rate_f) as usize {
+            let t = i as f32 / rate_f;
+            let f = if bounce { freq * 1.5 * (1.0 / 1.5f32).powf((t / 0.06).min(1.0)) } else { freq };
+            phase += std::f32::consts::TAU * f / rate_f;
+            let wave = if triangle { std::f32::consts::FRAC_2_PI * phase.sin().asin() } else { phase.sin() };
+            let env = if t < 0.012 {
+                0.0001 * (gain / 0.0001).powf(t / 0.012)
+            } else {
+                gain * (0.0001 / gain).powf(((t - 0.012) / (len - 0.012)).min(1.0))
+            };
+            if let Some(o) = out.get_mut(start + i) {
+                *o += wave * env;
+            }
+        }
+    };
+    for (at, freq, sub, gain) in INTRO_HITS {
+        let len = if sub { 0.55 } else { 0.28 };
+        note(at, freq, true, gain * 0.6, len, true);
+        if sub {
+            note(at, freq / 2.0, false, gain, len + 0.2, true); // the bass thump
+        }
+        if at > 0.8 {
+            for f in INTRO_CHORD {
+                note(at, f, false, 0.18, 0.7, false);
+            }
+        }
+    }
+    // Softer highs (a gentle low-pass), and overall level.
+    let k = 1.0 - (-std::f32::consts::TAU * 2600.0 / rate_f).exp();
+    let mut y = 0f32;
+    for s in &mut out {
+        y += k * (*s - y);
+        *s = (y * 0.55).clamp(-1.0, 1.0);
+    }
+    out
+}
+
 /// Start opening the next song when the current one has this long left.
 const PREPARE_AHEAD: Duration = Duration::from_secs(45);
 /// Gapless: queue the next song this long before the current one ends.
 const QUEUE_AHEAD: Duration = Duration::from_secs(4);
 
 impl AudioEngine {
+    /// Plays the first-launch intro's beat (alongside whatever else is playing).
+    pub fn play_intro(&self, volume: f32) {
+        let Some(device) = &self._device else { return };
+        let rate = 44_100;
+        let samples: Vec<f32> = intro_samples(rate).into_iter().map(|s| s * volume.clamp(0.0, 1.0)).collect();
+        device.mixer().add(rodio::buffer::SamplesBuffer::new(std::num::NonZero::new(1).unwrap(), std::num::NonZero::new(rate).unwrap(), samples));
+    }
+
     pub fn new() -> Self {
         let (device, decks, device_error) = match rodio::DeviceSinkBuilder::open_default_sink() {
             Ok(mut device) => {
@@ -1317,5 +1376,21 @@ pub mod tests {
     #[test]
     fn plain_m4a_streams_and_seeks() {
         check_stream_and_seek("/tmp/test_plain.m4a", Codec::Mp4, true);
+    }
+}
+
+#[cfg(test)]
+mod intro_tests {
+    #[test]
+    fn the_intro_beat_is_short_and_doesnt_clip() {
+        let s = super::intro_samples(44_100);
+        assert_eq!(s.len(), 88_200);
+        let peak = s.iter().fold(0f32, |m, v| m.max(v.abs()));
+        assert!(peak > 0.2 && peak < 1.0, "peak {peak}");
+        // Each hit is heard: something is playing just after each one starts.
+        for (at, ..) in super::INTRO_HITS {
+            let i = ((at + 0.03) * 44_100.0) as usize;
+            assert!(s[i..i + 400].iter().any(|v| v.abs() > 0.02), "hit at {at}");
+        }
     }
 }

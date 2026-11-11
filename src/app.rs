@@ -405,6 +405,10 @@ pub struct Saved {
     pub liked_playlists: Vec<deezer::PlaylistInfo>,
     /// Artists you follow, newest first.
     pub followed_artists: Vec<deezer::ArtistInfo>,
+    /// "Pick artists you like" was shown (or wasn't needed: you already had a history).
+    pub artists_picked: bool,
+    /// The first-launch intro played; later launches say "Welcome back".
+    pub intro_seen: bool,
     /// Artist pages found by name for songs that didn't know them (name → Deezer artist id).
     pub artist_ids: HashMap<String, String>,
     /// What you searched for lately, newest first.
@@ -456,6 +460,8 @@ impl Default for Saved {
             liked_albums: vec![],
             liked_playlists: vec![],
             followed_artists: vec![],
+            artists_picked: false,
+            intro_seen: false,
             artist_ids: HashMap::new(),
             recent_searches: vec![],
             last_queue: vec![],
@@ -785,7 +791,7 @@ pub struct App {
     backups_rx: Option<Receiver<Vec<crate::backup::Info>>>,
     backups_stale: bool,
     /// Save at the end of this frame instead of waiting for the next autosave.
-    save_now: bool,
+    pub save_now: bool,
     /// The Diagnostics page's facts and self-test.
     pub diag: crate::diag::Diagnostics,
     /// Checks for, downloads and installs new versions.
@@ -846,6 +852,10 @@ pub struct App {
     pub import_running: Option<ImportJob>,
     /// The profile form, when open (first-launch welcome or "Edit profile").
     pub profile_editing: Option<crate::ui::ProfileForm>,
+    /// The first-launch intro, or "Welcome back", while it shows.
+    pub intro: Option<crate::ui::intro::Intro>,
+    /// "Pick artists you like", while it's open.
+    pub picker: Option<crate::ui::pick_artists::Picker>,
 
     // YouTube view counts
     views_queue: std::collections::VecDeque<Track>,
@@ -996,6 +1006,8 @@ impl App {
             views_tx,
             views_rx,
             genre_rx: None,
+            intro: None,
+            picker: None,
             genre_failed: HashSet::new(),
             startup_note: None,
             genre_pending: HashSet::new(),
@@ -1014,6 +1026,18 @@ impl App {
         std::thread::spawn(crate::artcache::trim_disk);
         app.apply_theme(&cc.egui_ctx);
         app.startup_note = load_note;
+        // The intro the first time, "Welcome back" after that.
+        {
+            let name = match crate::account::session() {
+                Some(s) => format!("@{}", s.username),
+                None => app.saved.profile.name.trim().to_string(),
+            };
+            let still = crate::theme::reduce_motion() || !crate::perf::on(crate::perf::Extra::Animations);
+            app.intro = Some(crate::ui::intro::Intro::for_launch(!app.saved.intro_seen, still, name));
+            if still {
+                app.saved.intro_seen = true;
+            }
+        }
         // The first time Pulse opens (and once after updating): offer an account. The local
         // profile window comes after, if you choose "Not now".
         if crate::account::available() && crate::account::session().is_none() && !app.saved.account_asked {
@@ -1046,6 +1070,14 @@ impl App {
                 "queue" => Route::Queue,
                 "settings" => Route::Settings,
                 "liked-albums" => Route::LikedAlbums,
+                "intro" | "welcome" => {
+                    app.intro = Some(crate::ui::intro::Intro::for_launch(page == "intro", false, "@mercy".into()));
+                    Route::Home
+                }
+                "pick-artists" => {
+                    crate::ui::pick_artists::open(&mut app, &cc.egui_ctx);
+                    Route::Home
+                }
                 "signup" => {
                     app.account_dialog = Some(AccountDialog::new(AccountMode::SignUp));
                     Route::Home
@@ -1298,6 +1330,21 @@ impl App {
                     })
                     .take(2)
                     .collect();
+                // Not much history yet: the artists you follow (or picked when you started)
+                // fill in, a different pair each day.
+                let mut artists = artists;
+                let followed = &self.saved.followed_artists;
+                if artists.len() < 2 && !followed.is_empty() {
+                    let start = (now / 86_400) as usize % followed.len();
+                    for a in followed.iter().cycle().skip(start).take(followed.len()) {
+                        if artists.len() == 2 {
+                            break;
+                        }
+                        if deezer::is_deezer_id(&a.id) && !artists.iter().any(|(id, _)| *id == a.id) {
+                            artists.push((a.id.clone(), a.name.clone()));
+                        }
+                    }
+                }
                 let mut songs: Vec<Track> = vec![];
                 for t in &self.saved.recent {
                     if songs.len() == 2 {

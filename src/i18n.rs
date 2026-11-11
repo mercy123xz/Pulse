@@ -551,6 +551,17 @@ const STRINGS: &[(&str, [&str; 4])] = &[
     ("Connected but nothing shows? In Discord, open User Settings → Activity Privacy and turn on “Share my activity”.", ["¿Conectado pero no aparece nada? En Discord, abre Ajustes de usuario → Privacidad de actividad y activa «Compartir mi actividad».", "Conectado, mas nada aparece? No Discord, abra Configurações de usuário → Privacidade de atividade e ative “Compartilhar minha atividade”.", "Connecté mais rien ne s'affiche ? Dans Discord, ouvrez Paramètres utilisateur → Confidentialité de l'activité et activez « Partager mon activité ».", "Verbunden, aber nichts zu sehen? Öffne in Discord Benutzereinstellungen → Aktivitäts-Privatsphäre und schalte „Meine Aktivität teilen“ ein."]),
     ("Open on the website", ["Abrir en el sitio web", "Abrir no site", "Ouvrir sur le site", "Auf der Website öffnen"]),
     ("Privacy Policy", ["Política de privacidad", "Política de privacidade", "Politique de confidentialité", "Datenschutzerklärung"]),
+    ("Welcome back", ["Bienvenido de nuevo", "Bem-vindo de volta", "Bon retour", "Willkommen zurück"]),
+    ("Pick artists you like", ["Elige artistas que te gusten", "Escolha artistas de que você gosta", "Choisissez des artistes que vous aimez", "Wähle Künstler, die du magst"]),
+    ("Choose 3 or more. Your home page starts from them, and from artists like them, until what you play takes over.", ["Elige 3 o más. Tu inicio parte de ellos, y de artistas parecidos, hasta que lo que escuches tome el relevo.", "Escolha 3 ou mais. Sua página inicial parte deles, e de artistas parecidos, até o que você ouve assumir.", "Choisissez-en 3 ou plus. Votre accueil part d'eux, et d'artistes similaires, jusqu'à ce que vos écoutes prennent le relais.", "Wähle 3 oder mehr. Deine Startseite beginnt mit ihnen und ähnlichen Künstlern, bis das, was du hörst, übernimmt."]),
+    ("Search for an artist", ["Busca un artista", "Procure um artista", "Rechercher un artiste", "Nach einem Künstler suchen"]),
+    ("None picked yet", ["Ninguno elegido todavía", "Nenhum escolhido ainda", "Aucun choisi pour l'instant", "Noch keiner gewählt"]),
+    ("picked", ["elegidos", "escolhidos", "choisis", "gewählt"]),
+    ("Continue", ["Continuar", "Continuar", "Continuer", "Weiter"]),
+    ("Pick", ["Elige", "Escolha", "Choisissez-en", "Wähle"]),
+    ("Skip", ["Omitir", "Pular", "Passer", "Überspringen"]),
+    ("Your home page now starts from your artists", ["Tu inicio ahora parte de tus artistas", "Sua página inicial agora parte dos seus artistas", "Votre accueil part maintenant de vos artistes", "Deine Startseite beginnt jetzt mit deinen Künstlern"]),
+    ("Couldn't load artists. Check your connection.", ["No se pudieron cargar los artistas. Revisa tu conexión.", "Não foi possível carregar os artistas. Verifique sua conexão.", "Impossible de charger les artistes. Vérifiez votre connexion.", "Künstler konnten nicht geladen werden. Prüfe deine Verbindung."]),
 ];
 
 #[cfg(test)]
