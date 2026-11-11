@@ -135,6 +135,7 @@ footer a:hover { text-decoration: underline; }
         <li><a href="#sound">Sound and effects</a></li>
         <li><a href="#light">Staying light</a></li>
         <li><a href="#themes">Making a theme</a></li>
+        <li><a href="#accounts">Accounts</a></li>
         <li><a href="#data">Your data</a></li>
         <li><a href="#keys">Keyboard shortcuts</a></li>
         <li><a href="#build">Building it yourself</a></li>
@@ -280,16 +281,46 @@ backdrop = false           # true: soft glows in the playing song's colors</code
         <p>With <code>backdrop</code> on, Pulse works out the main color of the playing song's cover (once per song, in the background) and fills the main area with slow-moving glows in that color.</p>
       </section>
 
+      <section id="accounts" aria-labelledby="accounts-h">
+        <h2 id="accounts-h">Accounts</h2>
+        <p>A Pulse account is free and optional. You need one to make playlists public and to have a profile people can find. Everything else, including your whole library, works without one.</p>
+        <h3>Creating an account</h3>
+        <p>Pulse offers to make one the first time it opens (press <em>Not now</em> to skip). You can make one later in <strong>Settings → Account → Create account</strong>. You choose:</p>
+        <ul>
+          <li><strong>A username</strong>: 3 to 20 letters, numbers, <code>_</code> or <code>.</code>. It's public: it's on your profile and on the playlists you share.</li>
+          <li><strong>An email address</strong>: required, and only used to send you a code if you forget your password. It's never shown to anyone, and one email can have one account.</li>
+          <li><strong>A password</strong>: at least 8 characters, and it can't contain your username.</li>
+        </ul>
+        <p>Accounts made before email addresses were needed are asked to add one the next time Pulse opens. Until they do, the only other choice is to sign out.</p>
+        <h3>Signing in</h3>
+        <p>Sign in with your username or your email address. You stay signed in on that computer for 90 days. After 10 wrong passwords, signing in to that account from your connection pauses for 15 minutes.</p>
+        <h3>If you forget your password</h3>
+        <ol>
+          <li>In the sign-in window, press <em>Forgot password?</em></li>
+          <li>Enter your username or email address and press <em>Send code</em>.</li>
+          <li>Pulse emails you a 6-digit code. If it isn't there in a minute, check your spam folder.</li>
+          <li>Enter the code and a new password. The code works for 15 minutes and for 5 tries. After that, press <em>Send a new code</em>.</li>
+        </ol>
+        <p>You're signed in with your new password, and signed out on your other computers.</p>
+        <h3>Managing your account</h3>
+        <p>In <strong>Settings → Account</strong> you can see your profile, change your email address or password (both ask for your password first), sign out, or delete your account. Deleting it removes your profile and every playlist you made public, right away. Your library on your computer stays.</p>
+        <h3>Sharing playlists</h3>
+        <p>Open one of your playlists and press <em>Make public</em>. Pulse copies its link, which opens in Pulse or on this website. Changes you make to the playlist are uploaded by themselves. <em>Make private</em> takes it down again. Songs from your Music folder are never uploaded.</p>
+        <h3>What the server keeps</h3>
+        <p>Accounts live on a small server (a Cloudflare Worker and its database). It keeps your username, your email, your profile text, the playlists you made public, and a salted hash of your password, never the password itself. Signing in stores only a hash of each sign-in key. Reset codes are emailed through a mail service and stored only as a hash. A public playlist that three different people report is hidden. The server code is in <a href="https://github.com/mercy123xz/Pulse/tree/main/server"><code>server/</code></a>.</p>
+      </section>
+
       <section id="data" aria-labelledby="data-h">
         <h2 id="data-h">Your data</h2>
-        <p>Pulse has no accounts and no servers of its own. Everything it keeps stays on your PC, in <code>%APPDATA%\pulse-player</code>:</p>
+        <p>Unless you make a <a href="#accounts">Pulse account</a> and share playlists, nothing you do in Pulse leaves your PC. Everything it keeps is in <code>%APPDATA%\pulse-player</code>:</p>
         <ul>
           <li>your likes, playlists, recently played songs, profile and settings</li>
+          <li>if you're signed in, your sign-in key (in <code>account.json</code>)</li>
           <li>your themes</li>
           <li>songs you download for offline listening (in <code>offline</code>; Settings → Storage lets you choose another place)</li>
           <li>yt-dlp and Deno, and a cache of temporary files (Settings → Storage shows its size and can clear it)</li>
         </ul>
-        <p>Pulse also plays the music files in your Windows Music folder if you turn on <em>Show Local Files</em> in Settings. The only places Pulse talks to are the ones it gets music from: Deezer for song info, YouTube for audio, iTunes for missing covers, and GitHub when it fetches or updates its playback tools. Uninstalling keeps your folder, so reinstalling picks up where you left off; delete the folder to remove everything.</p>
+        <p>Pulse also plays the music files in your Windows Music folder if you turn on <em>Show Local Files</em> in Settings. The only places Pulse talks to are the ones it gets music from: Deezer for song info, YouTube for audio, iTunes for missing covers, GitHub when it fetches or updates its playback tools, and the Pulse accounts server if you use an account. Uninstalling keeps your folder, so reinstalling picks up where you left off; delete the folder to remove everything.</p>
         <p>Your playlists can be shared as a one-line code that contains just the list of songs. Nothing is uploaded: the code itself is the playlist.</p>
       </section>
 
@@ -331,6 +362,8 @@ cargo run --release</code></pre>
             <tr><td><code>src/dsp.rs</code></td><td>Equalizer, mono, fades and silence detection</td></tr>
             <tr><td><code>src/youtube.rs</code></td><td>Installing and updating yt-dlp and Deno, matching songs to videos, getting audio links</td></tr>
             <tr><td><code>src/deezer.rs</code></td><td>Song info, artwork, charts, artist and album pages</td></tr>
+            <tr><td><code>src/account.rs</code>, <code>src/ui/online.rs</code></td><td>Accounts: signing up and in, password resets, public playlists, profiles</td></tr>
+            <tr><td><code>server/</code></td><td>The accounts server (a Cloudflare Worker with a D1 database) and its tests</td></tr>
             <tr><td><code>src/app.rs</code></td><td>Pages and history, the queue, shuffle and repeat, your library, saving</td></tr>
             <tr><td><code>src/ui.rs</code>, <code>src/widgets.rs</code></td><td>Everything you see, and the custom-drawn pieces it's made of</td></tr>
             <tr><td><code>src/themes.rs</code>, <code>assets/themes/</code></td><td>The theme loader and the built-in themes</td></tr>
@@ -350,6 +383,10 @@ cargo run --release</code></pre>
         <p>YouTube may not have a full version of it, or YouTube changed something and yt-dlp hasn't caught up yet. Pulse updates yt-dlp daily, so trying again later often works. Pulse skips to the next song after a failure.</p>
         <h3>The window flickers or stays blank</h3>
         <p>Turn off <strong>Settings → Compatibility → Enable hardware acceleration</strong> and restart Pulse. It will draw with Windows' software renderer instead.</p>
+        <h3>I can't sign in</h3>
+        <p>Check you're using the username or email address you signed up with. If you forgot your password, press <em>Forgot password?</em> in the sign-in window (see <a href="#accounts">Accounts</a>). If you've tried too many times, wait 15 minutes.</p>
+        <h3>The reset code didn't arrive</h3>
+        <p>Look in your spam folder. A code only goes to the email address on the account, and only 3 codes are sent per hour. If your account has no email address, no code can be sent: <a href="https://github.com/mercy123xz/Pulse/issues">open an issue</a> and ask for help.</p>
         <h3>Still stuck?</h3>
         <p><a href="https://github.com/mercy123xz/Pulse/issues">Open an issue on GitHub</a> and describe what happened.</p>
       </section>

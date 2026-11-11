@@ -61,7 +61,7 @@
 **Share (optional)**
 - A free **Pulse account** lets you make playlists public and have a profile people can find
 - Shared links open in Pulse or on the website; save other people's playlists or copy them
-- No account needed for anything else
+- No account needed for anything else. See [Accounts](#accounts)
 
 **Make it yours**
 - Five built-in **themes** (Default, Blossom, Dreary Mono, Lunar, Aurora), each with dark and light colors,
@@ -74,6 +74,24 @@
 - High contrast mode
 - Full keyboard control and screen-reader support, with text colors that meet WCAG AA contrast
 - A true desktop app with no web browser inside. It runs on any 64-bit Windows 10 or 11 PC, even one without a graphics driver
+
+## Accounts
+
+An account is free and optional: it's for making playlists public and having a profile.
+
+- **Create one** when Pulse first opens, or in **Settings → Account**. You choose a username
+  (public), an email address (required, only for password resets, never shown) and a password
+  (at least 8 characters).
+- **Sign in** with your username or email. You stay signed in for 90 days on that computer.
+- **Forgot your password?** Press *Forgot password?* when signing in. Pulse emails you a 6-digit
+  code (it works for 15 minutes); enter it with a new password.
+- **Settings → Account** changes your email or password, signs you out, or deletes your account
+  along with everything you made public. Your library stays on your PC either way.
+- Accounts made before emails were needed are asked to add one the next time Pulse opens.
+
+The server keeps your username, email, profile text, public playlists and a salted hash of your
+password, never the password. It's a Cloudflare Worker; its code and setup are in [`server/`](server/).
+More in the [docs](https://mercy123xz.github.io/Pulse/docs/#accounts).
 
 ## Download
 
@@ -141,7 +159,7 @@ On Linux you'll also need the ALSA development headers (`sudo apt install libaso
 | `src/dsp.rs` | Sound processing on every song: equalizer, mono, fades, silence detection for automix |
 | `src/import.rs` | Importing playlists from YouTube, Spotify and SoundCloud |
 | `src/suggest.rs` | What the search box suggests while you type, and how it's ranked |
-| `src/account.rs`, `src/ui/online.rs` | Pulse accounts: signing in, public playlists, profiles |
+| `src/account.rs`, `src/ui/online.rs` | Pulse accounts: signing up and in, password resets, public playlists, profiles |
 | `server/` | The accounts server (a Cloudflare Worker with a D1 database) and its tests |
 | `src/audiocache.rs` | Songs you played, kept on disk so they start instantly next time |
 | `src/downloads.rs` | Downloading songs for offline listening |

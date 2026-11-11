@@ -50,8 +50,10 @@ pub fn account_dialog(app: &mut App, ctx: &egui::Context) {
     let busy = app.account_busy > 0;
     let mut close = false;
     let mut submit = false;
+    let mut app_sign_out = false;
     let mode = d.mode;
     let welcome = d.welcome;
+    let required = d.required;
     let modal = egui::Modal::new(egui::Id::new("account")).frame(dialog_frame()).show(ctx, |ui| {
         ui.set_width(420.0);
         ui.spacing_mut().item_spacing.y = 0.0;
@@ -63,7 +65,9 @@ pub fn account_dialog(app: &mut App, ctx: &egui::Context) {
             ui.add_space(14.0);
         }
         let (title, body) = match mode {
-            AccountMode::SignUp if welcome => ("Welcome to Pulse", "Create a free account to share playlists and have a profile. It's optional: your music and library work without one."),
+            AccountMode::SignUp if welcome => {
+                ("Welcome to Pulse", "Create a free account to share playlists and have a profile. It's optional: your music and library work without one.")
+            }
             AccountMode::SignIn => ("Sign in to Pulse", "Welcome back."),
             AccountMode::SignUp => ("Create a Pulse account", "Share playlists and have a public profile. Your library stays on this computer."),
             AccountMode::Password => ("Change password", "You'll stay signed in here and be signed out everywhere else."),
@@ -72,16 +76,35 @@ pub fn account_dialog(app: &mut App, ctx: &egui::Context) {
                 "This deletes your account, your public profile and every playlist you made public. Your library on this computer stays. This can't be undone.",
             ),
             AccountMode::Bio => ("Edit your public profile", "A few words about you. Anyone can see this."),
+            AccountMode::Forgot => ("Forgot your password?", "Enter your username or email. We'll email you a 6-digit code to choose a new password."),
+            AccountMode::Reset => ("Choose a new password", "Enter the code from the email and a new password. You'll be signed out on your other computers."),
+            AccountMode::Email if required => {
+                ("Add your email", "Your account needs an email address, so you can get back in if you forget your password. It's never shown to anyone.")
+            }
+            AccountMode::Email => ("Change your email", "Password reset codes go to this address. It's never shown to anyone."),
         };
         ui.label(RichText::new(tr(title)).font(heavy(22.0)).color(pal().text));
         ui.add_space(8.0);
         ui.label(RichText::new(tr(body)).font(regular(13.5)).color(pal().text_muted));
         ui.add_space(20.0);
-        if matches!(mode, AccountMode::SignIn | AccountMode::SignUp) {
-            let hint = if mode == AccountMode::SignUp { "3–20 letters, numbers, _ or ." } else { "" };
-            let r = field(ui, "Username", &mut d.username, false, "user", hint);
+        if let Some(note) = &d.note {
+            Frame::new().fill(pal().accent.gamma_multiply(0.16)).corner_radius(CornerRadius::same(8)).inner_margin(Margin::symmetric(12, 9)).show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.label(RichText::new(tr(note)).font(regular(12.5)).color(pal().text));
+            });
+            ui.add_space(14.0);
+        }
+        if matches!(mode, AccountMode::SignIn | AccountMode::SignUp | AccountMode::Forgot) {
+            let (label, hint) = match mode {
+                AccountMode::SignUp => ("Username", "3–20 letters, numbers, _ or ."),
+                _ => ("Username or email", ""),
+            };
+            let r = field(ui, label, &mut d.username, false, "user", hint);
             if d.username.is_empty() && !r.has_focus() && !busy {
                 r.request_focus();
+            }
+            if mode == AccountMode::Forgot {
+                submit |= r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
             }
         }
         let enter = |ui: &Ui, r: &egui::Response| r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
@@ -89,8 +112,20 @@ pub fn account_dialog(app: &mut App, ctx: &egui::Context) {
             AccountMode::SignIn => {
                 let r = field(ui, "Password", &mut d.password, true, "pass", "");
                 submit |= enter(ui, &r);
+                ui.add_space(-8.0);
+                if ui
+                    .add(egui::Label::new(RichText::new(tr("Forgot password?")).font(med(12.5)).color(pal().accent_soft)).sense(egui::Sense::click()))
+                    .on_hover_cursor(egui::CursorIcon::PointingHand)
+                    .clicked()
+                {
+                    d.mode = AccountMode::Forgot;
+                    d.error = None;
+                    d.password.clear();
+                }
+                ui.add_space(14.0);
             }
             AccountMode::SignUp => {
+                field(ui, "Email", &mut d.email, false, "email", "Only for resetting your password. Never shown.");
                 field(ui, "Password", &mut d.password, true, "pass", "At least 8 characters");
                 let r = field(ui, "Password again", &mut d.password2, true, "pass2", "");
                 submit |= enter(ui, &r);
@@ -107,6 +142,25 @@ pub fn account_dialog(app: &mut App, ctx: &egui::Context) {
             AccountMode::Bio => {
                 d.bio = d.bio.chars().take(300).collect();
                 field(ui, "About you", &mut d.bio, false, "bio", "Up to 300 characters");
+            }
+            AccountMode::Forgot => {}
+            AccountMode::Reset => {
+                d.code = d.code.chars().filter(char::is_ascii_digit).take(6).collect();
+                let r = field(ui, "Code", &mut d.code, false, "code", "6 digits");
+                if d.code.is_empty() && !r.has_focus() && !busy {
+                    r.request_focus();
+                }
+                field(ui, "New password", &mut d.password, true, "new", "At least 8 characters");
+                let r = field(ui, "New password again", &mut d.password2, true, "new2", "");
+                submit |= enter(ui, &r);
+            }
+            AccountMode::Email => {
+                let r = field(ui, "Email", &mut d.email, false, "email", "you@example.com");
+                if d.email.is_empty() && !r.has_focus() && !busy {
+                    r.request_focus();
+                }
+                let r = field(ui, "Your password", &mut d.password, true, "pass", "To make sure it's you");
+                submit |= enter(ui, &r);
             }
         }
         if mode == AccountMode::SignUp {
@@ -126,6 +180,8 @@ pub fn account_dialog(app: &mut App, ctx: &egui::Context) {
             let other = match mode {
                 AccountMode::SignIn => Some(("New here? Create an account", AccountMode::SignUp)),
                 AccountMode::SignUp => Some(("Have an account? Sign in", AccountMode::SignIn)),
+                AccountMode::Forgot => Some(("Back to sign in", AccountMode::SignIn)),
+                AccountMode::Reset => Some(("Send a new code", AccountMode::Forgot)),
                 _ => None,
             };
             if let Some((label, to)) = other
@@ -136,6 +192,7 @@ pub fn account_dialog(app: &mut App, ctx: &egui::Context) {
             {
                 d.mode = to;
                 d.error = None;
+                d.note = None;
             }
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 ui.spacing_mut().item_spacing.x = 10.0;
@@ -144,15 +201,27 @@ pub fn account_dialog(app: &mut App, ctx: &egui::Context) {
                     AccountMode::SignUp => "Create account",
                     AccountMode::Password => "Change password",
                     AccountMode::Delete => "Delete account",
-                    AccountMode::Bio => "Save",
+                    AccountMode::Bio | AccountMode::Email => "Save",
+                    AccountMode::Forgot => "Send code",
+                    AccountMode::Reset => "Set password",
                 };
                 if busy {
                     ui.spinner();
                 } else if dialog_button(ui, tr(label), true, true).clicked() {
                     submit = true;
                 }
-                if dialog_button(ui, tr(if welcome { "Not now" } else { "Cancel" }), false, !busy).clicked() {
+                let cancel = if required {
+                    "Sign out"
+                } else if welcome {
+                    "Not now"
+                } else {
+                    "Cancel"
+                };
+                if dialog_button(ui, tr(cancel), false, !busy).clicked() {
                     close = true;
+                    if required {
+                        app_sign_out = true;
+                    }
                 }
             });
         });
@@ -160,7 +229,16 @@ pub fn account_dialog(app: &mut App, ctx: &egui::Context) {
     if submit && !busy {
         submit_dialog(app, ctx);
     }
-    if (close || modal.should_close()) && app.account_busy == 0 {
+    if app_sign_out {
+        app.account_dialog = None;
+        app.account_job(ctx, || {
+            account::sign_out();
+            Ok(AccountDone::SignedOut)
+        });
+        return;
+    }
+    // An account without an email can't wave the window away (only "Sign out" closes it).
+    if (close || (modal.should_close() && !required)) && app.account_busy == 0 {
         app.account_dialog = None;
         // "Not now" on the welcome: the profile window (name, picture) comes next, as before.
         if welcome && app.saved.profile.created == 0 && !app.saved.profile.skipped {
@@ -172,11 +250,20 @@ pub fn account_dialog(app: &mut App, ctx: &egui::Context) {
 fn submit_dialog(app: &mut App, ctx: &egui::Context) {
     let Some(d) = &mut app.account_dialog else { return };
     let (user, pass, pass2, bio) = (d.username.trim().to_lowercase(), d.password.clone(), d.password2.clone(), d.bio.trim().to_string());
+    let (email, code) = (d.email.trim().to_lowercase(), d.code.clone());
+    d.note = None;
     // Checks the server would make anyway, said straight away.
     let local_error = match d.mode {
-        AccountMode::SignIn if user.is_empty() || pass.is_empty() => Some("Enter your username and password."),
+        AccountMode::SignIn if user.is_empty() || pass.is_empty() => Some("Enter your username or email, and your password."),
         AccountMode::SignUp if user.len() < 3 => Some("Usernames are 3 to 20 characters."),
         AccountMode::SignUp if !account::valid_username(&user) => Some("Usernames can use letters, numbers, _ and . only."),
+        AccountMode::SignUp | AccountMode::Email if email.is_empty() => Some("Enter your email address."),
+        AccountMode::SignUp | AccountMode::Email if !account::valid_email(&email) => Some("That email address doesn't look right."),
+        AccountMode::Email if pass.is_empty() => Some("Enter your password."),
+        AccountMode::Forgot if user.is_empty() => Some("Enter your username or email address."),
+        AccountMode::Reset if code.len() != 6 => Some("Enter the 6-digit code from the email."),
+        AccountMode::Reset if pass.chars().count() < 8 => Some("Passwords need at least 8 characters."),
+        AccountMode::Reset if pass != pass2 => Some("The two passwords don't match."),
         AccountMode::SignUp | AccountMode::Password if (if d.mode == AccountMode::SignUp { &pass } else { &pass2 }).chars().count() < 8 => {
             Some("Passwords need at least 8 characters.")
         }
@@ -191,7 +278,12 @@ fn submit_dialog(app: &mut App, ctx: &egui::Context) {
     let reload = account::session().map(|s| format!("user:{}", s.username));
     match d.mode {
         AccountMode::SignIn => app.account_job(ctx, move || account::sign_in(&user, &pass).map(AccountDone::SignedIn)),
-        AccountMode::SignUp => app.account_job(ctx, move || account::sign_up(&user, &pass).map(AccountDone::SignedIn)),
+        AccountMode::SignUp => app.account_job(ctx, move || account::sign_up(&user, &email, &pass).map(AccountDone::SignedIn)),
+        AccountMode::Forgot => app.account_job(ctx, move || account::reset_start(&user).map(AccountDone::CodeSent)),
+        AccountMode::Reset => app.account_job(ctx, move || account::reset_finish(&user, &code, &pass).map(AccountDone::SignedIn)),
+        AccountMode::Email => {
+            app.account_job(ctx, move || account::set_email(&email, &pass).map(|_| AccountDone::Done { message: tr("Email saved").to_string(), reload: None }))
+        }
         AccountMode::Password => app.account_job(ctx, move || {
             account::change_password(&pass, &pass2).map(|_| AccountDone::Done { message: tr("Password changed").to_string(), reload: None })
         }),
@@ -388,6 +480,15 @@ pub fn account_settings(app: &mut App, ui: &mut Ui, row: Row) {
                 }
                 if ui.button(tr("Your profile")).clicked() {
                     app.navigate(Route::User(s.username.clone()), &ctx);
+                }
+            });
+            let email = if s.email.is_empty() { tr("None yet. Add one so you can reset your password.").to_string() } else { s.email.clone() };
+            row(ui, tr("Email"), &email, &mut |ui| {
+                if ui.button(tr(if s.email.is_empty() { "Add email" } else { "Change email" })).clicked() {
+                    let mut d = AccountDialog::new(AccountMode::Email);
+                    d.email = s.email.clone();
+                    d.required = false;
+                    app.account_dialog = Some(d);
                 }
             });
             row(ui, tr("Password"), tr("Change the password you sign in with."), &mut |ui| {

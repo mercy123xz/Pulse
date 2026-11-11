@@ -2,11 +2,13 @@
 //
 // A Cloudflare Worker with a D1 database (binding name: DB). See server/README.md.
 //
-// What it stores: your username, a salted hash of your password (never the password),
-// sign-in sessions (only a hash of each session key), your profile text, and the
-// playlists you make public. Deleting your account deletes all of it.
+// What it stores: your username, your email address (only used to send you a code if you
+// forget your password; never shown to anyone), a salted hash of your password (never the
+// password), sign-in sessions (only a hash of each session key), your profile text, and
+// the playlists you make public. Deleting your account deletes all of it.
 //
-// No secrets are needed: session keys are random and only their hashes are stored.
+// Sending email needs one secret: BREVO_API_KEY (or RESEND_API_KEY), plus a MAIL_FROM
+// variable with the address it comes from. See server/README.md.
 
 const ALLOWED_ORIGINS = ["https://mercy123xz.github.io", "https://pulse.is-a.software"];
 
@@ -19,6 +21,11 @@ const PBKDF2_ITERATIONS = 100_000; // the most Workers allow
 const SIGNUPS_PER_IP_PER_HOUR = 5;
 const FAILED_LOGINS_PER_15_MIN = 10;
 const HIDE_AFTER_REPORTS = 3;
+const RESET_MINUTES = 15; // how long a reset code works
+const RESET_TRIES = 5; // wrong codes before it stops working
+const RESET_MAILS_PER_IP_PER_HOUR = 5;
+const RESET_MAILS_PER_ACCOUNT_PER_HOUR = 3;
+const RESET_CHECKS_PER_IP_PER_15_MIN = 20;
 
 // Pictures may only come from the music services Pulse uses, so a published playlist
 // can't make other people's Pulse load pictures from (and reveal them to) any server.
@@ -80,6 +87,9 @@ async function route(c, method, path) {
   if (method === "PUT" && path === "/me") return updateMe(c);
   if (method === "POST" && path === "/me/password") return changePassword(c);
   if (method === "DELETE" && path === "/me") return deleteMe(c);
+  if (method === "PUT" && path === "/me/email") return changeEmail(c);
+  if (method === "POST" && path === "/reset/start") return resetStart(c);
+  if (method === "POST" && path === "/reset/finish") return resetFinish(c);
   if (method === "POST" && path === "/playlists") return publish(c);
   if ((p = m(/^\/playlists\/([A-Za-z0-9]{10})$/))) {
     if (method === "GET") return getPlaylist(c, p[1]);
@@ -144,6 +154,44 @@ function checkPassword(p, username) {
   if (p.toLowerCase().includes(username)) fail(400, "Your password can't contain your username.");
 }
 
+function checkEmail(e) {
+  if (!e) fail(400, "Enter your email address. It's how you get back in if you forget your password.");
+  if (e.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@.]{2,}$/.test(e)) fail(400, "That email address doesn't look right.");
+}
+
+async function emailFree(c, email, exceptId = 0) {
+  const row = await c.env.DB.prepare("SELECT id FROM users WHERE email = ? AND id != ?").bind(email, exceptId).first();
+  if (row) fail(409, "That email address is already used by another account.");
+}
+
+// A user by username, or by email if it has an @ in it.
+const findUser = (c, who) =>
+  c.env.DB.prepare(`SELECT id, username, email, pass_hash, pass_salt, bio, created FROM users WHERE ${who.includes("@") ? "email" : "username"} = ?`).bind(who).first();
+
+// Sends one email through Brevo or Resend, whichever has a key set.
+async function sendMail(env, to, subject, text, html) {
+  if (typeof env.MAIL_HOOK === "function") return env.MAIL_HOOK({ to, subject, text, html }); // tests
+  const from = String(env.MAIL_FROM || "");
+  const m = from.match(/^\s*(.*?)\s*<([^>]+)>\s*$/);
+  const sender = m ? { name: m[1] || "Pulse", email: m[2] } : { name: "Pulse", email: from.trim() };
+  if (!sender.email || !(env.BREVO_API_KEY || env.RESEND_API_KEY)) fail(503, "Password reset isn't set up on the server yet.");
+  const r = env.BREVO_API_KEY
+    ? await fetch("https://api.brevo.com/v3/smtp/email", {
+        method: "POST",
+        headers: { "api-key": env.BREVO_API_KEY, "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ sender, to: [{ email: to }], subject, textContent: text, htmlContent: html }),
+      })
+    : await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ from: `${sender.name} <${sender.email}>`, to: [to], subject, text, html }),
+      });
+  if (!r.ok) {
+    console.error("mail", r.status, await r.text().catch(() => ""));
+    fail(502, "The email couldn't be sent. Please try again in a few minutes.");
+  }
+}
+
 // Counts something per key in the last `secs` seconds (and records this one).
 async function overLimit(c, kind, key, max, secs) {
   const db = c.env.DB;
@@ -167,7 +215,7 @@ async function auth(c) {
   const token = h.startsWith("Bearer ") ? h.slice(7).trim() : "";
   if (!/^[0-9a-f]{64}$/.test(token)) fail(401, "Please sign in again.");
   const row = await c.env.DB.prepare(
-    "SELECT u.id, u.username, u.bio, u.created, s.token_hash FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ? AND s.expires > ?",
+    "SELECT u.id, u.username, u.email, u.bio, u.created, s.token_hash FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ? AND s.expires > ?",
   )
     .bind(await sha256(token), c.now)
     .first();
@@ -213,6 +261,8 @@ function cleanTracks(list) {
 }
 
 const publicUser = (u) => ({ username: u.username, bio: u.bio || "", created: u.created });
+// Only ever sent to the account's owner.
+const ownUser = (u) => ({ ...publicUser(u), email: u.email || "" });
 
 // ---------------------------------------------------------------- accounts
 
@@ -221,27 +271,30 @@ async function signup(c) {
   const username = str(b.username, 40).toLowerCase();
   checkUsername(username);
   checkPassword(b.password, username);
+  const email = str(b.email, 300).toLowerCase();
+  checkEmail(email);
   if (await overLimit(c, "signup", c.ip, SIGNUPS_PER_IP_PER_HOUR, 3600)) fail(429, "Too many new accounts from here. Please try again later.");
   const taken = await c.env.DB.prepare("SELECT 1 FROM users WHERE username = ?").bind(username).first();
   if (taken) fail(409, "That username is taken.");
+  await emailFree(c, email);
   const salt = randomHex(16);
   const hash = await hashPassword(b.password, salt);
-  const res = await c.env.DB.prepare("INSERT INTO users (username, pass_hash, pass_salt, bio, created) VALUES (?, ?, ?, '', ?)")
-    .bind(username, hash, salt, c.now)
+  const res = await c.env.DB.prepare("INSERT INTO users (username, email, pass_hash, pass_salt, bio, created) VALUES (?, ?, ?, ?, '', ?)")
+    .bind(username, email, hash, salt, c.now)
     .run();
   await note(c, "signup", c.ip);
   const id = res.meta?.last_row_id;
   const token = await newSession(c, id);
-  return c.reply(201, { token, user: { username, bio: "", created: c.now } });
+  return c.reply(201, { token, user: { username, bio: "", created: c.now, email } });
 }
 
 async function login(c) {
   const b = await body(c);
-  const username = str(b.username, 40).toLowerCase();
+  const username = str(b.username, 300).toLowerCase(); // or an email address
   const password = typeof b.password === "string" ? b.password : "";
   const key = `${username}|${c.ip}`;
   if (await overLimit(c, "login", key, FAILED_LOGINS_PER_15_MIN, 900)) fail(429, "Too many tries. Please wait 15 minutes.");
-  const u = await c.env.DB.prepare("SELECT id, username, pass_hash, pass_salt, bio, created FROM users WHERE username = ?").bind(username).first();
+  const u = username ? await findUser(c, username) : null;
   // The same work either way, so timing doesn't tell whether a username exists.
   const hash = await hashPassword(password.slice(0, 200), u ? u.pass_salt : "00000000000000000000000000000000");
   if (!u || !sameText(hash, u.pass_hash)) {
@@ -249,7 +302,7 @@ async function login(c) {
     fail(401, "Wrong username or password.");
   }
   const token = await newSession(c, u.id);
-  return c.reply(200, { token, user: publicUser(u) });
+  return c.reply(200, { token, user: ownUser(u) });
 }
 
 async function logout(c) {
@@ -261,7 +314,7 @@ async function logout(c) {
 async function me(c) {
   const u = await auth(c);
   const lists = await c.env.DB.prepare("SELECT id, name, count, cover, updated FROM playlists WHERE user_id = ? ORDER BY updated DESC").bind(u.id).all();
-  return c.reply(200, { user: publicUser(u), playlists: lists.results || [] });
+  return c.reply(200, { user: ownUser(u), playlists: lists.results || [] });
 }
 
 async function updateMe(c) {
@@ -269,7 +322,7 @@ async function updateMe(c) {
   const b = await body(c);
   const bio = str(b.bio, 300);
   await c.env.DB.prepare("UPDATE users SET bio = ? WHERE id = ?").bind(bio, u.id).run();
-  return c.reply(200, { user: { ...publicUser(u), bio } });
+  return c.reply(200, { user: { ...ownUser(u), bio } });
 }
 
 async function changePassword(c) {
@@ -285,6 +338,80 @@ async function changePassword(c) {
   return c.reply(200, { ok: true });
 }
 
+async function changeEmail(c) {
+  const u = await auth(c);
+  const b = await body(c);
+  const row = await c.env.DB.prepare("SELECT pass_hash, pass_salt FROM users WHERE id = ?").bind(u.id).first();
+  // A password too, so someone with only your session can't point resets at themselves.
+  if (!sameText(await hashPassword(String(b.password || "").slice(0, 200), row.pass_salt), row.pass_hash)) fail(401, "That password is wrong.");
+  const email = str(b.email, 300).toLowerCase();
+  checkEmail(email);
+  await emailFree(c, email, u.id);
+  await c.env.DB.prepare("UPDATE users SET email = ? WHERE id = ?").bind(email, u.id).run();
+  await c.env.DB.prepare("DELETE FROM resets WHERE user_id = ?").bind(u.id).run();
+  return c.reply(200, { user: { ...ownUser(u), email } });
+}
+
+// Forgot password, step 1: email a code to the account's address. The reply is the same
+// whether or not the account exists, so this can't be used to find out who has one.
+async function resetStart(c) {
+  const b = await body(c);
+  const who = str(b.who, 300).toLowerCase();
+  if (!who) fail(400, "Enter your username or email address.");
+  if (!c.env.MAIL_HOOK && !(c.env.MAIL_FROM && (c.env.BREVO_API_KEY || c.env.RESEND_API_KEY))) fail(503, "Password reset isn't set up on the server yet.");
+  if (await overLimit(c, "reset", c.ip, RESET_MAILS_PER_IP_PER_HOUR, 3600)) fail(429, "Too many codes asked for from here. Please try again later.");
+  await note(c, "reset", c.ip);
+  const sent = { ok: true, message: "If that account has an email address, a code is on its way. Check your spam folder if it doesn't arrive in a minute." };
+  const u = await findUser(c, who);
+  if (!u || !u.email) return c.reply(200, sent);
+  if (await overLimit(c, "reset-user", String(u.id), RESET_MAILS_PER_ACCOUNT_PER_HOUR, 3600)) return c.reply(200, sent);
+  await note(c, "reset-user", String(u.id));
+  const code = String(crypto.getRandomValues(new Uint32Array(1))[0] % 1_000_000).padStart(6, "0");
+  await c.env.DB.prepare("INSERT OR REPLACE INTO resets (user_id, code_hash, expires, tries) VALUES (?, ?, ?, 0)")
+    .bind(u.id, await sha256(`${u.id}:${code}`), c.now + RESET_MINUTES * 60)
+    .run();
+  const text = `Hi @${u.username},\n\nYour Pulse code is ${code}\n\nEnter it in Pulse to choose a new password. It works for ${RESET_MINUTES} minutes.\n\nIf you didn't ask for this, you can ignore this email: your password hasn't changed.`;
+  const html = `<div style="font-family:Segoe UI,Arial,sans-serif;max-width:440px;margin:auto;padding:24px;color:#1b1a20">
+<p style="margin:0 0 16px">Hi @${u.username},</p>
+<p style="margin:0 0 8px">Your Pulse code is</p>
+<p style="font-size:32px;font-weight:700;letter-spacing:6px;margin:0 0 16px;color:#6d28d9">${code}</p>
+<p style="margin:0 0 16px">Enter it in Pulse to choose a new password. It works for ${RESET_MINUTES} minutes.</p>
+<p style="margin:0;color:#6b6880;font-size:13px">If you didn't ask for this, you can ignore this email: your password hasn't changed.</p></div>`;
+  await sendMail(c.env, u.email, `${code} is your Pulse code`, text, html);
+  return c.reply(200, sent);
+}
+
+// Forgot password, step 2: the code and a new password. Signs you in.
+async function resetFinish(c) {
+  const b = await body(c);
+  const who = str(b.who, 300).toLowerCase();
+  const code = str(b.code, 20).replace(/\s/g, "");
+  if (await overLimit(c, "reset-check", c.ip, RESET_CHECKS_PER_IP_PER_15_MIN, 900)) fail(429, "Too many tries. Please wait 15 minutes.");
+  await note(c, "reset-check", c.ip);
+  const expired = "That code has expired. Ask for a new one.";
+  const u = who ? await findUser(c, who) : null;
+  const row = u ? await c.env.DB.prepare("SELECT code_hash, expires, tries FROM resets WHERE user_id = ?").bind(u.id).first() : null;
+  if (!row || row.expires < c.now) fail(400, expired);
+  if (!/^\d{6}$/.test(code) || !sameText(await sha256(`${u.id}:${code}`), row.code_hash)) {
+    if (row.tries + 1 >= RESET_TRIES) {
+      await c.env.DB.prepare("DELETE FROM resets WHERE user_id = ?").bind(u.id).run();
+      fail(400, "Too many wrong codes. Ask for a new one.");
+    }
+    await c.env.DB.prepare("UPDATE resets SET tries = tries + 1 WHERE user_id = ?").bind(u.id).run();
+    fail(400, "That code is wrong.");
+  }
+  checkPassword(b.password, u.username);
+  const salt = randomHex(16);
+  const db = c.env.DB;
+  await db.batch([
+    db.prepare("UPDATE users SET pass_hash = ?, pass_salt = ? WHERE id = ?").bind(await hashPassword(b.password, salt), salt, u.id),
+    db.prepare("DELETE FROM resets WHERE user_id = ?").bind(u.id),
+    db.prepare("DELETE FROM sessions WHERE user_id = ?").bind(u.id), // signed out everywhere
+  ]);
+  const token = await newSession(c, u.id);
+  return c.reply(200, { token, user: ownUser(u) });
+}
+
 async function deleteMe(c) {
   const u = await auth(c);
   const b = await body(c);
@@ -295,6 +422,7 @@ async function deleteMe(c) {
     db.prepare("DELETE FROM reports WHERE playlist_id IN (SELECT id FROM playlists WHERE user_id = ?)").bind(u.id),
     db.prepare("DELETE FROM playlists WHERE user_id = ?").bind(u.id),
     db.prepare("DELETE FROM sessions WHERE user_id = ?").bind(u.id),
+    db.prepare("DELETE FROM resets WHERE user_id = ?").bind(u.id),
     db.prepare("DELETE FROM users WHERE id = ?").bind(u.id),
   ]);
   return c.reply(200, { ok: true });

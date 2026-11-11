@@ -1,7 +1,20 @@
 # Pulse accounts server
 
 Accounts, public playlists and profiles for Pulse. It's a Cloudflare Worker with a D1
-database, on Cloudflare's free plan. It needs no secrets.
+database, on Cloudflare's free plan. To email password-reset codes it uses
+[Brevo](https://www.brevo.com) (free for up to 300 emails a day), or Resend if you have your own
+domain.
+
+## Upgrading a server set up before emails (do this before releasing the app that needs it)
+
+1. **Add the new column and table.** Open the `pulse-accounts` database's **Console**, paste all
+   of [`add-email.sql`](add-email.sql), and press **Execute**. Run it once only: a second time
+   says the `email` column already exists, which is harmless.
+2. **Update the code.** Open the Worker, press **Edit code**, replace everything with
+   [`worker.js`](worker.js), and press **Deploy**.
+3. **Set up email** as in step 7 below.
+
+Existing accounts keep working. Pulse asks each one to add an email the next time it opens.
 
 ## Set it up (about 10 minutes)
 
@@ -19,6 +32,25 @@ database, on Cloudflare's free plan. It needs no secrets.
    Set **Variable name** to `DB`, choose `pulse-accounts`, and press **Add binding**.
 6. **Check it.** Open the Worker's address (`https://pulse-accounts.<you>.workers.dev/`). It
    should say `{"ok":true,"service":"pulse-accounts"}`.
+7. **Set up email** (for "Forgot password?"):
+   1. Make a free account at [brevo.com](https://www.brevo.com).
+   2. Open the menu with your name (top right) → **Senders, Domains & Dedicated IPs → Senders →
+      Add sender**. Name: `Pulse`. Email:
+      an address you own. Brevo emails it a link: open it to confirm the address.
+   3. From the same menu, open **SMTP & API → API keys** and press **Generate a new API key**.
+      Name it `pulse-accounts` and copy it. It's only shown once.
+   4. In Cloudflare, open the Worker's **Settings → Variables and Secrets → Add**:
+      - Type **Secret**, name `BREVO_API_KEY`, value: the key you copied.
+      - Type **Text**, name `MAIL_FROM`, value: `Pulse <the address from step 2>`.
+
+      Press **Deploy**.
+   5. Try it: in Pulse, press **Forgot password?** when signing in and enter your username.
+
+   Until this is done, "Forgot password?" says it isn't set up yet; everything else works.
+   Emails sent from a free address (like Gmail) through a mail service sometimes land in spam.
+   With your own domain, verify the domain in Brevo and use an address on it. To use
+   [Resend](https://resend.com) instead (it needs your own domain), set `RESEND_API_KEY` in
+   place of `BREVO_API_KEY`.
 
 Then put that address in `ACCOUNTS_URL` in `src/account.rs` and `ACCOUNTS` in `site/share.js`.
 
@@ -26,13 +58,14 @@ Then put that address in `ACCOUNTS_URL` in `src/account.rs` and `ACCOUNTS` in `s
 
 | Table | What's in it |
 |---|---|
-| `users` | Username, a salted PBKDF2 hash of the password (never the password), bio, when you joined |
+| `users` | Username, email address (never shown to anyone, only used for reset codes), a salted PBKDF2 hash of the password (never the password), bio, when you joined |
 | `sessions` | A SHA-256 hash of each sign-in key (never the key), and when it expires (90 days) |
 | `playlists` | Public playlists: name, description, songs (title, artist, album, ids, cover links), dates |
 | `reports` | Reports of public playlists (a hash of who reported, never their address) |
-| `attempts` | Recent sign-ups, failed sign-ins and reports, used for the limits below; cleared after a day |
+| `resets` | A password-reset code waiting to be used: only its hash, when it expires (15 minutes) and wrong tries |
+| `attempts` | Recent sign-ups, failed sign-ins, reset requests and reports, used for the limits below; cleared after a day |
 
-Deleting an account deletes its sessions, playlists and the reports about them.
+Deleting an account deletes its sessions, reset code, playlists and the reports about them.
 
 ## Built-in protections
 
@@ -41,6 +74,13 @@ Deleting an account deletes its sessions, playlists and the reports about them.
 - Sign-in: 10 wrong passwords per username and address, then a 15-minute wait. The same
   message is shown for a wrong username and a wrong password.
 - Sign-up: 5 new accounts per address per hour. Some names are reserved (admin, pulse, support…).
+  An email address can only be on one account.
+- Password resets: a 6-digit code, stored only as a hash, that works for 15 minutes and 5 tries.
+  At most 3 codes per account and 5 requests per address an hour. The reply is the same whether
+  or not the account exists, so it can't be used to find out who has one. A reset signs you out
+  everywhere.
+- Changing your email needs your password, so someone with only your session can't send your
+  reset codes to themselves.
 - Only the app can make changes. A website can read public playlists and profiles, but can't
   sign in or publish for anyone.
 - Published songs keep only what Pulse needs. Songs from your computer (which contain file
@@ -70,3 +110,5 @@ DELETE FROM users WHERE username = 'name';
 ## Testing
 
 `node server/test.mjs` runs every endpoint against a local SQLite database (Node 22.13+).
+`node server/serve.mjs` runs the server locally on port 8787; it doesn't send emails but prints
+them, and shows the last one at `/__mail`.

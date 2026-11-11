@@ -551,13 +551,29 @@ fn kept_for_next_time(mut src: StreamSource, track: &Track) -> StreamSource {
 /// What a finished account call changes.
 pub enum AccountDone {
     SignedIn(crate::account::Session),
+    /// Who you are, checked when Pulse opens.
+    Checked(crate::account::Session),
+    /// A reset code was emailed: the window asks for it next.
+    CodeSent(String),
     SignedOut,
     Deleted,
-    Published { name: String, id: String, fingerprint: u64 },
-    Synced { id: String, fingerprint: u64 },
-    Unpublished { id: String },
+    Published {
+        name: String,
+        id: String,
+        fingerprint: u64,
+    },
+    Synced {
+        id: String,
+        fingerprint: u64,
+    },
+    Unpublished {
+        id: String,
+    },
     /// Something else that worked: a message to show, and a page to load again.
-    Done { message: String, reload: Option<String> },
+    Done {
+        message: String,
+        reload: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -567,6 +583,12 @@ pub enum AccountMode {
     Password,
     Delete,
     Bio,
+    /// Forgot password: ask for a code by email.
+    Forgot,
+    /// Forgot password: the code and a new password.
+    Reset,
+    /// Add or change your email.
+    Email,
 }
 
 /// The account window's fields.
@@ -577,14 +599,40 @@ pub struct AccountDialog {
     /// The new password (Password), or the password again (SignUp).
     pub password2: String,
     pub bio: String,
+    pub email: String,
+    /// The code from a password-reset email.
+    pub code: String,
     pub error: Option<String>,
+    /// A message that isn't an error (the code was sent).
+    pub note: Option<String>,
+    /// Email: your account has none yet, and you need one to continue (or sign out).
+    pub required: bool,
     /// Shown by itself when Pulse opens: worded as a welcome, with "Not now".
     pub welcome: bool,
 }
 
 impl AccountDialog {
+    /// "Add an email": shown until the account has one (or you sign out).
+    pub fn email_required() -> Self {
+        let mut d = Self::new(AccountMode::Email);
+        d.required = true;
+        d
+    }
+
     pub fn new(mode: AccountMode) -> Self {
-        Self { mode, username: String::new(), password: String::new(), password2: String::new(), bio: String::new(), error: None, welcome: false }
+        Self {
+            mode,
+            username: String::new(),
+            password: String::new(),
+            password2: String::new(),
+            bio: String::new(),
+            email: String::new(),
+            code: String::new(),
+            error: None,
+            note: None,
+            required: false,
+            welcome: false,
+        }
     }
 }
 
@@ -960,6 +1008,9 @@ impl App {
             let mut d = AccountDialog::new(AccountMode::SignUp);
             d.welcome = true;
             app.account_dialog = Some(d);
+        } else if crate::account::available() && crate::account::session().is_some() {
+            // Signed in: check who you are, and ask for an email if the account has none.
+            app.account_job(&cc.egui_ctx, || crate::account::refresh().map(AccountDone::Checked));
         } else if app.saved.profile.created == 0 && !app.saved.profile.skipped {
             app.profile_editing = Some(crate::ui::ProfileForm { welcome: true, ..Default::default() });
         }
@@ -984,6 +1035,20 @@ impl App {
                 "liked-albums" => Route::LikedAlbums,
                 "signup" => {
                     app.account_dialog = Some(AccountDialog::new(AccountMode::SignUp));
+                    Route::Home
+                }
+                "signin" | "forgot" | "reset" | "add-email" => {
+                    let mut d = match page.as_str() {
+                        "signin" => AccountDialog::new(AccountMode::SignIn),
+                        "forgot" => AccountDialog::new(AccountMode::Forgot),
+                        "reset" => AccountDialog::new(AccountMode::Reset),
+                        _ => AccountDialog::email_required(),
+                    };
+                    if page == "reset" {
+                        d.note =
+                            Some("If that account has an email address, a code is on its way. Check your spam folder if it doesn't arrive in a minute.".into());
+                    }
+                    app.account_dialog = Some(d);
                     Route::Home
                 }
                 p if p.starts_with("public:") => Route::Public(p[7..].to_string()),
@@ -2533,8 +2598,24 @@ impl App {
     fn account_done(&mut self, done: AccountDone, ctx: &egui::Context) {
         use crate::i18n::tr;
         match done {
+            AccountDone::Checked(s) => {
+                if s.email.is_empty() && self.account_dialog.is_none() {
+                    self.account_dialog = Some(AccountDialog::email_required());
+                }
+            }
+            AccountDone::CodeSent(message) => {
+                if let Some(d) = &mut self.account_dialog {
+                    d.mode = AccountMode::Reset;
+                    d.note = Some(message);
+                    d.error = None;
+                    d.code.clear();
+                    d.password.clear();
+                    d.password2.clear();
+                }
+            }
             AccountDone::SignedIn(s) => {
-                self.account_dialog = None;
+                // Older accounts have no email yet: one is needed before going on.
+                self.account_dialog = s.email.is_empty().then(AccountDialog::email_required);
                 // No profile on this computer yet: your username is its name.
                 if self.saved.profile.created == 0 {
                     self.saved.profile.name = s.username.clone();

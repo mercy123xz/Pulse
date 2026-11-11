@@ -32,6 +32,9 @@ pub fn available() -> bool {
 pub struct Session {
     pub token: String,
     pub username: String,
+    /// Where a code goes if you forget your password ("" if none was added yet).
+    #[serde(default)]
+    pub email: String,
 }
 
 /// A public profile.
@@ -185,10 +188,13 @@ fn call(method: &str, path: &str, body: Option<Value>, signed_in: bool) -> Resul
     if (200..300).contains(&status) {
         return Ok(v);
     }
-    if status == 401 && signed_in {
+    let message =
+        v.get("error").and_then(Value::as_str).map(str::to_owned).unwrap_or_else(|| format!("The accounts server returned an error (HTTP {status})."));
+    // The session ended (not just a wrong password, which is a 401 too).
+    if status == 401 && signed_in && message == "Please sign in again." {
         set_session(None);
     }
-    Err(v.get("error").and_then(Value::as_str).map(str::to_owned).unwrap_or_else(|| format!("The accounts server returned an error (HTTP {status}).")))
+    Err(message)
 }
 
 fn parse<T: for<'de> Deserialize<'de>>(v: Value) -> Result<T, String> {
@@ -198,16 +204,18 @@ fn parse<T: for<'de> Deserialize<'de>>(v: Value) -> Result<T, String> {
 fn signed_in_as(v: &Value) -> Result<Session, String> {
     let token = v.get("token").and_then(Value::as_str).ok_or("No sign-in key came back.")?.to_string();
     let username = v.pointer("/user/username").and_then(Value::as_str).unwrap_or_default().to_string();
-    let s = Session { token, username };
+    let email = v.pointer("/user/email").and_then(Value::as_str).unwrap_or_default().to_string();
+    let s = Session { token, username, email };
     set_session(Some(s.clone()));
     Ok(s)
 }
 
-pub fn sign_up(username: &str, password: &str) -> Result<Session, String> {
-    let v = call("POST", "/signup", Some(json!({ "username": username.trim(), "password": password })), false)?;
+pub fn sign_up(username: &str, email: &str, password: &str) -> Result<Session, String> {
+    let v = call("POST", "/signup", Some(json!({ "username": username.trim(), "email": email.trim(), "password": password })), false)?;
     signed_in_as(&v)
 }
 
+/// `username` can also be the account's email address.
 pub fn sign_in(username: &str, password: &str) -> Result<Session, String> {
     let v = call("POST", "/login", Some(json!({ "username": username.trim(), "password": password })), false)?;
     signed_in_as(&v)
@@ -217,6 +225,49 @@ pub fn sign_in(username: &str, password: &str) -> Result<Session, String> {
 pub fn sign_out() {
     let _ = call("POST", "/logout", None, true);
     set_session(None);
+}
+
+/// Asks the server who you are (in case your email was changed on another computer).
+pub fn refresh() -> Result<Session, String> {
+    let v = call("GET", "/me", None, true)?;
+    let mut s = session().ok_or("Please sign in first.")?;
+    s.email = v.pointer("/user/email").and_then(Value::as_str).unwrap_or_default().to_string();
+    set_session(Some(s.clone()));
+    Ok(s)
+}
+
+/// Adds or changes the email that password-reset codes go to.
+pub fn set_email(email: &str, password: &str) -> Result<(), String> {
+    call("PUT", "/me/email", Some(json!({ "email": email.trim(), "password": password })), true)?;
+    if let Some(mut s) = session() {
+        s.email = email.trim().to_lowercase();
+        set_session(Some(s));
+    }
+    Ok(())
+}
+
+/// Forgot password, step 1: emails a code to the account (`who`: username or email).
+/// Returns the server's message.
+pub fn reset_start(who: &str) -> Result<String, String> {
+    let v = call("POST", "/reset/start", Some(json!({ "who": who.trim() })), false)?;
+    Ok(v.get("message").and_then(Value::as_str).unwrap_or("A code is on its way.").to_string())
+}
+
+/// Forgot password, step 2: the code from the email and a new password. Signs you in.
+pub fn reset_finish(who: &str, code: &str, password: &str) -> Result<Session, String> {
+    let v = call("POST", "/reset/finish", Some(json!({ "who": who.trim(), "code": code.trim(), "password": password })), false)?;
+    signed_in_as(&v)
+}
+
+/// Roughly an email address (the server checks properly).
+pub fn valid_email(e: &str) -> bool {
+    let e = e.trim();
+    match e.split_once('@') {
+        Some((a, b)) => {
+            !a.is_empty() && !e.contains(char::is_whitespace) && !b.contains('@') && b.split('.').count() >= 2 && b.split('.').all(|p| !p.is_empty())
+        }
+        None => false,
+    }
 }
 
 pub fn set_bio(bio: &str) -> Result<(), String> {
@@ -360,8 +411,10 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("pulse-online-{}", std::process::id()));
         unsafe { std::env::set_var("PULSE_DATA_DIR", &dir) };
         let name = format!("t{}", std::process::id());
-        let s = sign_up(&name, "a good password").unwrap();
-        assert_eq!(s.username, name);
+        let mail = format!("{name}@example.com");
+        assert!(sign_up(&name, "", "a good password").unwrap_err().contains("email"));
+        let s = sign_up(&name, &format!("  {}  ", mail.to_uppercase()), "a good password").unwrap();
+        assert_eq!((s.username.as_str(), s.email.as_str()), (name.as_str(), mail.as_str()));
         assert_eq!(session().unwrap(), s, "kept for next time");
         assert!(dir.join("account.json").is_file());
         let song = |id: &str, title: &str| {
@@ -384,9 +437,22 @@ mod tests {
         assert_eq!((prof.user.bio.as_str(), prof.playlists.len(), prof.playlists[0].name.as_str()), ("hi", 1, "Rage 2"));
         assert!(search(&name[..3]).iter().any(|u| u.username == name));
         assert_eq!(sign_in(&name, "wrong password").unwrap_err(), "Wrong username or password.");
-        assert_eq!(sign_up(&name, "a good password").unwrap_err(), "That username is taken.");
-        sign_in(&name, "a good password").unwrap();
-        change_password("a good password", "a newer password").unwrap();
+        assert_eq!(sign_up(&name, "x@example.com", "a good password").unwrap_err(), "That username is taken.");
+        assert_eq!(sign_in(&mail, "a good password").unwrap().username, name, "sign in with email");
+        let mail2 = format!("{name}.2@example.com");
+        assert_eq!(set_email(&mail2, "wrong password").unwrap_err(), "That password is wrong.");
+        set_email(&mail2, "a good password").unwrap();
+        assert_eq!(refresh().unwrap().email, mail2);
+        // Forgot password: the local server keeps the email it would have sent.
+        assert!(reset_start(&name).unwrap().contains("code"));
+        let sent: Value = crate::net::api().get(&format!("{}/__mail", base())).call().unwrap().body_mut().read_json().unwrap();
+        assert_eq!(sent["to"], mail2.as_str());
+        let code = sent["subject"].as_str().unwrap()[..6].to_string();
+        let wrong = if code == "000000" { "111111" } else { "000000" };
+        assert_eq!(reset_finish(&name, wrong, "reset password 1").unwrap_err(), "That code is wrong.");
+        let s = reset_finish(&mail2, &code, "reset password 1").unwrap();
+        assert_eq!((s.username.as_str(), s.email.as_str()), (name.as_str(), mail2.as_str()));
+        change_password("reset password 1", "a newer password").unwrap();
         unpublish(&id).unwrap();
         assert_eq!(playlist(&id).unwrap_err(), "That playlist isn't public anymore.");
         report(&"A".repeat(10), "x").unwrap_err();
