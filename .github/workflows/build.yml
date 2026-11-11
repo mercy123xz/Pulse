@@ -12,6 +12,8 @@ permissions:
 
 jobs:
   windows:
+    # Android preview releases are made by android.yml; they get no Windows installer.
+    if: github.event_name != 'release' || !startsWith(github.event.release.tag_name, 'android')
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
