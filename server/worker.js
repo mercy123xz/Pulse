@@ -190,7 +190,8 @@ async function sendMail(env, to, subject, text, html, params = {}) {
         template_id: env.EMAILJS_TEMPLATE_ID,
         user_id: env.EMAILJS_PUBLIC_KEY,
         accessToken: env.EMAILJS_PRIVATE_KEY,
-        template_params: { to_email: to, subject, message: text, ...params },
+        // "to_email" is ours; "email" is what EmailJS's ready-made templates use.
+        template_params: { to_email: to, email: to, subject, message: text, ...params },
       }),
     });
     if (!r.ok) {
