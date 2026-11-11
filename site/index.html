@@ -3,6 +3,11 @@
 <head>
 <meta charset="utf-8">
 <script>try{var t=localStorage.getItem("pulse-theme");document.documentElement.dataset.theme=t||(matchMedia("(prefers-color-scheme: light)").matches?"light":"dark")}catch(e){document.documentElement.dataset.theme="dark"}</script>
+<script>
+// The intro: the first visit gets "Press to enter"; later visits a "Welcome back". Decided
+// here, before anything is drawn, so the page doesn't flash first. See intro.js.
+(function(){var m="none";try{var still=matchMedia("(prefers-reduced-motion: reduce)").matches;if(localStorage.getItem("pulse-visited"))m="back";else if(!still&&!location.hash)m="intro";else localStorage.setItem("pulse-visited","1")}catch(e){}document.documentElement.setAttribute("data-intro",m)})();
+</script>
 
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Pulse — a fast, native music player for Windows</title>
@@ -383,10 +388,55 @@ footer a:hover { text-decoration: underline; }
   html { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 28 28'%3E%3Cpath d='M4 3v19.5l5.6-5.4 3.6 8.4 3.6-1.6-3.6-8.2H21z' fill='%230b0b0e' stroke='%23a78bfa' stroke-width='1.8' stroke-linejoin='round'/%3E%3C/svg%3E") 4 3, auto; }
   a, button, summary, label, [role="button"], [data-zoom] { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 28 28'%3E%3Cpath d='M4 3v19.5l5.6-5.4 3.6 8.4 3.6-1.6-3.6-8.2H21z' fill='%237c3aed' stroke='%23f5f3ff' stroke-width='1.8' stroke-linejoin='round'/%3E%3C/svg%3E") 4 3, pointer; }
 }
+
+/* Intro (first visit) and "Welcome back" (later ones): see intro.js */
+#intro { position: fixed; inset: 0; z-index: 1000; place-items: center; background: radial-gradient(60% 50% at 50% 45%, rgba(124, 58, 237, .28), transparent 70%), #0b0b0e; color: #fff; }
+html[data-intro="intro"] #intro { display: grid; }
+html[data-intro="intro"] body { overflow: hidden; }
+.intro-inner { display: grid; justify-items: center; gap: 1.4rem; text-align: center; padding: 2rem; }
+.intro-bars { display: flex; align-items: center; gap: 14px; height: 130px; }
+.intro-bars i { display: block; width: 22px; border-radius: 11px; background: #fff; transform-origin: 50% 50%; animation: intro-breathe 1.6s ease-in-out infinite; }
+.intro-bars i:nth-child(1) { height: 38px; animation-delay: -.2s; }
+.intro-bars i:nth-child(2) { height: 76px; animation-delay: -.5s; }
+.intro-bars i:nth-child(3) { height: 112px; animation-delay: -.8s; }
+.intro-bars i:nth-child(4) { height: 60px; animation-delay: -1.1s; }
+.intro-bars i:nth-child(5) { height: 24px; animation-delay: -1.4s; }
+#intro.playing .intro-bars i { animation: none; }
+.intro-bars i.hit { animation: intro-hop .34s cubic-bezier(.3, 1.6, .5, 1); }
+.intro-bars i.hit-all { background: #c4b5fd; box-shadow: 0 0 28px rgba(167, 139, 250, .8); transition: background .15s, box-shadow .15s; }
+@keyframes intro-breathe { 50% { transform: scaleY(.88); opacity: .85; } }
+@keyframes intro-hop { 35% { transform: translateY(-16px) scaleY(1.3); } }
+.intro-name { margin: 0; font-size: 1.1rem; font-weight: 700; letter-spacing: .32em; text-transform: uppercase; color: #c4b5fd; }
+.intro-enter { margin-top: .6rem; padding: .95rem 2.1rem; border: 0; border-radius: 999px; font: 700 1.05rem/1 Inter, system-ui, sans-serif; color: #fff; background: linear-gradient(180deg, #8b5cf6, #7c3aed); box-shadow: 0 10px 40px rgba(124, 58, 237, .5), inset 0 1px 0 rgba(255, 255, 255, .25); cursor: pointer; transition: transform .2s cubic-bezier(.2, .8, .2, 1), box-shadow .2s; }
+.intro-enter:hover { transform: translateY(-2px) scale(1.03); box-shadow: 0 14px 50px rgba(124, 58, 237, .65), inset 0 1px 0 rgba(255, 255, 255, .25); }
+.intro-enter:focus-visible, .intro-skip:focus-visible { outline: 2px solid #c4b5fd; outline-offset: 4px; }
+.intro-skip { border: 0; background: none; color: #9696a4; font: 500 .9rem Inter, system-ui, sans-serif; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+.intro-skip:hover { color: #ededf1; }
+#intro.playing .intro-enter, #intro.playing .intro-skip, #intro.playing .intro-name { opacity: 0; transition: opacity .25s; pointer-events: none; }
+.intro-wall { position: fixed; z-index: 1001; background: linear-gradient(135deg, #a78bfa, #7c3aed 55%, #5b21b6); pointer-events: none; }
+/* The top of the page eases in once the intro is done. */
+.hero-grid > * { transition: opacity .8s ease, transform 1s cubic-bezier(.2, .8, .2, 1); }
+.hero-grid > :nth-child(2) { transition-delay: .15s; }
+html[data-intro="intro"] .hero-grid > * { opacity: 0; transform: translateY(18px); }
+.welcome { position: fixed; left: 50%; top: 50%; z-index: 1000; display: flex; align-items: center; gap: .8rem; padding: 1rem 1.6rem; border-radius: 16px; border: 1px solid rgba(255, 255, 255, .1); background: rgba(22, 22, 27, .62); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); color: #fff; font-size: 1.2rem; font-weight: 700; box-shadow: 0 20px 60px rgba(0, 0, 0, .4); opacity: 0; transform: translate(-50%, -50%) scale(.96); transition: opacity .35s ease, transform .45s cubic-bezier(.2, .8, .2, 1); cursor: pointer; }
+.welcome.shown { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+.welcome-bars { display: flex; align-items: center; gap: 3px; height: 22px; }
+.welcome-bars i { display: block; width: 4px; border-radius: 2px; background: #a78bfa; animation: intro-breathe .9s ease-in-out infinite; }
+.welcome-bars i:nth-child(1) { height: 8px; } .welcome-bars i:nth-child(2) { height: 15px; animation-delay: -.2s; } .welcome-bars i:nth-child(3) { height: 22px; animation-delay: -.4s; } .welcome-bars i:nth-child(4) { height: 12px; animation-delay: -.6s; } .welcome-bars i:nth-child(5) { height: 6px; animation-delay: -.8s; }
+@media (prefers-reduced-motion: reduce) { .welcome, .welcome.shown { transform: translate(-50%, -50%); transition: opacity .35s; } .welcome-bars i, .intro-bars i { animation: none; } }
+@media (max-width: 520px) { .intro-bars { gap: 10px; height: 100px; } .intro-bars i { width: 17px; } .welcome { font-size: 1.05rem; padding: .85rem 1.2rem; white-space: nowrap; } }
 </style>
 <link rel="stylesheet" href="site.css">
 </head>
 <body>
+<div id="intro" hidden role="dialog" aria-modal="true" aria-label="Welcome to Pulse">
+  <div class="intro-inner">
+    <div class="intro-bars" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+    <p class="intro-name">Pulse</p>
+    <button class="intro-enter" type="button">Press to enter</button>
+    <button class="intro-skip" type="button" onclick="document.documentElement.setAttribute('data-intro','done')">Skip intro</button>
+  </div>
+</div>
 <a class="skip" href="#main">Skip to content</a>
 
 <header class="top">
@@ -413,7 +463,7 @@ footer a:hover { text-decoration: underline; }
       <div>
         <span class="eyebrow">Free &amp; open source · Windows 10 and 11</span>
         <h1 id="hero-title">Your music, <span>without the weight.</span></h1>
-        <p class="lede">Pulse is a small, native music player written in Rust. Search any artist, press play, and hear the whole song. No account, no browser inside, nothing to sign up for.</p>
+        <p class="lede">Pulse is a small, native music player written in Rust. Search any artist, press play, and hear the whole song. No ads, no browser inside, and no account needed.</p>
         <div class="cta">
           <a class="btn btn-primary js-download" href="download/">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 19h16"/></svg>
@@ -698,6 +748,7 @@ footer a:hover { text-decoration: underline; }
       <a href="https://github.com/mercy123xz/Pulse">Source code</a>
       <a href="https://github.com/mercy123xz/Pulse/releases">All releases</a>
       <a href="https://github.com/mercy123xz/Pulse/issues">Report a problem</a>
+      <a href="#" id="replay-intro">Replay intro</a>
     </nav>
     <p style="margin:0">Pulse is a free, non-commercial side project for personal listening. Song info and artwork come from Deezer; audio is streamed from YouTube with yt-dlp. Pulse isn't affiliated with or endorsed by Deezer, YouTube, Google, Spotify or SoundCloud. Screenshots show the artwork and artists of their respective owners.</p>
   </div>
@@ -848,6 +899,7 @@ footer a:hover { text-decoration: underline; }
   o.observe(m);
 })();
 </script>
+<script src="intro.js" defer></script>
 <script src="demo.js" defer></script>
 <script src="ask.js" defer></script>
 <script src="site.js" defer></script>

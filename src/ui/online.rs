@@ -424,6 +424,10 @@ pub fn user_page(app: &mut App, ui: &mut Ui) {
                 ctx.copy_text(account::profile_link(&p.user.username));
                 app.toast(tr("Link copied"), &ctx);
             }
+            // Your own profile on the website; it then greets you by name on Pulse's home page.
+            if mine && ghost_button(ui, icon::GLOBE, "Open on the website").clicked() {
+                ctx.open_url(egui::OpenUrl::new_tab(format!("{}&me=1", account::profile_link(&p.user.username))));
+            }
             if mine && ghost_button(ui, icon::PENCIL_SIMPLE, "Edit profile").clicked() {
                 let mut d = AccountDialog::new(AccountMode::Bio);
                 d.bio = p.user.bio.clone();

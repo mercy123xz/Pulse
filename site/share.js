@@ -102,6 +102,12 @@ var PulseShare = (function () {
     copyButton();
     var name = param("name").toLowerCase();
     if (!/^[a-z0-9_.]{1,20}$/.test(name)) return problem("Not found", "This link isn't right.");
+    // Opened from your own profile in the Pulse app: the home page can then greet you by
+    // name. The marker is taken out of the address, so a copied link doesn't carry it.
+    if (param("me") === "1") {
+      try { localStorage.setItem("pulse-user", name); } catch (e) {}
+      try { history.replaceState(null, "", location.pathname + "?name=" + encodeURIComponent(name)); } catch (e) {}
+    }
     load("/users/" + name, function (p) {
       var u = p.user;
       document.title = "@" + u.username + " · Pulse";
