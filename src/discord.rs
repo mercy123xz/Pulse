@@ -206,7 +206,16 @@ impl Conn {
                     why = Link::Blocked;
                     continue;
                 }
-                Err(_) => continue,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(e) => {
+                    // Anything but "no such pipe" means Discord is there but something
+                    // got in the way: say what, so it can be looked into.
+                    crate::crash::note(&format!("Discord: couldn't open {}: {e}", path.display()));
+                    if why == Link::NotRunning {
+                        why = Link::Refused(format!("Windows said: {e}"));
+                    }
+                    continue;
+                }
             };
             let mut c = Conn { pipe, nonce: 0 };
             match c.handshake() {
@@ -321,7 +330,19 @@ fn candidates() -> Vec<std::path::PathBuf> {
 fn connect(path: &std::path::Path) -> std::io::Result<Box<dyn Pipe>> {
     #[cfg(windows)]
     {
-        std::fs::OpenOptions::new().read(true).write(true).open(path).map(|f| Box::new(f) as Box<dyn Pipe>)
+        // ERROR_PIPE_BUSY: Discord is between connections; it opens a new slot quickly.
+        const PIPE_BUSY: i32 = 231;
+        let mut tries = 0;
+        loop {
+            match std::fs::OpenOptions::new().read(true).write(true).open(path) {
+                Ok(f) => return Ok(Box::new(f) as Box<dyn Pipe>),
+                Err(e) if e.raw_os_error() == Some(PIPE_BUSY) && tries < 10 => {
+                    tries += 1;
+                    std::thread::sleep(Duration::from_millis(100));
+                }
+                Err(e) => return Err(e),
+            }
+        }
     }
     #[cfg(unix)]
     {
