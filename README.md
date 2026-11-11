@@ -40,7 +40,7 @@
 - Full-length songs, found and streamed from YouTube automatically. They start while they download,
   and the first songs of a page you open are loaded ahead so they play at once
 - **Synced lyrics** in a side panel, a **mini player**, and **Gaming** and **Ultra-low** modes
-- **Discord status:** show what you're listening to
+- **Discord status:** show what you're listening to, through the Discord app (or Legcord or Vesktop with Rich Presence (arRPC) on)
 - **Autoplay:** when your queue runs out, Pulse keeps playing similar songs (turn it off in the Queue)
 - The next song is found while the current one plays, so tracks change without a wait
 - Queue with **Play next** and **Add to queue**, plus shuffle and repeat (all or one)

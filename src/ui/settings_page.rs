@@ -724,7 +724,7 @@ fn discord_link(ui: &mut Ui) {
         Link::Connected(false) => (true, tr("Connected to Discord. Your status shows up when a song plays.").to_string()),
         Link::NotRunning => (
             false,
-            tr("Discord isn't open. Open the Discord desktop app (the website version can't show what other apps are doing); Pulse finds it within 20 seconds.").to_string(),
+            tr("Discord isn't open. Open the Discord desktop app; Pulse finds it within 20 seconds. Using Legcord or Vesktop? Turn on Rich Presence (arRPC) in its settings. The Discord website can't show it.").to_string(),
         ),
         Link::Blocked => (
             false,
