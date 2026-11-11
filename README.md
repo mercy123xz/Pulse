@@ -85,7 +85,8 @@ An account is free and optional: it's for making playlists public and having a p
   (at least 8 characters).
 - **Sign in** with your username or email. You stay signed in for 90 days on that computer.
 - **Forgot your password?** Press *Forgot password?* when signing in. Pulse emails you a 6-digit
-  code (it works for 15 minutes); enter it with a new password.
+  code (it works for 15 minutes); enter it with a new password. If the email isn't in your inbox
+  within a minute, check your spam folder.
 - **Settings → Account** changes your email or password, signs you out, or deletes your account
   along with everything you made public. Your library stays on your PC either way.
 - Accounts made before emails were needed are asked to add one the next time Pulse opens.
