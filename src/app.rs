@@ -23,6 +23,8 @@ pub enum Route {
     /// Albums and playlists you saved with the heart on their page.
     LikedAlbums,
     LikedPlaylists,
+    /// Artists you follow.
+    FollowedArtists,
     Recent,
     Queue,
     Playlist(String),
@@ -367,6 +369,8 @@ pub struct Saved {
     /// Albums and playlists saved with the heart on their page, newest first.
     pub liked_albums: Vec<deezer::AlbumInfo>,
     pub liked_playlists: Vec<deezer::PlaylistInfo>,
+    /// Artists you follow, newest first.
+    pub followed_artists: Vec<deezer::ArtistInfo>,
     /// Artist pages found by name for songs that didn't know them (name → Deezer artist id).
     pub artist_ids: HashMap<String, String>,
     /// What you searched for lately, newest first.
@@ -416,6 +420,7 @@ impl Default for Saved {
             featured_checked: HashSet::new(),
             liked_albums: vec![],
             liked_playlists: vec![],
+            followed_artists: vec![],
             artist_ids: HashMap::new(),
             recent_searches: vec![],
             last_queue: vec![],
@@ -669,6 +674,9 @@ pub struct App {
     pub lyrics: HashMap<String, LyricsState>,
     lyrics_tx: Sender<(String, Result<Option<crate::lyrics::Lyrics>, String>)>,
     lyrics_rx: Receiver<(String, Result<Option<crate::lyrics::Lyrics>, String>)>,
+    /// What other people search for, by what was typed (filled in the background).
+    pub popular_searches: HashMap<String, Vec<String>>,
+    popular_rx: Option<(String, Receiver<Vec<String>>)>,
     /// An artist being looked up by name after you clicked it (the name, and the answer).
     artist_lookup: Option<(String, Receiver<Option<String>>)>,
     /// When each loaded page was last opened, so the oldest can be let go of.
@@ -807,6 +815,8 @@ impl App {
             lyrics_tx,
             lyrics_rx,
             artist_lookup: None,
+            popular_searches: HashMap::new(),
+            popular_rx: None,
             cache_used: HashMap::new(),
             song_tracks: HashMap::new(),
             rematch_tried: HashSet::new(),
@@ -881,7 +891,11 @@ impl App {
                     Route::Home
                 }
                 p if p.starts_with("artist:") => Route::Artist(p[7..].to_string()),
-                p if p.starts_with("search:") => Route::Search(p[7..].to_string()),
+                p if p.starts_with("search:") => {
+                    app.search_text = p[7..].to_string();
+                    app.focus_search = true;
+                    Route::Search(p[7..].to_string())
+                }
                 p => p.strip_prefix("playlist:").and_then(|n| n.parse().ok()).map(Route::Local).unwrap_or(Route::Home),
             };
         }
@@ -1007,6 +1021,7 @@ impl App {
             Route::Liked
             | Route::LikedAlbums
             | Route::LikedPlaylists
+            | Route::FollowedArtists
             | Route::Recent
             | Route::Queue
             | Route::Local(_)
@@ -1186,6 +1201,7 @@ impl App {
         }
         self.receive_credits();
         self.receive_artist_lookup(ctx);
+        self.receive_popular_searches();
         self.receive_import(ctx);
         self.receive_rematches();
         self.run_featured(ctx);
@@ -2364,6 +2380,56 @@ impl App {
 
     pub fn playlist_names(&self) -> Vec<String> {
         self.saved.playlists.iter().map(|p| p.name.clone()).collect()
+    }
+
+    /// Follows an artist, or stops following them.
+    pub fn toggle_follow(&mut self, a: &deezer::ArtistInfo, ctx: &egui::Context) {
+        if let Some(i) = self.saved.followed_artists.iter().position(|x| x.id == a.id) {
+            self.saved.followed_artists.remove(i);
+            self.toast(&format!("{} {}", crate::i18n::tr("Unfollowed"), a.name), ctx);
+        } else {
+            self.saved.followed_artists.insert(0, a.clone());
+            self.toast(&format!("{} {}", crate::i18n::tr("Following"), a.name), ctx);
+        }
+    }
+
+    pub fn follows(&self, id: &str) -> bool {
+        self.saved.followed_artists.iter().any(|a| a.id == id)
+    }
+
+    /// Asks (in the background) what other people search for that starts with `typed`.
+    /// One question at a time; the newest wins. Not in Gaming and Ultra-low modes.
+    pub fn want_popular_searches(&mut self, typed: &str, ctx: &egui::Context) {
+        let q = typed.trim().to_lowercase();
+        if q.chars().count() < 2 || self.popular_searches.contains_key(&q) || crate::perf::mode() != crate::perf::Mode::Normal {
+            return;
+        }
+        if self.popular_rx.as_ref().is_some_and(|(asked, _)| *asked == q) {
+            return;
+        }
+        let (tx, rx) = channel();
+        self.popular_rx = Some((q.clone(), rx));
+        let ctx = ctx.clone();
+        std::thread::spawn(move || {
+            let _ = tx.send(crate::suggest::popular(&q));
+            ctx.request_repaint();
+        });
+    }
+
+    fn receive_popular_searches(&mut self) {
+        let Some((q, rx)) = &self.popular_rx else { return };
+        match rx.try_recv() {
+            Ok(list) => {
+                let q = q.clone();
+                if self.popular_searches.len() > 300 {
+                    self.popular_searches.clear();
+                }
+                self.popular_searches.insert(q, list);
+                self.popular_rx = None;
+            }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => self.popular_rx = None,
+            Err(_) => {}
+        }
     }
 
     /// Saves an album to your library, or takes it out again.

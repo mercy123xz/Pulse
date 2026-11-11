@@ -97,7 +97,8 @@ pub fn is_deezer_id(id: &str) -> bool {
     !id.is_empty() && id.bytes().all(|b| b.is_ascii_digit())
 }
 
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct ArtistInfo {
     pub id: String,
     pub name: String,

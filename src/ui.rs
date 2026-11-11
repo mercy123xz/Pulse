@@ -275,6 +275,10 @@ fn sidebar(app: &mut App, ui: &mut Ui) {
     if nav_item(ui, icon::PLAYLIST, "Liked Playlists", app.route == Route::LikedPlaylists, Some(lists_n)).clicked() {
         app.navigate(Route::LikedPlaylists, &ctx);
     }
+    let following_n = app.saved.followed_artists.len();
+    if nav_item(ui, icon::USER, "Your Artists", app.route == Route::FollowedArtists, Some(following_n)).clicked() {
+        app.navigate(Route::FollowedArtists, &ctx);
+    }
     if nav_item(ui, icon::CLOCK_COUNTER_CLOCKWISE, "Recently Played", app.route == Route::Recent, None).clicked() {
         app.navigate(Route::Recent, &ctx);
     }
@@ -414,6 +418,7 @@ fn nav_item_art(ui: &mut Ui, art: Option<&str>, glyph: &str, label: &str, select
             "Liked Songs" => "Liked",
             "Liked Albums" => "Albums",
             "Liked Playlists" => "Lists",
+            "Your Artists" => "Artists",
             "Recently Played" => "Recent",
             "Local Files" => "Files",
             "Create playlist" => "New",
@@ -487,38 +492,68 @@ fn nav_item_art(ui: &mut Ui, art: Option<&str>, glyph: &str, label: &str, select
 /// One line in the search dropdown.
 enum Suggestion {
     Recent(String),
-    Artist(String),
-    Song(Box<Track>),
+    /// A search to finish what you're typing.
+    Query(String),
+    Pick(Box<crate::suggest::Pick>),
 }
 
-/// Under the search box while it's in use: recent searches when it's empty, quick picks
-/// from the results while typing (the same reply as the results page, so no extra
-/// requests). ↑/↓ choose, Enter opens. True if Enter picked a suggestion.
+/// Under the search box while it's in use. Empty: your recent searches. While typing:
+/// searches that finish what you typed (yours, then what other people search for), then
+/// the artist you most likely mean and a mix of their music, with what's in your library
+/// first (see `suggest`). ↑/↓ choose, Enter opens. True if Enter picked a suggestion.
 fn search_dropdown(app: &mut App, ui: &mut Ui, pill: Rect, edit: &egui::Response) -> bool {
+    use crate::suggest::Pick;
     let ctx = ui.ctx().clone();
     let area_id = egui::Id::new("search_dropdown");
     let last_rect: Option<Rect> = ui.data(|d| d.get_temp(area_id.with("rect")));
     let over = last_rect.is_some_and(|r| ui.rect_contains_pointer(r) || ctx.pointer_hover_pos().is_some_and(|p| r.contains(p)));
-    if !edit.has_focus() && !over {
+    // Developer check: PULSE_DEBUG_DROPDOWN keeps it open for screenshots.
+    if !edit.has_focus() && !over && std::env::var_os("PULSE_DEBUG_DROPDOWN").is_none() {
         ui.data_mut(|d| d.remove::<Rect>(area_id.with("rect")));
         return false;
     }
     let q = app.search_text.trim().to_string();
-    let mut items: Vec<(Suggestion, String, String, Option<String>)> = vec![];
+    if !q.is_empty() {
+        app.want_popular_searches(&q, &ctx);
+    }
+    let lib = crate::suggest::Library {
+        liked_songs: app.liked_ids.iter().map(String::as_str).collect(),
+        liked_albums: app.saved.liked_albums.iter().map(|a| a.id.as_str()).collect(),
+        liked_playlists: app.saved.liked_playlists.iter().map(|p| p.id.as_str()).collect(),
+        followed: app.saved.followed_artists.iter().map(|a| a.id.as_str()).collect(),
+        played_artists: app
+            .saved
+            .played_artists
+            .iter()
+            .filter_map(|v| match &v.place {
+                crate::app::Place::Artist(id) => Some((id.as_str(), v.count)),
+                _ => None,
+            })
+            .collect(),
+        recent_songs: app.saved.recent.iter().take(50).map(|t| t.id.as_str()).collect(),
+    };
+    let mut items: Vec<Suggestion> = vec![];
     if q.is_empty() {
         for r in &app.saved.recent_searches {
-            items.push((Suggestion::Recent(r.clone()), r.clone(), String::new(), None));
+            items.push(Suggestion::Recent(r.clone()));
         }
-    } else if let Some(r) = app.search_results_for(&q) {
-        for a in r.artists.iter().take(2) {
-            items.push((Suggestion::Artist(a.id.clone()), a.name.clone(), tr("Artist").to_string(), a.picture.clone()));
+    } else {
+        let results = app.search_results_for(&q);
+        let popular = app.popular_searches.get(&q.to_lowercase()).map(Vec::as_slice).unwrap_or(&[]);
+        for c in crate::suggest::completions(&q, &app.saved.recent_searches, popular, results, 4) {
+            items.push(Suggestion::Query(c));
         }
-        for t in r.tracks.iter().take(5) {
-            items.push((Suggestion::Song(Box::new(t.clone())), t.title.clone(), t.all_artists(), t.art_small().map(str::to_owned)));
+        if let Some(r) = results {
+            for p in crate::suggest::picks(&q, r, &lib, 6) {
+                items.push(Suggestion::Pick(Box::new(p)));
+            }
         }
     }
-    let searching =
-        !q.is_empty() && items.is_empty() && (app.search_edited_at.is_some() || matches!(app.cache.get(&format!("search:{q}")), Some(Remote::Loading)));
+    let saved: Vec<bool> = items.iter().map(|s| matches!(s, Suggestion::Pick(p) if p.saved(&lib))).collect();
+    drop(lib);
+    let searching = !q.is_empty()
+        && !items.iter().any(|s| matches!(s, Suggestion::Pick(_)))
+        && (app.search_edited_at.is_some() || matches!(app.cache.get(&format!("search:{q}")), Some(Remote::Loading)));
     if items.is_empty() && !searching {
         return false;
     }
@@ -535,6 +570,8 @@ fn search_dropdown(app: &mut App, ui: &mut Ui, pill: Rect, edit: &egui::Response
     }
     sel = sel.filter(|s| *s < items.len());
     let mut chosen: Option<usize> = None;
+    // The Follow / save button on a row (pressed without opening the row).
+    let mut toggled: Option<usize> = None;
     let enter = edit.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
     if enter {
         chosen = sel;
@@ -558,38 +595,84 @@ fn search_dropdown(app: &mut App, ui: &mut Ui, pill: Rect, edit: &egui::Response
                     });
                 });
             }
-            if searching {
-                ui.label(RichText::new(tr("Searching…")).font(regular(12.5)).color(pal().text_muted));
-            }
-            for (k, (s, title, sub, art)) in items.iter().enumerate() {
-                let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), if art.is_some() { 44.0 } else { 32.0 }), Sense::click());
+            for (k, s) in items.iter().enumerate() {
+                // A thin line between the searches and the results.
+                if k > 0 && matches!(s, Suggestion::Pick(_)) && matches!(items[k - 1], Suggestion::Query(_)) {
+                    ui.add_space(4.0);
+                    let (line, _) = ui.allocate_exact_size(vec2(ui.available_width(), 1.0), Sense::hover());
+                    ui.painter().hline(line.x_range().shrink(8.0), line.center().y, Stroke::new(1.0, pal().border));
+                    ui.add_space(4.0);
+                }
+                let tall = matches!(s, Suggestion::Pick(_));
+                let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), if tall { 52.0 } else { 34.0 }), Sense::click());
                 let hot = resp.hovered() || sel == Some(k);
                 if hot {
                     ui.painter().rect_filled(rect, r_sm(), pal().surface_hover);
                 }
                 let mut x = rect.left() + 8.0;
+                let mut right = rect.right() - 8.0;
                 match s {
-                    Suggestion::Recent(_) => {
-                        paint_icon(ui.painter(), pos2(x + 8.0, rect.center().y), icon::CLOCK_COUNTER_CLOCKWISE, regular(15.0), pal().text_muted);
-                        x += 26.0;
+                    Suggestion::Recent(text) | Suggestion::Query(text) => {
+                        let glyph = if matches!(s, Suggestion::Recent(_)) { icon::CLOCK_COUNTER_CLOCKWISE } else { icon::MAGNIFYING_GLASS };
+                        paint_icon(ui.painter(), pos2(x + 9.0, rect.center().y), glyph, regular(15.0), pal().text_muted);
+                        x += 30.0;
+                        // What you typed in bold, the rest plain, like music apps.
+                        let typed = text.len().min(q.len());
+                        let bold = text.get(..typed).filter(|p| crate::app::fold(p) == crate::app::fold(&q)).map(|_| typed).unwrap_or(0);
+                        let mut job = egui::text::LayoutJob::default();
+                        job.append(&text[..bold], 0.0, egui::TextFormat::simple(semi(13.5), pal().text));
+                        job.append(&text[bold..], 0.0, egui::TextFormat::simple(regular(13.5), pal().text_muted));
+                        let g = ui.painter().layout_job(job);
+                        ui.painter().galley(pos2(x, rect.center().y - g.size().y / 2.0), g, pal().text);
                     }
-                    _ => {
-                        let round = matches!(s, Suggestion::Artist(_));
-                        let r = Rect::from_min_size(pos2(x, rect.center().y - 17.0), Vec2::splat(34.0));
-                        artwork(ui, r, art.as_deref(), if round { CornerRadius::same(17) } else { r_sm() });
-                        x += 44.0;
+                    Suggestion::Pick(p) => {
+                        let (title, sub, art, round) = match p.as_ref() {
+                            Pick::Artist(a) => (a.name.clone(), tr("Artist").to_string(), a.picture.clone(), true),
+                            Pick::Album(a) => (a.title.clone(), format!("{} • {}", tr(a.kind()), a.artist.name), a.cover_small.clone().or(a.cover.clone()), false),
+                            Pick::Playlist(p) => (p.title.clone(), format!("{} • {}", tr("Playlist"), p.creator), p.picture.clone(), false),
+                            Pick::Song(t) => (t.title.clone(), format!("{} • {}", tr("Song"), t.all_artists()), t.art_small().map(str::to_owned), false),
+                        };
+                        let r = Rect::from_min_size(pos2(x, rect.center().y - 20.0), Vec2::splat(40.0));
+                        artwork(ui, r, art.as_deref(), if round { CornerRadius::same(20) } else { r_sm() });
+                        x += 52.0;
+                        // Right side: Follow for artists, add / saved for the rest.
+                        let on = saved[k];
+                        if let Pick::Artist(_) = p.as_ref() {
+                            let b = Rect::from_center_size(pos2(right - 42.0, rect.center().y), vec2(84.0, 30.0));
+                            let br = ui.interact(b, area_id.with(("follow", k)), Sense::click());
+                            ui.painter().rect_stroke(b, CornerRadius::same(15), Stroke::new(1.0, if br.hovered() { pal().text } else { pal().text_faint }), egui::StrokeKind::Inside);
+                            ui.painter().text(b.center(), Align2::CENTER_CENTER, tr(if on { "Following" } else { "Follow" }), semi(12.0), pal().text);
+                            if br.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                                toggled = Some(k);
+                            }
+                            right = b.left() - 10.0;
+                        } else {
+                            let b = Rect::from_center_size(pos2(right - 12.0, rect.center().y), Vec2::splat(26.0));
+                            let br = ui.interact(b, area_id.with(("save", k)), Sense::click());
+                            let (glyph, font, col) = if on {
+                                (icon::CHECK_CIRCLE, filled_icon(20.0), pal().accent_soft)
+                            } else {
+                                (icon::PLUS_CIRCLE, regular(20.0), if br.hovered() { pal().text } else { pal().text_muted })
+                            };
+                            paint_icon(ui.painter(), b.center(), glyph, font, col);
+                            let tip = tr(if on { "Remove from your library" } else { "Save to your library" });
+                            if br.on_hover_text(tip).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                                toggled = Some(k);
+                            }
+                            right = b.left() - 8.0;
+                        }
+                        let w = right - x;
+                        paint_line(ui, pos2(x, rect.center().y - 16.0), &title, med(13.5), pal().text, w);
+                        paint_line(ui, pos2(x, rect.center().y + 2.0), &sub, regular(12.0), pal().text_muted, w);
                     }
                 }
-                let w = rect.right() - x - 8.0;
-                if sub.is_empty() {
-                    paint_line(ui, pos2(x, rect.center().y - 8.0), title, med(13.0), pal().text, w);
-                } else {
-                    paint_line(ui, pos2(x, rect.center().y - 15.0), title, med(13.0), pal().text, w);
-                    paint_line(ui, pos2(x, rect.center().y + 1.0), sub, regular(11.5), pal().text_muted, w);
-                }
-                if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                if toggled != Some(k) && resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                     chosen = Some(k);
                 }
+            }
+            if searching {
+                ui.add_space(4.0);
+                ui.label(RichText::new(tr("Searching…")).font(regular(12.5)).color(pal().text_muted));
             }
         });
     });
@@ -600,24 +683,36 @@ fn search_dropdown(app: &mut App, ui: &mut Ui, pill: Rect, edit: &egui::Response
     if clear_history {
         app.saved.recent_searches.clear();
     }
+    if let Some(k) = toggled
+        && let Suggestion::Pick(p) = &items[k]
+    {
+        match p.as_ref() {
+            Pick::Artist(a) => app.toggle_follow(a, &ctx),
+            Pick::Album(a) => app.toggle_album(a, &ctx),
+            Pick::Playlist(pl) => app.toggle_playlist(pl, &ctx),
+            Pick::Song(t) => app.toggle_like(t, &ctx),
+        }
+        return false;
+    }
     let Some(k) = chosen else { return false };
     ui.data_mut(|d| d.insert_temp(sel_id, None::<usize>));
     ui.data_mut(|d| d.remove::<Rect>(area_id.with("rect")));
     ui.memory_mut(|m| m.surrender_focus(edit.id));
-    match &items[k].0 {
-        Suggestion::Recent(r) => {
+    match &items[k] {
+        Suggestion::Recent(r) | Suggestion::Query(r) => {
             app.search_text = r.clone();
             app.search_edited_at = None;
             app.remember_search(r);
             app.submit_search(&ctx);
         }
-        Suggestion::Artist(id) => {
+        Suggestion::Pick(p) => {
             app.remember_search(&q);
-            app.navigate(Route::Artist(id.clone()), &ctx);
-        }
-        Suggestion::Song(t) => {
-            app.remember_search(&q);
-            app.open_song(t, &ctx);
+            match p.as_ref() {
+                Pick::Artist(a) => app.navigate(Route::Artist(a.id.clone()), &ctx),
+                Pick::Album(a) => app.navigate(Route::Album(a.id.clone()), &ctx),
+                Pick::Playlist(pl) => app.navigate(Route::Playlist(pl.id.clone()), &ctx),
+                Pick::Song(t) => app.open_song(t, &ctx),
+            }
         }
     }
     true
@@ -799,6 +894,15 @@ fn page(app: &mut App, ui: &mut Ui) {
                 empty_state(ui, icon::VINYL_RECORD, "No liked albums yet", "Tap the heart on an album's page to save it here.", None);
             } else {
                 album_grid(app, ui, &list, None);
+            }
+        }
+        Route::FollowedArtists => {
+            page_title(ui, "Your Artists", None);
+            let list = app.saved.followed_artists.clone();
+            if list.is_empty() {
+                empty_state(ui, icon::USER, "You're not following anyone yet", "Press Follow on an artist's page or in search to see them here.", None);
+            } else {
+                artist_grid(app, ui, &list, None);
             }
         }
         Route::LikedPlaylists => {
@@ -1546,6 +1650,17 @@ fn album_page(app: &mut App, ui: &mut Ui) {
     });
 }
 
+/// "Follow" / "Following": an outlined pill, like music apps use.
+fn follow_button(ui: &mut Ui, following: bool) -> egui::Response {
+    let text = RichText::new(tr(if following { "Following" } else { "Follow" })).font(semi(12.5)).color(pal().text);
+    let b = egui::Button::new(text)
+        .min_size(vec2(84.0, 30.0))
+        .corner_radius(CornerRadius::same(15))
+        .fill(Color32::TRANSPARENT)
+        .stroke(Stroke::new(1.0, if following { pal().text_muted } else { pal().text_faint }));
+    ui.add(b).on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
 /// The heart beside Play on an album or playlist page: saves it to your library.
 fn save_heart(ui: &mut Ui, liked: bool) -> egui::Response {
     let (rect, resp) = ui.allocate_exact_size(Vec2::splat(40.0), Sense::click());
@@ -1600,8 +1715,14 @@ fn artist(app: &mut App, ui: &mut Ui) {
             p.artist.picture.as_deref().or(p.artist.picture_xl.as_deref()),
             true,
         );
-        action_row(app, ui, &p.top);
         let ctx = ui.ctx().clone();
+        ui.horizontal(|ui| {
+            action_row(app, ui, &p.top);
+            let following = app.follows(&p.artist.id);
+            if follow_button(ui, following).clicked() {
+                app.toggle_follow(&p.artist, &ctx);
+            }
+        });
 
         if let Some(latest) = p.releases.first() {
             section_title(ui, "Latest release", None);
