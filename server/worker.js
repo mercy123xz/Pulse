@@ -41,24 +41,28 @@ const RESERVED = new Set([
 export default {
   async fetch(request, env) {
     const origin = request.headers.get("Origin") || "";
+    // DEV_ORIGIN: a local copy of the website, for testing (server/serve.mjs sets it).
+    const allowed = env.DEV_ORIGIN ? [...ALLOWED_ORIGINS, env.DEV_ORIGIN] : ALLOWED_ORIGINS;
     const cors = {
-      // The app sends no Origin; the website reads public pages.
-      "Access-Control-Allow-Origin": ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0],
-      "Access-Control-Allow-Methods": "GET, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type",
+      // The app sends no Origin. Pulse's own website reads public pages and can sign in.
+      "Access-Control-Allow-Origin": allowed.includes(origin) ? origin : ALLOWED_ORIGINS[0],
+      "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type, Authorization",
       "Access-Control-Max-Age": "86400",
       Vary: "Origin",
     };
     const reply = (status, data) =>
       new Response(JSON.stringify(data), { status, headers: { ...cors, "Content-Type": "application/json", "Cache-Control": "no-store" } });
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
-    // Changes come only from the app: a website can't sign in or publish for you.
-    if (request.method !== "GET" && origin) return reply(403, { error: "Not allowed from a website." });
+    // Changes come from the app or from Pulse's own website: any other website can't sign
+    // in or change anything for you. (Sign-ins are a key sent in a header, not a cookie, so
+    // another site can't borrow one either.)
+    if (request.method !== "GET" && origin && !allowed.includes(origin)) return reply(403, { error: "Not allowed from a website." });
 
     try {
       const url = new URL(request.url);
       const ip = request.headers.get("CF-Connecting-IP") || "unknown";
-      const ctx = { env, request, ip, reply, now: Math.floor(Date.now() / 1000) };
+      const ctx = { env, request, ip, reply, web: !!origin, now: Math.floor(Date.now() / 1000) };
       return await route(ctx, request.method, url.pathname.replace(/\/+$/, "") || "/");
     } catch (e) {
       if (e instanceof Reply) return reply(e.status, { error: e.message });
@@ -291,6 +295,8 @@ const ownUser = (u) => ({ ...publicUser(u), email: u.email || "" });
 // ---------------------------------------------------------------- accounts
 
 async function signup(c) {
+  // New accounts are made in the app (a sign-up form on the open web would mostly invite bots).
+  if (c.web) fail(403, "Create your account in the Pulse app: Settings → Account.");
   const b = await body(c);
   const username = str(b.username, 40).toLowerCase();
   checkUsername(username);

@@ -20,6 +20,21 @@
     }
     setTimeout(function () { root.classList.remove("theme-fade"); }, 350);
   }
+  // Your account: a person icon, or your initial once you're signed in on this site.
+  var base = (document.currentScript && document.currentScript.src) || location.href;
+  if (nav) {
+    var who = null;
+    try { who = (JSON.parse(localStorage.getItem("pulse-session") || "null") || {}).username || null; } catch (e) {}
+    var acct = document.createElement("a");
+    acct.className = "nav-icon account-btn" + (who ? " signed-in" : "");
+    acct.href = new URL("account/", base).href;
+    acct.setAttribute("aria-label", who ? "Your account (@" + who + ")" : "Sign in");
+    acct.title = acct.getAttribute("aria-label");
+    if (who) acct.textContent = who.charAt(0).toUpperCase();
+    else acct.innerHTML = icon('<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>');
+    var before = nav.querySelector(":scope > .btn");
+    nav.insertBefore(acct, before || null);
+  }
   var themeBtn = null;
   if (nav) {
     themeBtn = document.createElement("button");

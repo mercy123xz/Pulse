@@ -21,6 +21,9 @@ html { scroll-padding-top: 90px; }
 .nav-icon:hover { color: var(--text); background: var(--surface-2); }
 .nav-icon:focus-visible { outline: 3px solid var(--accent-soft); outline-offset: 2px; }
 .nav-icon svg { width: 19px; height: 19px; }
+.account-btn { text-decoration: none; }
+.account-btn.signed-in { background: linear-gradient(#a78bfa, #7c3aed); color: #fff; font-weight: 700; font-size: .95rem; }
+.account-btn.signed-in:hover { color: #fff; filter: brightness(1.1); }
 .nav-icon .sun { display: none; }
 [data-theme="light"] .nav-icon .sun { display: block; }
 [data-theme="light"] .nav-icon .moon { display: none; }

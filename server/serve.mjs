@@ -5,7 +5,7 @@ import worker from "./worker.js";
 import { makeD1 } from "./d1.mjs";
 // Emails aren't sent: the last one is printed and can be read at /__mail.
 let lastMail = null;
-const env = { DB: makeD1(process.argv[2] || ":memory:"), MAIL_HOOK: (m) => { lastMail = m; console.log(`mail to ${m.to}: ${m.subject}`); } };
+const env = { DB: makeD1(process.argv[2] || ":memory:"), DEV_ORIGIN: "http://localhost:8765", MAIL_HOOK: (m) => { lastMail = m; console.log(`mail to ${m.to}: ${m.subject}`); } };
 createServer(async (req, res) => {
   if (req.url === "/__mail") { res.writeHead(200, { "Content-Type": "application/json" }); return res.end(JSON.stringify(lastMail)); }
   const chunks = [];

@@ -45,6 +45,13 @@ r = await call("PUT", "/me", { bio: "  hi there  " }, { token: tok }); ok(r.data
 // websites can't change things
 r = await call("POST", "/login", { username: "mercy_1", password: "correct horse" }, { origin: "https://evil.example" }); ok(r.status === 403, "no website writes");
 r = await call("GET", "/users/mercy_1", undefined, { origin: "https://mercy123xz.github.io" }); ok(r.status === 200, "website can read");
+r = await call("POST", "/login", { username: "mercy_1", password: "correct horse" }, { origin: "https://mercy123xz.github.io" }); ok(r.status === 200 && r.data.token, "Pulse's website can sign in");
+r = await call("GET", "/me", undefined, { token: r.data.token, origin: "https://mercy123xz.github.io" }); ok(r.status === 200, "and use the account");
+r = await call("POST", "/signup", { username: "webby", password: "web password", email: "w@example.com" }, { origin: "https://mercy123xz.github.io" }); ok(r.status === 403 && /app/.test(r.data.error), "sign-up stays in the app");
+r = await worker.fetch(new Request("https://acc.example/login", { method: "OPTIONS", headers: { Origin: "https://mercy123xz.github.io" } }), env);
+ok(r.status === 204 && r.headers.get("Access-Control-Allow-Origin") === "https://mercy123xz.github.io" && /Authorization/.test(r.headers.get("Access-Control-Allow-Headers")) && /DELETE/.test(r.headers.get("Access-Control-Allow-Methods")), "the website may send sign-ins");
+r = await worker.fetch(new Request("https://acc.example/login", { method: "OPTIONS", headers: { Origin: "https://evil.example" } }), env);
+ok(r.headers.get("Access-Control-Allow-Origin") !== "https://evil.example", "other websites aren't");
 // publish
 const tracks = [
   { id: "dz:1", title: "Get Away", duration: 100, artist: { id: "141771412", name: "OsamaSon", picture: "https://cdn-images.dzcdn.net/images/artist/x/56x56.jpg" }, album: { id: "9", title: "psykotic" }, cover_small: "https://cdn-images.dzcdn.net/images/cover/a/56x56.jpg", cover_big: "https://evil.example/track.png", explicit: true, featured: [], secret: "x" },

@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<script>try{var t=localStorage.getItem("pulse-theme");document.documentElement.dataset.theme=t||(matchMedia("(prefers-color-scheme: light)").matches?"light":"dark")}catch(e){document.documentElement.dataset.theme="dark"}</script>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Your account · Pulse</title>
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#0b0b0e">
+<link rel="icon" href="../img/favicon-32.png" sizes="32x32" type="image/png">
+<style>
+:root { --bg: #0b0b0e; --surface: #16161b; --surface-2: #1d1d24; --border: #2c2c36; --text: #ededf1; --muted: #a3a3b0; --accent: #7c3aed; --accent-soft: #a78bfa; --bad: #ffb4c2; --good: #86efac; color-scheme: dark; }
+html[data-theme="light"] { --bg: #f7f6fb; --surface: #ffffff; --surface-2: #f0eef7; --border: #dcd8e8; --text: #1b1a20; --muted: #5d5a6e; --accent-soft: #6d28d9; --bad: #b4233c; --good: #15803d; color-scheme: light; }
+* { box-sizing: border-box; }
+body { margin: 0; min-height: 100vh; background: radial-gradient(80% 60% at 50% 0%, rgba(124, 58, 237, .22), transparent 70%), var(--bg); color: var(--text); font: 400 1rem/1.6 "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, Arial, sans-serif; padding: 1.5rem; }
+main { max-width: 34rem; margin: 0 auto; padding-bottom: 3rem; }
+.home { display: inline-flex; align-items: center; gap: .55rem; color: var(--text); text-decoration: none; font-weight: 700; font-size: 1.1rem; }
+.home svg { width: 30px; height: 30px; }
+h1 { font-size: clamp(1.7rem, 5vw, 2.2rem); letter-spacing: -.03em; margin: 2rem 0 .4rem; overflow-wrap: anywhere; }
+h2 { font-size: 1.05rem; margin: 0 0 .6rem; }
+p { color: var(--muted); margin: .3rem 0; }
+a { color: var(--accent-soft); }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 1.3rem; margin-top: 1rem; }
+label { display: block; font-size: .85rem; font-weight: 600; margin: .9rem 0 .3rem; }
+input, textarea { width: 100%; font: inherit; color: var(--text); background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; padding: .7rem .85rem; }
+textarea { min-height: 5rem; resize: vertical; }
+input:focus, textarea:focus { outline: 2px solid var(--accent-soft); outline-offset: 1px; border-color: transparent; }
+.row { display: flex; gap: .6rem; flex-wrap: wrap; align-items: center; margin-top: 1rem; }
+button, .b { font-family: inherit; font-size: .95rem; font-weight: 600; line-height: 1.2; padding: .75rem 1.2rem; border-radius: 10px; border: 1px solid var(--border); background: transparent; color: var(--text); cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; gap: .4rem; }
+button:hover, .b:hover { border-color: var(--accent-soft); }
+button.main { background: linear-gradient(180deg, #8b5cf6, #7c3aed); border-color: transparent; color: #fff; }
+button.main:hover { filter: brightness(1.08); }
+button.danger { color: var(--bad); }
+button.main.danger { background: #b4233c; color: #fff; }
+button:disabled { opacity: .55; cursor: wait; }
+button:focus-visible, .b:focus-visible, a:focus-visible { outline: 2px solid var(--accent-soft); outline-offset: 3px; }
+.link { border: 0; padding: 0; background: none; color: var(--accent-soft); font-weight: 500; text-decoration: underline; text-underline-offset: 3px; }
+.msg { margin-top: .9rem; padding: .7rem .9rem; border-radius: 10px; font-size: .92rem; }
+.msg.bad { background: color-mix(in srgb, var(--bad) 14%, transparent); color: var(--bad); }
+.msg.good { background: color-mix(in srgb, var(--good) 14%, transparent); color: var(--good); }
+.msg.info { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--text); }
+.who { display: flex; gap: 1rem; align-items: center; margin-top: 1.6rem; }
+.avatar { width: 72px; height: 72px; border-radius: 50%; display: grid; place-items: center; background: linear-gradient(#a78bfa, #7c3aed); font-size: 1.9rem; font-weight: 700; color: #fff; flex: none; }
+.who h1 { margin: 0; }
+ul.lists { list-style: none; padding: 0; margin: .4rem 0 0; }
+ul.lists li { display: flex; gap: .8rem; align-items: center; padding: .55rem 0; border-top: 1px solid var(--border); }
+ul.lists li:first-child { border-top: 0; }
+ul.lists img, ul.lists .ph { width: 44px; height: 44px; border-radius: 8px; object-fit: cover; background: var(--surface-2); flex: none; }
+ul.lists .t { flex: 1; min-width: 0; }
+ul.lists .t b, ul.lists .t span { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+ul.lists .t span { color: var(--muted); font-size: .85rem; }
+ul.lists button, ul.lists .b { padding: .5rem .8rem; font-size: .85rem; }
+details summary { cursor: pointer; font-weight: 600; }
+details[open] summary { margin-bottom: .4rem; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+@media (pointer: fine) {
+  html { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 28 28'%3E%3Cpath d='M4 3v19.5l5.6-5.4 3.6 8.4 3.6-1.6-3.6-8.2H21z' fill='%230b0b0e' stroke='%23a78bfa' stroke-width='1.8' stroke-linejoin='round'/%3E%3C/svg%3E") 4 3, auto; }
+  a, button, summary, label { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 28 28'%3E%3Cpath d='M4 3v19.5l5.6-5.4 3.6 8.4 3.6-1.6-3.6-8.2H21z' fill='%237c3aed' stroke='%23f5f3ff' stroke-width='1.8' stroke-linejoin='round'/%3E%3C/svg%3E") 4 3, pointer; }
+}
+</style>
+</head>
+<body>
+<main>
+  <a class="home" href="../">
+    <svg viewBox="0 0 30 30" aria-hidden="true"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#a78bfa"/><stop offset="1" stop-color="#7c3aed"/></linearGradient></defs><rect width="30" height="30" rx="8" fill="url(#g)"/><g fill="#fff"><rect x="7" y="12" width="2.4" height="6" rx="1.2"/><rect x="11" y="8.5" width="2.4" height="13" rx="1.2"/><rect x="15" y="6" width="2.4" height="18" rx="1.2"/><rect x="19" y="10" width="2.4" height="10" rx="1.2"/><rect x="23" y="13" width="2.4" height="4" rx="1.2"/></g></svg>
+    Pulse
+  </a>
+  <div id="page" aria-live="polite"><p style="margin-top:2rem">Loading…</p></div>
+  <noscript><p>This page needs JavaScript. You can also manage your account in the Pulse app: Settings → Account.</p></noscript>
+</main>
+<script src="account.js"></script>
+</body>
+</html>
