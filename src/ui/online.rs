@@ -77,7 +77,10 @@ pub fn account_dialog(app: &mut App, ctx: &egui::Context) {
             ),
             AccountMode::Bio => ("Edit your public profile", "A few words about you. Anyone can see this."),
             AccountMode::Forgot => ("Forgot your password?", "Enter your username or email. We'll email you a 6-digit code to choose a new password."),
-            AccountMode::Reset => ("Choose a new password", "Enter the code from the email and a new password. Not in your inbox? Check your spam folder. You'll be signed out on your other computers."),
+            AccountMode::Reset => (
+                "Choose a new password",
+                "Enter the code from the email and a new password. Not in your inbox? Check your spam folder. You'll be signed out on your other computers.",
+            ),
             AccountMode::Email if required => {
                 ("Add your email", "Your account needs an email address, so you can get back in if you forget your password. It's never shown to anyone.")
             }
