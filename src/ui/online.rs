@@ -6,7 +6,7 @@ use crate::app::{AccountDialog, AccountDone, AccountMode, App, Page, Route};
 use crate::i18n::tr;
 use crate::theme::*;
 use crate::widgets::*;
-use egui::{Align, Color32, CornerRadius, Frame, Key, Layout, Margin, RichText, Stroke, Ui};
+use egui::{Align, Color32, CornerRadius, Frame, Key, Layout, Margin, RichText, Stroke, Ui, vec2};
 use egui_phosphor::regular as icon;
 
 /// "Mar 2026": when someone joined.
@@ -51,10 +51,19 @@ pub fn account_dialog(app: &mut App, ctx: &egui::Context) {
     let mut close = false;
     let mut submit = false;
     let mode = d.mode;
+    let welcome = d.welcome;
     let modal = egui::Modal::new(egui::Id::new("account")).frame(dialog_frame()).show(ctx, |ui| {
         ui.set_width(420.0);
         ui.spacing_mut().item_spacing.y = 0.0;
+        if welcome {
+            // The Pulse mark above the welcome.
+            let (r, _) = ui.allocate_exact_size(vec2(44.0, 44.0), egui::Sense::hover());
+            ui.painter().rect_filled(r, CornerRadius::same(12), pal().accent);
+            crate::theme::paint_icon(ui.painter(), r.center(), icon::WAVEFORM, regular(24.0), Color32::WHITE);
+            ui.add_space(14.0);
+        }
         let (title, body) = match mode {
+            AccountMode::SignUp if welcome => ("Welcome to Pulse", "Create a free account to share playlists and have a profile. It's optional: your music and library work without one."),
             AccountMode::SignIn => ("Sign in to Pulse", "Welcome back."),
             AccountMode::SignUp => ("Create a Pulse account", "Share playlists and have a public profile. Your library stays on this computer."),
             AccountMode::Password => ("Change password", "You'll stay signed in here and be signed out everywhere else."),
@@ -142,7 +151,7 @@ pub fn account_dialog(app: &mut App, ctx: &egui::Context) {
                 } else if dialog_button(ui, tr(label), true, true).clicked() {
                     submit = true;
                 }
-                if dialog_button(ui, tr("Cancel"), false, !busy).clicked() {
+                if dialog_button(ui, tr(if welcome { "Not now" } else { "Cancel" }), false, !busy).clicked() {
                     close = true;
                 }
             });
@@ -153,6 +162,10 @@ pub fn account_dialog(app: &mut App, ctx: &egui::Context) {
     }
     if (close || modal.should_close()) && app.account_busy == 0 {
         app.account_dialog = None;
+        // "Not now" on the welcome: the profile window (name, picture) comes next, as before.
+        if welcome && app.saved.profile.created == 0 && !app.saved.profile.skipped {
+            app.profile_editing = Some(crate::ui::ProfileForm { welcome: true, ..Default::default() });
+        }
     }
 }
 

@@ -398,6 +398,8 @@ pub struct Saved {
     pub profile: Profile,
     /// Songs whose featured artists were already looked up.
     pub featured_checked: HashSet<String>,
+    /// The "create an account" window was shown when Pulse opened (it's shown once).
+    pub account_asked: bool,
     /// Albums and playlists saved with the heart on their page, newest first.
     pub liked_albums: Vec<deezer::AlbumInfo>,
     pub liked_playlists: Vec<deezer::PlaylistInfo>,
@@ -450,6 +452,7 @@ impl Default for Saved {
             visits: vec![],
             profile: Profile::default(),
             featured_checked: HashSet::new(),
+            account_asked: false,
             liked_albums: vec![],
             liked_playlists: vec![],
             followed_artists: vec![],
@@ -575,11 +578,13 @@ pub struct AccountDialog {
     pub password2: String,
     pub bio: String,
     pub error: Option<String>,
+    /// Shown by itself when Pulse opens: worded as a welcome, with "Not now".
+    pub welcome: bool,
 }
 
 impl AccountDialog {
     pub fn new(mode: AccountMode) -> Self {
-        Self { mode, username: String::new(), password: String::new(), password2: String::new(), bio: String::new(), error: None }
+        Self { mode, username: String::new(), password: String::new(), password2: String::new(), bio: String::new(), error: None, welcome: false }
     }
 }
 
@@ -948,8 +953,14 @@ impl App {
         crate::audiocache::set_limit_mb(app.saved.settings.replay_cache_mb);
         std::thread::spawn(crate::artcache::trim_disk);
         app.apply_theme(&cc.egui_ctx);
-        // First launch: offer to make a profile.
-        if app.saved.profile.created == 0 && !app.saved.profile.skipped {
+        // The first time Pulse opens (and once after updating): offer an account. The local
+        // profile window comes after, if you choose "Not now".
+        if crate::account::available() && crate::account::session().is_none() && !app.saved.account_asked {
+            app.saved.account_asked = true;
+            let mut d = AccountDialog::new(AccountMode::SignUp);
+            d.welcome = true;
+            app.account_dialog = Some(d);
+        } else if app.saved.profile.created == 0 && !app.saved.profile.skipped {
             app.profile_editing = Some(crate::ui::ProfileForm { welcome: true, ..Default::default() });
         }
         // Forget downloads whose files were deleted outside Pulse.
@@ -2524,6 +2535,12 @@ impl App {
         match done {
             AccountDone::SignedIn(s) => {
                 self.account_dialog = None;
+                // No profile on this computer yet: your username is its name.
+                if self.saved.profile.created == 0 {
+                    self.saved.profile.name = s.username.clone();
+                    self.saved.profile.created = now_unix();
+                    self.profile_editing = None;
+                }
                 self.toast(&format!("{} @{}", tr("Signed in as"), s.username), ctx);
             }
             AccountDone::SignedOut => self.toast(tr("Signed out"), ctx),

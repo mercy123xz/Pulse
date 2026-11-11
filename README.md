@@ -27,14 +27,20 @@
 ## Features
 
 **Discover**
-- **Home:** today's top songs, popular albums, artists and playlists, and quick genre picks
+- **Home:** today's top songs, quick genre picks, and rows built from what you play:
+  "Listeners of X also listen to" and "Songs like X"
 - **Charts:** the top 100 songs overall or in 27 genres
-- **Live search** for songs, artists, albums and playlists as you type
-- **Artist pages** with their latest release, most popular songs, full discography and similar artists
+- **Search** with suggestions as you type: finish-the-search rows, the artist you mean, then their
+  albums, songs and playlists, with what's in your library first
+- **Artist pages** with their latest release, most popular songs, full discography, songs like
+  theirs and similar artists. **Follow** the artists you like
 - **Album and playlist pages** with cover art
 
 **Listen**
-- Full-length songs, found and streamed from YouTube automatically
+- Full-length songs, found and streamed from YouTube automatically. They start while they download,
+  and the first songs of a page you open are loaded ahead so they play at once
+- **Synced lyrics** in a side panel, a **mini player**, and **Gaming** and **Ultra-low** modes
+- **Discord status:** show what you're listening to
 - **Autoplay:** when your queue runs out, Pulse keeps playing similar songs (turn it off in the Queue)
 - The next song is found while the current one plays, so tracks change without a wait
 - Queue with **Play next** and **Add to queue**, plus shuffle and repeat (all or one)
@@ -46,11 +52,16 @@
 - YouTube view counts next to songs
 
 **Your library**
-- **Liked Songs**, **Recently Played** and your **own playlists**, with custom covers, search,
-  genre filters, sorting and "date added"
+- **Liked Songs**, **Liked Albums**, **Liked Playlists**, **Your Artists**, **Recently Played** and your
+  **own playlists**, with custom covers, search, genre filters, sorting and "date added"
 - **Import playlists** from YouTube, Spotify or SoundCloud by pasting a link
 - **Download songs** for offline listening, and play the music files in your **Music folder**
-- Everything is saved on your PC. No account or sign-in needed
+- Your library is saved on your PC, with automatic backups
+
+**Share (optional)**
+- A free **Pulse account** lets you make playlists public and have a profile people can find
+- Shared links open in Pulse or on the website; save other people's playlists or copy them
+- No account needed for anything else
 
 **Make it yours**
 - Five built-in **themes** (Default, Blossom, Dreary Mono, Lunar, Aurora), each with dark and light colors,
@@ -129,6 +140,10 @@ On Linux you'll also need the ALSA development headers (`sudo apt install libaso
 | `src/audio.rs` | Audio engine: two decks for crossfade, opens the next song early for gapless playback, streams in chunks |
 | `src/dsp.rs` | Sound processing on every song: equalizer, mono, fades, silence detection for automix |
 | `src/import.rs` | Importing playlists from YouTube, Spotify and SoundCloud |
+| `src/suggest.rs` | What the search box suggests while you type, and how it's ranked |
+| `src/account.rs`, `src/ui/online.rs` | Pulse accounts: signing in, public playlists, profiles |
+| `server/` | The accounts server (a Cloudflare Worker with a D1 database) and its tests |
+| `src/audiocache.rs` | Songs you played, kept on disk so they start instantly next time |
 | `src/downloads.rs` | Downloading songs for offline listening |
 | `src/local.rs` | Songs from the Music folder |
 | `src/net.rs` | Shared HTTP helpers |
@@ -142,7 +157,7 @@ On Linux you'll also need the ALSA development headers (`sudo apt install libaso
 | `build.rs` | Bakes the Visual C++ runtime and the icon into the Windows `.exe` |
 | `installer/pulse.iss` | The Windows installer (Inno Setup) |
 
-Run the tests with `cargo test`.
+Run the tests with `cargo test`, and the accounts server's with `node server/test.mjs`.
 
 ## Built with
 

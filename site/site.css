@@ -76,3 +76,12 @@ html.theme-fade, html.theme-fade * { transition: background-color .3s ease, colo
   html.motion .reveal { opacity: 0; transform: translateY(22px); transition: opacity .7s cubic-bezier(.2, .7, .2, 1) var(--d, 0s), transform .7s cubic-bezier(.2, .7, .2, 1) var(--d, 0s); }
   html.motion .reveal.in { opacity: 1; transform: none; }
 }
+
+/* Launch video in What's new */
+.launch { position: relative; margin: 0 0 1rem; }
+.launch video { display: block; width: 100%; aspect-ratio: 16 / 9; border-radius: 12px; background: #0b0b0e; cursor: pointer; }
+.launch-sound { position: absolute; right: .6rem; top: .6rem; width: 38px; height: 38px; border-radius: 50%; border: 1px solid rgba(255,255,255,.25); background: rgba(11,11,14,.65); color: #fff; display: grid; place-items: center; backdrop-filter: blur(6px); }
+.launch-sound:hover { background: rgba(124,58,237,.85); }
+.launch-sound .i-on, .launch-sound.on .i-off { display: none; }
+.launch-sound.on .i-on { display: block; }
+.launch figcaption { margin-top: .4rem; font-size: .78rem; color: var(--muted); }
