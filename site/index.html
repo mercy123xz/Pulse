@@ -17,7 +17,7 @@
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image">
-<link rel="preload" as="image" type="image/avif" imagesrcset="img/chart-page-480.avif 480w, img/chart-page-715.avif 715w, img/chart-page-752.avif 752w, img/chart-page-800.avif 800w, img/chart-page-872.avif 872w, img/chart-page-1000.avif 1000w, img/chart-page-1140.avif 1140w, img/chart-page-1312.avif 1312w, img/chart-page-1504.avif 1504w, img/chart-page-1647.avif 1647w" imagesizes="(min-width: 1220px) calc(50vw + 32px), (min-width: 1100px) calc(55.56vw - 35px), calc(100vw - 42px)" fetchpriority="high">
+<link rel="preload" as="image" type="image/webp" href="img/headphones.webp" fetchpriority="high">
 <style>
 :root {
   --bg: #0b0b0e;
@@ -71,7 +71,20 @@ a:focus-visible, .btn:focus-visible { outline: 2px solid var(--accent-soft); out
 .hero { position: relative; overflow: hidden; padding: clamp(3rem, 8vw, 6rem) 0 clamp(3rem, 6vw, 5rem); }
 .hero::before { content: ""; position: absolute; inset: -20% -10% auto 35%; height: 120%; background: radial-gradient(closest-side, rgba(124, 58, 237, .32), rgba(124, 58, 237, 0)); pointer-events: none; }
 .hero-grid { position: relative; display: grid; gap: clamp(2rem, 5vw, 3.5rem); align-items: center; }
-@media (min-width: 1100px) { .hero-grid { grid-template-columns: 1fr 1.25fr; } }
+@media (min-width: 1000px) { .hero-grid { grid-template-columns: 1.05fr 1fr; } }
+/* The headphones: a still picture first, then the 3D ones fade in over it. */
+.stage { position: relative; width: 100%; max-width: 460px; aspect-ratio: 1; margin-inline: auto; }
+.stage::before { content: ""; position: absolute; inset: 8% 4% 10%; border-radius: 50%; background: radial-gradient(closest-side, rgba(139, 92, 246, .22), rgba(99, 102, 241, .07) 60%, transparent); pointer-events: none; }
+.stage img, .stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; transition: opacity .9s ease; }
+.stage img { object-fit: contain; pointer-events: none; }
+.stage canvas { opacity: 0; touch-action: pan-y; cursor: grab; outline-offset: 4px; }
+.stage canvas.grabbing { cursor: grabbing; }
+.stage canvas.ready { opacity: 1; }
+.stage canvas.ready + img, .stage canvas.ready ~ img { opacity: 0; }
+.stage-hint { position: absolute; left: 0; right: 0; bottom: -.4rem; margin: 0; text-align: center; font-size: .78rem; color: var(--muted); opacity: 0; transition: opacity .9s ease .6s; pointer-events: none; }
+.stage canvas.ready ~ .stage-hint { opacity: .75; }
+@media (min-width: 1000px) { .stage { max-width: 620px; margin-right: -2rem; } }
+@media (prefers-reduced-motion: reduce) { .stage img, .stage canvas, .stage-hint { transition: none; } }
 .eyebrow { display: inline-flex; gap: .5rem; align-items: center; color: var(--accent-soft); font-weight: 600; font-size: .9rem; letter-spacing: .02em; }
 h1 { font-size: clamp(2.5rem, 6vw, 4.25rem); line-height: 1.04; letter-spacing: -.035em; margin: .7rem 0 1rem; font-weight: 800; }
 h1 span { background: linear-gradient(90deg, #c4b5fd, var(--accent-soft) 40%, #8b5cf6); -webkit-background-clip: text; background-clip: text; color: transparent; }
@@ -84,7 +97,6 @@ h1 span { background: linear-gradient(90deg, #c4b5fd, var(--accent-soft) 40%, #8
 .window-bar { display: flex; gap: 6px; padding: 10px 14px; border-bottom: 1px solid var(--border); background: var(--bg-2); }
 .window-bar i { width: 10px; height: 10px; border-radius: 50%; background: #3a3a46; }
 .window img { width: 100%; }
-@media (min-width: 1100px) { .hero .window { margin-right: calc((100vw - min(100vw - 2.5rem, var(--wrap))) / -2); border-top-right-radius: 0; border-bottom-right-radius: 0; } }
 
 /* Facts strip */
 .facts { border-block: 1px solid var(--border); background: var(--bg-2); }
@@ -356,19 +368,6 @@ figure.theme { margin: 0; }
 /* Download */
 .download { text-align: center; }
 .download .box { position: relative; overflow: hidden; background: radial-gradient(120% 140% at 50% 0%, rgba(124, 58, 237, .28), rgba(22, 22, 27, 1) 60%); border: 1px solid var(--border); border-radius: 24px; padding: clamp(2.5rem, 6vw, 4rem) 1.5rem; }
-.download .box.has-3d { display: grid; align-items: center; gap: 1rem; }
-.phones { display: block; width: 100%; height: 260px; touch-action: pan-y; cursor: grab; opacity: 0; transform: scale(.94); transition: opacity .9s ease, transform 1.1s cubic-bezier(.2, .8, .2, 1); }
-.phones.ready { opacity: 1; transform: none; }
-.phones-hint { margin: -.4rem 0 0; font-size: .78rem; color: var(--muted); opacity: .8; }
-.phones-hint .for-touch { display: none; }
-@media (hover: none) { .phones-hint .for-mouse { display: none; } .phones-hint .for-touch { display: inline; } }
-@media (min-width: 900px) {
-  .download .box.has-3d { grid-template-columns: 1.1fr .9fr; text-align: left; padding-inline: clamp(2rem, 5vw, 4rem); }
-  .download .box.has-3d .section-lede { margin-inline: 0 !important; }
-  .download .box.has-3d .cta { justify-content: flex-start; }
-  .phones { height: 380px; }
-  .phones-hint { text-align: center; }
-}
 .download .cta { justify-content: center; }
 .download small { display: block; color: var(--muted); max-width: 38rem; margin: 1.6rem auto 0; font-size: .9rem; }
 
@@ -377,15 +376,6 @@ footer .wrap { display: grid; gap: .8rem; }
 footer nav { display: flex; gap: 1.2rem; flex-wrap: wrap; }
 footer a { color: var(--text); text-decoration: none; }
 footer a:hover { text-decoration: underline; }
-
-/* Hero screenshot in 3D: tilted back from its right edge, following the mouse with a soft glare. */
-.hero .window { position: relative; transform-origin: right center; transform: perspective(1800px) rotateY(var(--ry, 0deg)) rotateX(var(--rx, 0deg)); transition: transform .6s cubic-bezier(.2, .7, .2, 1), box-shadow .6s; }
-.hero .window::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: radial-gradient(600px circle at var(--gx, 30%) var(--gy, 20%), rgba(167, 139, 250, .16), transparent 55%); opacity: var(--glare, .6); transition: opacity .6s; }
-@media (min-width: 1100px) {
-  .hero .window { --ry: 7deg; --rx: 2deg; box-shadow: -40px 40px 90px rgba(0, 0, 0, .6), -10px 0 60px rgba(124, 58, 237, .18); }
-  .hero .window.is-tracking { transition: transform .12s linear, box-shadow .6s; }
-}
-@media (prefers-reduced-motion: reduce) { .hero .window, .hero .window.is-tracking { transition: none; } }
 
 /* Cursor: black arrow with a purple edge; purple over anything clickable.
    Native cursors (no script), only for mouse users. */
@@ -433,13 +423,10 @@ footer a:hover { text-decoration: underline; }
         </div>
         <p class="meta">Version <span class="js-version">1.0.0</span> · under 10 MB installer · no administrator password needed</p>
       </div>
-      <div class="window">
-        <div class="window-bar" aria-hidden="true"><i></i><i></i><i></i></div>
-        <picture>
-          <source type="image/avif" srcset="img/chart-page-480.avif 480w, img/chart-page-715.avif 715w, img/chart-page-752.avif 752w, img/chart-page-800.avif 800w, img/chart-page-872.avif 872w, img/chart-page-1000.avif 1000w, img/chart-page-1140.avif 1140w, img/chart-page-1312.avif 1312w, img/chart-page-1504.avif 1504w, img/chart-page-1647.avif 1647w" sizes="(min-width: 1220px) calc(50vw + 32px), (min-width: 1100px) calc(55.56vw - 35px), calc(100vw - 42px)">
-          <source type="image/webp" srcset="img/chart-page-480.webp 480w, img/chart-page-715.webp 715w, img/chart-page-752.webp 752w, img/chart-page-800.webp 800w, img/chart-page-872.webp 872w, img/chart-page-1000.webp 1000w, img/chart-page-1140.webp 1140w, img/chart-page-1312.webp 1312w, img/chart-page-1504.webp 1504w, img/chart-page-1647.webp 1647w" sizes="(min-width: 1220px) calc(50vw + 32px), (min-width: 1100px) calc(55.56vw - 35px), calc(100vw - 42px)">
-          <img src="img/chart-page-752.webp" width="1647" height="791" fetchpriority="high" decoding="async" alt="Pulse's Charts page: the 100 most popular songs, each with its cover, artist, album, YouTube view count and length.">
-        </picture>
+      <div class="stage">
+        <canvas id="phones" aria-hidden="true"></canvas>
+        <img src="img/headphones.webp" width="900" height="900" fetchpriority="high" decoding="async" alt="A pair of black over-ear headphones lit in purple.">
+        <p class="stage-hint" aria-hidden="true">Drag to turn</p>
       </div>
     </div>
   </section>
@@ -678,8 +665,7 @@ footer a:hover { text-decoration: underline; }
         </ul>
       </div>
     </div>
-      <div class="box has-3d">
-        <div class="box-text">
+      <div class="box">
         <h2 id="download-title">Ready when you are.</h2>
         <p class="section-lede" style="margin-inline:auto">Download the installer, run it, and press play. It installs just for you, adds Pulse to the Start menu, and uninstalls cleanly from Windows Settings.</p>
         <div class="cta">
@@ -690,11 +676,6 @@ footer a:hover { text-decoration: underline; }
           <a class="btn btn-ghost" href="docs/">Read the docs</a>
         </div>
         <small>Windows may show "Windows protected your PC" the first time, as it does for any new app without a paid signing certificate. Click <em>More info</em>, then <em>Run anyway</em>. The first song you play takes a moment longer while Pulse sets up YouTube playback (about 70 MB, once).</small>
-        </div>
-        <div class="box-3d" aria-hidden="true">
-          <canvas class="phones" id="phones"></canvas>
-          <p class="phones-hint"><span class="for-mouse">Move your cursor, drag to spin, click to pulse</span><span class="for-touch">Drag to spin, tap to pulse</span></p>
-        </div>
       </div>
     </div>
   </section>
@@ -765,7 +746,7 @@ footer a:hover { text-decoration: underline; }
 
 // Gallery: any screenshot opens full size; arrows or swipe go through the rest.
 (function () {
-  var imgs = Array.prototype.slice.call(document.querySelectorAll(".shot img, .hero .window img"));
+  var imgs = Array.prototype.slice.call(document.querySelectorAll(".shot img"));
   if (!imgs.length) return;
   var lb = document.createElement("div");
   lb.className = "lightbox";
@@ -847,36 +828,6 @@ footer a:hover { text-decoration: underline; }
 })();
 </script>
 <script>
-// Hero tilt: the screenshot leans toward the mouse a little (wide screens, mouse only,
-// and not when the system asks for less motion).
-(function () {
-  var win = document.querySelector(".hero .window");
-  if (!win || !window.matchMedia) return;
-  var wide = matchMedia("(min-width: 1100px) and (pointer: fine)");
-  var calm = matchMedia("(prefers-reduced-motion: reduce)");
-  var hero = document.querySelector(".hero");
-  var frame = 0;
-  hero.addEventListener("pointermove", function (e) {
-    if (!wide.matches || calm.matches || frame) return;
-    frame = requestAnimationFrame(function () {
-      frame = 0;
-      var r = win.getBoundingClientRect();
-      var x = Math.min(Math.max((e.clientX - r.left) / r.width, 0), 1);
-      var y = Math.min(Math.max((e.clientY - r.top) / r.height, 0), 1);
-      win.classList.add("is-tracking");
-      win.style.setProperty("--ry", (7 - (x - 0.5) * 6).toFixed(2) + "deg");
-      win.style.setProperty("--rx", (2 - (y - 0.5) * 4).toFixed(2) + "deg");
-      win.style.setProperty("--gx", (x * 100).toFixed(1) + "%");
-      win.style.setProperty("--gy", (y * 100).toFixed(1) + "%");
-      win.style.setProperty("--glare", "1");
-    });
-  });
-  hero.addEventListener("pointerleave", function () {
-    if (frame) { cancelAnimationFrame(frame); frame = 0; }
-    win.classList.remove("is-tracking");
-    ["--ry", "--rx", "--gx", "--gy", "--glare"].forEach(function (k) { win.style.removeProperty(k); });
-  });
-})();
 </script>
 <script>
 // The usage bars grow in when the chart comes into view.
@@ -891,19 +842,17 @@ footer a:hover { text-decoration: underline; }
 <script src="ask.js" defer></script>
 <script src="site.js" defer></script>
 <script>
-// 3D headphones: loaded only when the download section comes near (they're an extra).
+// 3D headphones: loaded after the page itself; the still picture stays if they can't run.
 (function () {
   var c = document.getElementById("phones");
-  if (!c || !("IntersectionObserver" in window)) return;
-  var io = new IntersectionObserver(function (es) {
-    if (!es[0].isIntersecting) return;
-    io.disconnect();
+  if (!c || !window.WebGLRenderingContext) return;
+  function go() {
     import("./headphones.js").then(function (m) {
-      if (m.mount(c)) requestAnimationFrame(function () { c.classList.add("ready"); });
-      else c.parentNode.style.display = "none";
-    }).catch(function () { c.parentNode.style.display = "none"; });
-  }, { rootMargin: "300px" });
-  io.observe(c);
+      if (m.mount(c)) requestAnimationFrame(function () { requestAnimationFrame(function () { c.classList.add("ready"); }); });
+    }).catch(function () {});
+  }
+  function soon() { (window.requestIdleCallback || setTimeout)(go, { timeout: 1500 }); }
+  if (document.readyState === "complete") soon(); else addEventListener("load", soon);
 })();
 </script>
 <script>
