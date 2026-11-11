@@ -42,6 +42,10 @@ pub enum Route {
     Lyrics,
     /// Versions, storage and a self-test, for when something isn't working.
     Diagnostics,
+    /// A playlist someone made public (its id on the accounts server).
+    Public(String),
+    /// Someone's public profile (their username).
+    User(String),
 }
 
 /// A song's lyrics, as far as we know.
@@ -62,6 +66,8 @@ pub enum Page {
     Album { info: AlbumInfo, tracks: Vec<Track> },
     Artist(ArtistPage),
     Song(Box<deezer::SongPage>),
+    Public(Box<crate::account::Public>),
+    User(crate::account::Profile),
 }
 
 impl Page {
@@ -84,6 +90,8 @@ impl Page {
                 }
             }
             Page::Playlist { tracks, .. } | Page::Album { tracks, .. } => tracks.iter_mut().for_each(&mut f),
+            Page::Public(p) => p.tracks.iter_mut().for_each(&mut f),
+            Page::User(_) => {}
             Page::Artist(p) => {
                 p.top.iter_mut().for_each(&mut f);
                 p.songs_like.iter_mut().for_each(&mut f);
@@ -179,6 +187,30 @@ pub struct LocalPlaylist {
     /// When each song was added: song id → Unix time in seconds.
     #[serde(default)]
     pub added: HashMap<String, u64>,
+    /// Its id on the accounts server while it's public.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub public_id: Option<String>,
+    /// What was last sent there (see `LocalPlaylist::fingerprint`).
+    #[serde(default, skip_serializing_if = "is_zero_u64")]
+    pub published: u64,
+}
+
+fn is_zero_u64(n: &u64) -> bool {
+    *n == 0
+}
+
+impl LocalPlaylist {
+    /// Changes when the name or songs change: a public playlist is sent again then.
+    pub fn fingerprint(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        self.name.hash(&mut h);
+        for t in &self.tracks {
+            t.id.hash(&mut h);
+            t.title.hash(&mut h);
+        }
+        h.finish().max(1)
+    }
 }
 
 /// How a song list is filtered and sorted (the bar above playlists).
@@ -513,6 +545,44 @@ fn kept_for_next_time(mut src: StreamSource, track: &Track) -> StreamSource {
     src
 }
 
+/// What a finished account call changes.
+pub enum AccountDone {
+    SignedIn(crate::account::Session),
+    SignedOut,
+    Deleted,
+    Published { name: String, id: String, fingerprint: u64 },
+    Synced { id: String, fingerprint: u64 },
+    Unpublished { id: String },
+    /// Something else that worked: a message to show, and a page to load again.
+    Done { message: String, reload: Option<String> },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AccountMode {
+    SignIn,
+    SignUp,
+    Password,
+    Delete,
+    Bio,
+}
+
+/// The account window's fields.
+pub struct AccountDialog {
+    pub mode: AccountMode,
+    pub username: String,
+    pub password: String,
+    /// The new password (Password), or the password again (SignUp).
+    pub password2: String,
+    pub bio: String,
+    pub error: Option<String>,
+}
+
+impl AccountDialog {
+    pub fn new(mode: AccountMode) -> Self {
+        Self { mode, username: String::new(), password: String::new(), password2: String::new(), bio: String::new(), error: None }
+    }
+}
+
 /// Result of checking an imported song again: (its id, the Deezer song if found now,
 /// else a cover from iTunes if there is one).
 type Rematch = (String, Option<Track>, Option<String>);
@@ -674,6 +744,15 @@ pub struct App {
     pub lyrics: HashMap<String, LyricsState>,
     lyrics_tx: Sender<(String, Result<Option<crate::lyrics::Lyrics>, String>)>,
     lyrics_rx: Receiver<(String, Result<Option<crate::lyrics::Lyrics>, String>)>,
+    /// The sign-in / account window, when open.
+    pub account_dialog: Option<AccountDialog>,
+    account_tx: Sender<Result<AccountDone, String>>,
+    account_rx: Receiver<Result<AccountDone, String>>,
+    /// Account calls still running.
+    pub account_busy: usize,
+    /// Public playlists being sent again (their ids), and when public ones were last checked.
+    syncing: HashSet<String>,
+    synced_at: f64,
     /// What other people search for, by what was typed (filled in the background).
     pub popular_searches: HashMap<String, Vec<String>>,
     popular_rx: Option<(String, Receiver<Vec<String>>)>,
@@ -739,6 +818,7 @@ impl App {
         let (tx, rx) = channel();
         let (views_tx, views_rx) = channel();
         let (download_tx, download_rx) = channel();
+        let (account_tx, account_rx) = channel();
         let (prefetch_failed_tx, prefetch_failed_rx) = channel();
         let (featured_tx, featured_rx) = channel();
         let (lyrics_tx, lyrics_rx) = channel();
@@ -816,6 +896,12 @@ impl App {
             lyrics_rx,
             artist_lookup: None,
             popular_searches: HashMap::new(),
+            account_dialog: None,
+            account_tx,
+            account_rx,
+            account_busy: 0,
+            syncing: HashSet::new(),
+            synced_at: 0.0,
             popular_rx: None,
             cache_used: HashMap::new(),
             song_tracks: HashMap::new(),
@@ -885,6 +971,12 @@ impl App {
                 "queue" => Route::Queue,
                 "settings" => Route::Settings,
                 "liked-albums" => Route::LikedAlbums,
+                "signup" => {
+                    app.account_dialog = Some(AccountDialog::new(AccountMode::SignUp));
+                    Route::Home
+                }
+                p if p.starts_with("public:") => Route::Public(p[7..].to_string()),
+                p if p.starts_with("user:") => Route::User(p[5..].to_string()),
                 "import" => {
                     app.import_open = true;
                     app.import_url = std::env::var("PULSE_DEBUG_IMPORT").unwrap_or_default();
@@ -1014,6 +1106,8 @@ impl App {
             Route::Album(id) => format!("album:{id}"),
             Route::Artist(id) => format!("artist:{id}"),
             Route::Mix(id) => format!("mix:{id}"),
+            Route::Public(id) => format!("public:{id}"),
+            Route::User(name) => format!("user:{name}"),
             Route::Song(id) if deezer::is_deezer_id(id.trim_start_matches("dz:")) => {
                 format!("song:{id}")
             }
@@ -1129,6 +1223,8 @@ impl App {
             Route::Album(id) => Box::new(move || deezer::album(&id).map(|(info, tracks)| Page::Album { info, tracks })),
             Route::Artist(id) => Box::new(move || deezer::artist_page(&id).map(Page::Artist)),
             Route::Mix(id) => Box::new(move || deezer::mix(&id).map(Page::Tracks)),
+            Route::Public(id) => Box::new(move || crate::account::playlist(&id).map(|p| Page::Public(Box::new(p)))),
+            Route::User(name) => Box::new(move || crate::account::profile(&name).map(Page::User)),
             Route::Song(id) => {
                 let Some(n) = id.strip_prefix("dz:").and_then(|n| n.parse::<u64>().ok()) else {
                     return;
@@ -1202,6 +1298,8 @@ impl App {
         self.receive_credits();
         self.receive_artist_lookup(ctx);
         self.receive_popular_searches();
+        self.receive_account(ctx);
+        self.sync_public_playlists(ctx);
         self.receive_import(ctx);
         self.receive_rematches();
         self.run_featured(ctx);
@@ -1316,6 +1414,11 @@ impl App {
     pub fn submit_search(&mut self, ctx: &egui::Context) {
         let q = self.search_text.trim().to_string();
         if q.is_empty() {
+            return;
+        }
+        // A pasted Pulse link opens what it points at.
+        if self.open_link(&q, ctx) {
+            self.search_text.clear();
             return;
         }
         self.navigate(Route::Search(q), ctx);
@@ -2160,6 +2263,12 @@ impl App {
     /// Starts importing the playlist at `import_url`.
     pub fn start_import(&mut self, ctx: &egui::Context) {
         let url = self.import_url.trim().to_string();
+        // A Pulse playlist link opens its page (save it or copy it from there).
+        if self.open_link(&url, ctx) {
+            self.import_open = false;
+            self.import_url.clear();
+            return;
+        }
         if let Err(e) = crate::import::detect(&url) {
             self.toast(&e, ctx);
             return;
@@ -2224,7 +2333,7 @@ impl App {
                 let total = imp.tracks.len();
                 let tracks: Vec<Track> = imp.tracks.into_iter().map(|(t, _)| t).collect();
                 let added = tracks.iter().map(|t| (t.id.clone(), now)).collect();
-                self.saved.playlists.push(LocalPlaylist { name: name.clone(), tracks, cover: None, added });
+                self.saved.playlists.push(LocalPlaylist { name: name.clone(), tracks, cover: None, added, ..Default::default() });
                 let i = self.saved.playlists.len() - 1;
                 self.import_open = false;
                 self.import_url.clear();
@@ -2352,7 +2461,7 @@ impl App {
         let added = first.iter().map(|t| (t.id.clone(), now_unix())).collect();
         let mut seen = HashSet::new();
         let tracks = first.into_iter().filter(|t| seen.insert(t.id.clone())).collect();
-        self.saved.playlists.push(LocalPlaylist { name: name.clone(), tracks, cover: None, added });
+        self.saved.playlists.push(LocalPlaylist { name: name.clone(), tracks, cover: None, added, ..Default::default() });
         self.toast(&format!("Created “{name}”"), ctx);
         self.navigate(Route::Local(self.saved.playlists.len() - 1), ctx);
     }
@@ -2380,6 +2489,163 @@ impl App {
 
     pub fn playlist_names(&self) -> Vec<String> {
         self.saved.playlists.iter().map(|p| p.name.clone()).collect()
+    }
+
+    // ------------------------------------------------------------ accounts
+
+    /// Runs an account call in the background; its result is applied in `receive_account`.
+    pub fn account_job(&mut self, ctx: &egui::Context, job: impl FnOnce() -> Result<AccountDone, String> + Send + 'static) {
+        self.account_busy += 1;
+        if let Some(d) = &mut self.account_dialog {
+            d.error = None;
+        }
+        let (tx, ctx) = (self.account_tx.clone(), ctx.clone());
+        std::thread::spawn(move || {
+            let _ = tx.send(job());
+            ctx.request_repaint();
+        });
+    }
+
+    fn receive_account(&mut self, ctx: &egui::Context) {
+        while let Ok(r) = self.account_rx.try_recv() {
+            self.account_busy = self.account_busy.saturating_sub(1);
+            match r {
+                Err(e) => match &mut self.account_dialog {
+                    Some(d) => d.error = Some(e),
+                    None => self.toast(&e, ctx),
+                },
+                Ok(done) => self.account_done(done, ctx),
+            }
+        }
+    }
+
+    fn account_done(&mut self, done: AccountDone, ctx: &egui::Context) {
+        use crate::i18n::tr;
+        match done {
+            AccountDone::SignedIn(s) => {
+                self.account_dialog = None;
+                self.toast(&format!("{} @{}", tr("Signed in as"), s.username), ctx);
+            }
+            AccountDone::SignedOut => self.toast(tr("Signed out"), ctx),
+            AccountDone::Deleted => {
+                for p in &mut self.saved.playlists {
+                    p.public_id = None;
+                    p.published = 0;
+                }
+                self.account_dialog = None;
+                self.toast(tr("Your account was deleted"), ctx);
+            }
+            AccountDone::Published { name, id, fingerprint } => {
+                if let Some(p) = self.saved.playlists.iter_mut().find(|p| p.name == name && p.public_id.is_none()) {
+                    p.public_id = Some(id.clone());
+                    p.published = fingerprint;
+                }
+                ctx.copy_text(crate::account::playlist_link(&id));
+                self.toast(tr("Your playlist is public. Link copied."), ctx);
+                self.save_now = true;
+            }
+            AccountDone::Synced { id, fingerprint } => {
+                self.syncing.remove(&id);
+                if let Some(p) = self.saved.playlists.iter_mut().find(|p| p.public_id.as_deref() == Some(id.as_str())) {
+                    p.published = fingerprint;
+                }
+                self.cache.remove(&format!("public:{id}"));
+            }
+            AccountDone::Unpublished { id } => {
+                if let Some(p) = self.saved.playlists.iter_mut().find(|p| p.public_id.as_deref() == Some(id.as_str())) {
+                    p.public_id = None;
+                    p.published = 0;
+                }
+                self.cache.remove(&format!("public:{id}"));
+                self.toast(tr("Your playlist is private again"), ctx);
+                self.save_now = true;
+            }
+            AccountDone::Done { message, reload } => {
+                self.account_dialog = None;
+                if let Some(key) = reload {
+                    self.cache.remove(&key);
+                }
+                if !message.is_empty() {
+                    self.toast(&message, ctx);
+                }
+            }
+        }
+    }
+
+    /// Makes your playlist number `i` public.
+    pub fn publish_playlist(&mut self, i: usize, ctx: &egui::Context) {
+        if crate::account::session().is_none() {
+            self.account_dialog = Some(AccountDialog::new(AccountMode::SignUp));
+            return;
+        }
+        let Some(p) = self.saved.playlists.get(i) else { return };
+        let (name, tracks, fingerprint) = (p.name.clone(), p.tracks.clone(), p.fingerprint());
+        self.account_job(ctx, move || crate::account::publish(&name, &tracks).map(|id| AccountDone::Published { name, id, fingerprint }));
+    }
+
+    pub fn unpublish_playlist(&mut self, i: usize, ctx: &egui::Context) {
+        let Some(id) = self.saved.playlists.get(i).and_then(|p| p.public_id.clone()) else { return };
+        self.account_job(ctx, move || crate::account::unpublish(&id).map(|_| AccountDone::Unpublished { id }));
+    }
+
+    /// Public playlists you changed are sent again (checked every few seconds, so a run of
+    /// edits goes up once).
+    fn sync_public_playlists(&mut self, ctx: &egui::Context) {
+        let now = ctx.input(|i| i.time);
+        if now - self.synced_at < 4.0 || crate::account::session().is_none() {
+            return;
+        }
+        self.synced_at = now;
+        let changed: Vec<(String, String, Vec<Track>, u64)> = self
+            .saved
+            .playlists
+            .iter()
+            .filter_map(|p| {
+                let id = p.public_id.clone()?;
+                let f = p.fingerprint();
+                (f != p.published && !self.syncing.contains(&id)).then(|| (id, p.name.clone(), p.tracks.clone(), f))
+            })
+            .collect();
+        for (id, name, tracks, fingerprint) in changed {
+            self.syncing.insert(id.clone());
+            self.account_busy += 1;
+            let (tx, ctx) = (self.account_tx.clone(), ctx.clone());
+            std::thread::spawn(move || {
+                let r = match crate::account::update(&id, &name, &tracks) {
+                    Ok(()) => Ok(AccountDone::Synced { id, fingerprint }),
+                    // Deleted on the server (or hidden): it's private now.
+                    Err(e) if e.contains("isn't public") => Ok(AccountDone::Unpublished { id }),
+                    Err(e) => Err(e),
+                };
+                let _ = tx.send(r);
+                ctx.request_repaint();
+            });
+        }
+    }
+
+    /// Opens a pasted Pulse playlist or profile link. False if it isn't one.
+    pub fn open_link(&mut self, text: &str, ctx: &egui::Context) -> bool {
+        match crate::account::read_link(text) {
+            Some(crate::account::Link::Playlist(id)) => self.navigate(Route::Public(id), ctx),
+            Some(crate::account::Link::Profile(name)) => self.navigate(Route::User(name), ctx),
+            None => return false,
+        }
+        true
+    }
+
+    /// Copies a public playlist into your own playlists.
+    pub fn save_copy(&mut self, p: &crate::account::Public, ctx: &egui::Context) {
+        let now = now_unix();
+        let mut name = p.name.clone();
+        let mut n = 2;
+        while self.saved.playlists.iter().any(|x| x.name == name) {
+            name = format!("{} ({n})", p.name);
+            n += 1;
+        }
+        let added = p.tracks.iter().map(|t| (t.id.clone(), now)).collect();
+        self.saved.playlists.push(LocalPlaylist { name: name.clone(), tracks: p.tracks.clone(), cover: None, added, public_id: None, published: 0 });
+        self.save_now = true;
+        self.toast(&format!("{} “{name}”", crate::i18n::tr("Saved a copy:")), ctx);
     }
 
     /// Follows an artist, or stops following them.

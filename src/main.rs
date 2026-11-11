@@ -1,6 +1,7 @@
 // Hide the black console window on Windows for release builds.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod account;
 mod app;
 mod artcache;
 mod audio;

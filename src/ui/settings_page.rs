@@ -14,9 +14,15 @@ pub fn settings_page(app: &mut App, ui: &mut Ui) {
     page_title(ui, tr("Settings"), None);
     let before = app.saved.settings.clone();
     let autoplay_before = app.saved.autoplay;
-    let s = &mut app.saved.settings;
     let max_w = ui.available_width().min(860.0);
     ui.set_max_width(max_w);
+
+    // ------------------------------------------------------------ Account
+    if crate::account::available() {
+        section(ui, tr("Account"));
+        super::online::account_settings(app, ui, &|ui, title, body, control| row(ui, title, body, |ui| control(ui)));
+    }
+    let s = &mut app.saved.settings;
 
     // ------------------------------------------------------------ Language
     section(ui, tr("Language"));

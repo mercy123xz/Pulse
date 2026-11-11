@@ -174,6 +174,8 @@ pub struct SearchResults {
     pub playlists: Vec<PlaylistInfo>,
     /// When the top result is an artist: who their listeners also play, and songs like theirs.
     pub around: Option<(String, Vec<ArtistInfo>, Vec<Track>)>,
+    /// Pulse users whose names start with what was typed.
+    pub users: Vec<crate::account::User>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -675,13 +677,14 @@ pub fn search(q: &str) -> Result<SearchResults, String> {
 
 /// Songs, artists, albums and playlists, asked for all at once.
 fn search_once(q: &str) -> Result<SearchResults, String> {
-    let (t, artists, albums, playlists) = std::thread::scope(|s| {
+    let (t, artists, albums, playlists, users) = std::thread::scope(|s| {
         // More than are shown, so the best known one is among them (see `rank_artists`).
         let artists = s.spawn(|| get::<List<DzArtist>>("/search/artist", &[("q", q), ("limit", "30")]).unwrap_or_default());
         let albums = s.spawn(|| get::<List<DzAlbum>>("/search/album", &[("q", q), ("limit", "24")]).unwrap_or_default());
         let playlists = s.spawn(|| get::<List<DzPlaylist>>("/search/playlist", &[("q", q), ("limit", "12")]).unwrap_or_default());
+        let users = s.spawn(|| crate::account::search(q));
         let t = get::<List<DzTrack>>("/search/track", &[("q", q), ("limit", "40")]);
-        (t, artists.join().unwrap_or_default(), albums.join().unwrap_or_default(), playlists.join().unwrap_or_default())
+        (t, artists.join().unwrap_or_default(), albums.join().unwrap_or_default(), playlists.join().unwrap_or_default(), users.join().unwrap_or_default())
     });
     let mut ranked = rank_artists(q, artists.data.into_iter().map(ArtistInfo::from).collect());
     ranked.truncate(12);
@@ -698,6 +701,7 @@ fn search_once(q: &str) -> Result<SearchResults, String> {
         tracks: tracks(t?),
         artists: ranked,
         around,
+        users,
         albums: albums.data.into_iter().map(|a| album_info(a, None)).collect(),
         playlists: playlists.data.iter().map(playlist_info).collect(),
     })

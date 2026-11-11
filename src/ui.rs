@@ -9,6 +9,7 @@ use crate::widgets::*;
 
 mod diag_page;
 mod lyrics_page;
+mod online;
 pub mod mini;
 mod personal;
 mod settings_page;
@@ -872,6 +873,8 @@ fn page(app: &mut App, ui: &mut Ui) {
         Route::Mix(id) => personal::mix_page(app, ui, &id),
         Route::Song(id) => song_page::song_page(app, ui, &id),
         Route::Profile => personal::profile_page(app, ui),
+        Route::Public(_) => online::public_page(app, ui),
+        Route::User(_) => online::user_page(app, ui),
         Route::LocalFiles => {
             if app.local_scanning && app.local_files.is_empty() {
                 page_title(ui, "Local Files", None);
@@ -1157,12 +1160,17 @@ fn playlist_grid(app: &mut App, ui: &mut Ui, playlists: &[PlaylistInfo], rows: O
             CardClick::None => {}
         }
     });
+    // Pulse playlists (public ones) and Deezer's.
+    let route = |id: String| match id.strip_prefix(crate::account::PREFIX) {
+        Some(p) => Route::Public(p.to_string()),
+        None => Route::Playlist(id),
+    };
     if let Some(id) = preview {
-        app.preload(Route::Playlist(id), &ctx);
+        app.preload(route(id), &ctx);
     }
     match action {
-        Some((id, false)) => app.navigate(Route::Playlist(id), &ctx),
-        Some((id, true)) => open_and_play(app, Route::Playlist(id), &ctx),
+        Some((id, false)) => app.navigate(route(id), &ctx),
+        Some((id, true)) => open_and_play(app, route(id), &ctx),
         None => {}
     }
 }
@@ -1382,6 +1390,17 @@ fn search(app: &mut App, ui: &mut Ui, q: &str) {
                 section_title(ui, title, None);
                 album_grid(app, ui, list, if all { Some(1) } else { None });
             }
+        }
+        if all && !r.users.is_empty() {
+            section_title(ui, "Profiles", None);
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = vec2(10.0, 10.0);
+                for u in r.users.iter().take(8) {
+                    if ghost_button(ui, icon::USER, &format!("@{}", u.username)).clicked() {
+                        app.navigate(Route::User(u.username.clone()), &ctx);
+                    }
+                }
+            });
         }
         if (all || filter == 6) && !r.playlists.is_empty() {
             section_title(ui, "Playlists", None);
@@ -1858,6 +1877,9 @@ fn local_collection(app: &mut App, ui: &mut Ui, title: &str, sub: &str, glyph: &
                 }
             });
         }
+    }
+    if let Some(i) = playlist {
+        online::publish_row(app, ui, i);
     }
     if tracks.is_empty() {
         let body = match (&app.route, playlist) {
@@ -2449,6 +2471,7 @@ fn dialogs(app: &mut App, ctx: &egui::Context) {
     restore_dialog(app, ctx);
     credits_dialog(app, ctx);
     import_dialog(app, ctx);
+    online::account_dialog(app, ctx);
     personal::profile_dialog(app, ctx);
     if let Some(idx) = app.confirm_delete.take() {
         let name = app.saved.playlists.get(idx).map(|p| p.name.clone()).unwrap_or_default();
