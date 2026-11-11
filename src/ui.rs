@@ -1052,11 +1052,15 @@ fn welcome_banner(ui: &mut Ui) {
     ui.painter().text(rect.right_center() - vec2(40.0, 0.0), Align2::RIGHT_CENTER, icon::VINYL_RECORD, regular(96.0), pal().accent_soft.gamma_multiply(0.25));
 }
 
-/// Today's top songs, then rows built from what you play ("Listeners of X also listen
-/// to", "Songs like Y"); until you've played something, popular albums, artists and playlists.
+/// Rows built from your artists and what you play ("Listeners of X also listen to",
+/// "Songs like Y") first, then today's top songs; until there are any, top songs and
+/// popular albums, artists and playlists.
 fn home_discovery(app: &mut App, ui: &mut Ui) {
     with_remote(app, ui, |app, ui, page| {
         let Page::Home(chart) = page else { return };
+        for (k, row) in chart.for_you.iter().enumerate() {
+            suggestion_row(app, ui, &format!("home_for_you_{k}"), row);
+        }
         if section_title(ui, "Top songs right now", Some("See all")) {
             app.chart_genre = (0, "All genres".into());
             let ctx = ui.ctx().clone();
@@ -1064,9 +1068,6 @@ fn home_discovery(app: &mut App, ui: &mut Ui) {
         }
         tracks_block(app, ui, "home_top", &chart.tracks);
         if !chart.for_you.is_empty() {
-            for (k, row) in chart.for_you.iter().enumerate() {
-                suggestion_row(app, ui, &format!("home_for_you_{k}"), row);
-            }
             return;
         }
         if !chart.albums.is_empty() {
