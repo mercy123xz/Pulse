@@ -268,6 +268,13 @@ fn sidebar(app: &mut App, ui: &mut Ui) {
     if nav_item_art(ui, Some(LIKED_ART), icon::HEART, "Liked Songs", app.route == Route::Liked, Some(liked_n)).clicked() {
         app.navigate(Route::Liked, &ctx);
     }
+    let (albums_n, lists_n) = (app.saved.liked_albums.len(), app.saved.liked_playlists.len());
+    if nav_item(ui, icon::VINYL_RECORD, "Liked Albums", app.route == Route::LikedAlbums, Some(albums_n)).clicked() {
+        app.navigate(Route::LikedAlbums, &ctx);
+    }
+    if nav_item(ui, icon::PLAYLIST, "Liked Playlists", app.route == Route::LikedPlaylists, Some(lists_n)).clicked() {
+        app.navigate(Route::LikedPlaylists, &ctx);
+    }
     if nav_item(ui, icon::CLOCK_COUNTER_CLOCKWISE, "Recently Played", app.route == Route::Recent, None).clicked() {
         app.navigate(Route::Recent, &ctx);
     }
@@ -405,6 +412,8 @@ fn nav_item_art(ui: &mut Ui, art: Option<&str>, glyph: &str, label: &str, select
         let full = tr(label);
         let short = tr(match label {
             "Liked Songs" => "Liked",
+            "Liked Albums" => "Albums",
+            "Liked Playlists" => "Lists",
             "Recently Played" => "Recent",
             "Local Files" => "Files",
             "Create playlist" => "New",
@@ -782,6 +791,24 @@ fn page(app: &mut App, ui: &mut Ui) {
             let tracks = app.saved.liked.clone();
             let sub = song_count(tracks.len());
             local_collection(app, ui, "Liked Songs", &sub, icon::HEART, &tracks, None);
+        }
+        Route::LikedAlbums => {
+            page_title(ui, "Liked Albums", None);
+            let list = app.saved.liked_albums.clone();
+            if list.is_empty() {
+                empty_state(ui, icon::VINYL_RECORD, "No liked albums yet", "Tap the heart on an album's page to save it here.", None);
+            } else {
+                album_grid(app, ui, &list, None);
+            }
+        }
+        Route::LikedPlaylists => {
+            page_title(ui, "Liked Playlists", None);
+            let list = app.saved.liked_playlists.clone();
+            if list.is_empty() {
+                empty_state(ui, icon::PLAYLIST, "No liked playlists yet", "Tap the heart on a playlist's page to save it here.", None);
+            } else {
+                playlist_grid(app, ui, &list, None);
+            }
         }
         Route::Recent => {
             let tracks = app.saved.recent.clone();
@@ -1209,7 +1236,10 @@ fn search(app: &mut App, ui: &mut Ui, q: &str) {
             }
         }
         if (all || filter == 2) && !r.artists.is_empty() {
-            section_title(ui, "Artists", None);
+            // On "All": one row of the top artists, with "See all" for the rest.
+            if section_title(ui, if all { "Top artists" } else { "Artists" }, all.then_some("See all")) {
+                ui.data_mut(|d| d.insert_temp(id, 2u8));
+            }
             artist_grid(app, ui, &r.artists, if all { Some(1) } else { None });
         }
         // Searched for an artist: who their listeners also play.
@@ -1431,7 +1461,16 @@ fn remote_playlist(app: &mut App, ui: &mut Ui) {
         app.note_visit(crate::app::Place::Playlist(info.id.clone()), &info.title, &format!("Playlist · {}", info.creator), info.picture.as_deref(), false);
         let ctx = ui.ctx().clone();
         autoplay_page(app, &ctx, tracks);
-        action_row(app, ui, tracks);
+        ui.horizontal(|ui| {
+            action_row(app, ui, tracks);
+            let liked = app.saved.liked_playlists.iter().any(|p| p.id == info.id);
+            if save_heart(ui, liked).clicked() {
+                // The page knows the real number of songs; lists sometimes don't.
+                let mut info = info.clone();
+                info.nb_tracks = info.nb_tracks.max(tracks.len() as u64);
+                app.toggle_playlist(&info, &ctx);
+            }
+        });
         tracks_block(app, ui, "playlist", tracks);
     });
 }
@@ -1478,6 +1517,10 @@ fn album_page(app: &mut App, ui: &mut Ui) {
         autoplay_page(app, &ctx, tracks);
         ui.horizontal(|ui| {
             action_row(app, ui, tracks);
+            let liked = app.saved.liked_albums.iter().any(|a| a.id == info.id);
+            if save_heart(ui, liked).clicked() {
+                app.toggle_album(info, &ctx);
+            }
             if linked && ghost_button(ui, icon::USER, &info.artist.name).clicked() {
                 app.navigate(Route::Artist(info.artist.id.clone()), &ctx);
             }
@@ -1489,6 +1532,15 @@ fn album_page(app: &mut App, ui: &mut Ui) {
             ui.label(RichText::new(format!("{date}  ·  {label}")).font(regular(12.0)).color(pal().text_muted));
         }
     });
+}
+
+/// The heart beside Play on an album or playlist page: saves it to your library.
+fn save_heart(ui: &mut Ui, liked: bool) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(Vec2::splat(40.0), Sense::click());
+    resp_selected(ui, &resp, liked, "Save to your library");
+    let (font, col) = if liked { (filled_icon(24.0), pal().accent_soft) } else { (regular(24.0), if resp.hovered() { pal().text } else { pal().text_muted }) };
+    paint_icon(ui.painter(), rect.center(), icon::HEART, font, col);
+    resp.on_hover_text(tr(if liked { "Remove from your library" } else { "Save to your library" })).on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
 fn action_row(app: &mut App, ui: &mut Ui, tracks: &[Track]) {
@@ -2374,6 +2426,14 @@ fn dialogs(app: &mut App, ctx: &egui::Context) {
     }
 }
 
+/// A dialog's button: filled with the accent color when it's the main one.
+fn dialog_button(ui: &mut Ui, label: &str, primary: bool, enabled: bool) -> egui::Response {
+    let text = RichText::new(label).font(semi(13.5)).color(if primary { Color32::WHITE } else { pal().text });
+    let b =
+        egui::Button::new(text).min_size(vec2(96.0, 36.0)).corner_radius(CornerRadius::same(18)).fill(if primary { pal().accent } else { pal().surface_hover });
+    ui.add_enabled(enabled, b)
+}
+
 /// The "Import a playlist" window.
 fn import_dialog(app: &mut App, ctx: &egui::Context) {
     if !app.import_open {
@@ -2381,57 +2441,99 @@ fn import_dialog(app: &mut App, ctx: &egui::Context) {
     }
     let mut close = false;
     let mut start = false;
-    let modal = egui::Modal::new(egui::Id::new("import")).show(ctx, |ui| {
-        ui.set_width(440.0);
-        ui.label(RichText::new(tr("Import a playlist")).font(heavy(20.0)).color(pal().text));
-        ui.add_space(4.0);
+    let modal = egui::Modal::new(egui::Id::new("import")).frame(dialog_frame()).show(ctx, |ui| {
+        ui.set_width(500.0);
+        ui.spacing_mut().item_spacing.y = 0.0;
+        ui.label(RichText::new(tr("Import a playlist")).font(heavy(22.0)).color(pal().text));
+        ui.add_space(8.0);
         ui.label(
-            RichText::new(tr("Paste a link to a playlist or album from YouTube, Spotify or SoundCloud. Pulse finds each song and makes a playlist of it."))
-                .font(regular(12.5))
+            RichText::new(tr("Paste a link to a playlist or album. Pulse finds each song and makes a playlist of it."))
+                .font(regular(13.5))
                 .color(pal().text_muted),
         );
-        ui.label(
-            RichText::new(tr("Spotify playlist over 100 songs? Open it in Spotify, press Ctrl+A, then Ctrl+C, and paste here."))
-                .font(regular(12.5))
-                .color(pal().text_muted),
-        );
-        ui.add_space(10.0);
+        ui.add_space(18.0);
         if let Some(job) = &app.import_running {
             let p = job.progress.lock().unwrap().clone();
             ui.horizontal(|ui| {
                 ui.spinner();
+                ui.add_space(4.0);
                 let count = if p.total > 0 { format!("  {} / {}", p.done, p.total) } else { String::new() };
-                ui.label(RichText::new(format!("{}{count}", tr(&p.status))).font(med(13.0)).color(pal().text));
+                ui.label(RichText::new(format!("{}{count}", tr(&p.status))).font(med(13.5)).color(pal().text));
             });
+            ui.add_space(12.0);
             if p.total > 0 {
                 ui.add(egui::ProgressBar::new(p.done as f32 / p.total as f32).desired_height(6.0).fill(pal().accent));
             }
-            ui.add_space(10.0);
+            ui.add_space(22.0);
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if ui.button(tr("Cancel")).clicked() {
+                if dialog_button(ui, tr("Cancel"), false, true).clicked() {
                     app.cancel_import();
                 }
             });
             return;
         }
-        let r = ui.add(egui::TextEdit::singleline(&mut app.import_url).hint_text("https://open.spotify.com/playlist/…").desired_width(f32::INFINITY));
+        // The box: outlined, and tall enough to show a pasted list of songs.
+        let songs = crate::import::spotify_track_ids(&app.import_url).len();
+        let focus_id = egui::Id::new("import_box");
+        let focused = ui.memory(|m| m.has_focus(focus_id));
+        let r = Frame::new()
+            .fill(pal().bg)
+            .stroke(Stroke::new(if focused { 1.5 } else { 1.0 }, if focused { pal().accent } else { pal().border }))
+            .corner_radius(CornerRadius::same(10))
+            .inner_margin(Margin::symmetric(12, 10))
+            .show(ui, |ui| {
+                egui::ScrollArea::vertical().max_height(84.0).show(ui, |ui| {
+                    ui.add(
+                        egui::TextEdit::multiline(&mut app.import_url)
+                            .id(focus_id)
+                            .frame(egui::Frame::NONE)
+                            .hint_text("https://open.spotify.com/playlist/…")
+                            .desired_rows(if songs > 1 { 4 } else { 1 })
+                            .desired_width(f32::INFINITY),
+                    )
+                })
+                .inner
+            })
+            .inner;
         if app.import_url.is_empty() && !r.has_focus() {
             r.request_focus();
         }
-        let enter = r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
-        ui.add_space(4.0);
+        // Enter starts the import (the line break it typed is dropped).
+        let enter = r.has_focus() && ui.input(|i| i.key_pressed(Key::Enter));
+        if enter {
+            app.import_url = app.import_url.trim().to_string();
+        }
+        ui.add_space(10.0);
         ui.horizontal(|ui| {
-            for (glyph, name) in [(icon::YOUTUBE_LOGO, "YouTube"), (icon::SPOTIFY_LOGO, "Spotify"), (icon::SOUNDCLOUD_LOGO, "SoundCloud")] {
-                ui.label(RichText::new(format!("{glyph} {name}")).font(regular(12.0)).color(pal().text_faint));
+            ui.spacing_mut().item_spacing.x = 16.0;
+            if songs > 1 {
+                ui.label(RichText::new(format!("{} {songs} {}", icon::SPOTIFY_LOGO, tr("Spotify songs ready to import"))).font(med(12.5)).color(pal().accent_soft));
+            } else {
+                for (glyph, name) in [(icon::YOUTUBE_LOGO, "YouTube"), (icon::SPOTIFY_LOGO, "Spotify"), (icon::SOUNDCLOUD_LOGO, "SoundCloud")] {
+                    ui.label(RichText::new(format!("{glyph}  {name}")).font(regular(12.5)).color(pal().text_faint));
+                }
             }
         });
-        ui.add_space(10.0);
+        ui.add_space(16.0);
+        // The tip, set apart in its own box.
+        Frame::new().fill(pal().surface_hover).corner_radius(CornerRadius::same(10)).inner_margin(Margin::symmetric(14, 12)).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.label(RichText::new(tr("Spotify playlist with more than 100 songs?")).font(semi(12.5)).color(pal().text));
+            ui.add_space(4.0);
+            ui.label(
+                RichText::new(tr("A Spotify link only shares the first 100. For all of them: open the playlist in the Spotify app, click a song, press Ctrl+A, then Ctrl+C, and paste here."))
+                    .font(regular(12.5))
+                    .color(pal().text_muted),
+            );
+        });
+        ui.add_space(22.0);
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            ui.spacing_mut().item_spacing.x = 10.0;
             let ok = !app.import_url.trim().is_empty();
-            if ui.add_enabled(ok, egui::Button::new(RichText::new(tr("Import")).color(Color32::WHITE)).fill(pal().accent)).clicked() || (enter && ok) {
+            if dialog_button(ui, tr("Import"), true, ok).clicked() || (enter && ok) {
                 start = true;
             }
-            if ui.button(tr("Cancel")).clicked() {
+            if dialog_button(ui, tr("Cancel"), false, true).clicked() {
                 close = true;
             }
         });

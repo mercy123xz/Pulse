@@ -20,12 +20,8 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
     }
     // "Always on top" is set when the window is made: changing it makes a new one.
     let id = ViewportId::from_hash_of(("mini_player", s.mini_on_top));
-    let mut b = ViewportBuilder::default()
-        .with_title("Pulse mini player")
-        .with_inner_size(SIZE)
-        .with_resizable(false)
-        .with_decorations(false)
-        .with_taskbar(false);
+    let mut b =
+        ViewportBuilder::default().with_title("Pulse mini player").with_inner_size(SIZE).with_resizable(false).with_decorations(false).with_taskbar(false);
     if let Some(p) = s.mini_pos {
         b = b.with_position(p);
     }

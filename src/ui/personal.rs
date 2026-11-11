@@ -137,7 +137,8 @@ pub fn home(app: &mut App, ui: &mut Ui) {
         let items: Vec<(usize, &Visit)> = top.iter().enumerate().collect();
         card_grid(ui, &items, Some(1), |ui, w, (i, a)| {
             let sub = format!("{} {}", a.title, tr("and similar artists"));
-            let info = CardInfo { id: egui::Id::new(("mix", *i)), art: a.image.as_deref(), title: &labels[*i], subtitle: sub, round: false, badge: Some(tr("Orbit")) };
+            let info =
+                CardInfo { id: egui::Id::new(("mix", *i)), art: a.image.as_deref(), title: &labels[*i], subtitle: sub, round: false, badge: Some(tr("Orbit")) };
             if let Place::Artist(id) = &a.place {
                 match card(ui, w, &info) {
                     CardClick::Open => action = Some((id.clone(), false)),
@@ -249,7 +250,10 @@ pub fn mix_page(app: &mut App, ui: &mut Ui, artist_id: &str) {
         let (kind, title) = if orbit { (tr("Orbit"), orbit_title(&name)) } else { (tr("Radio"), tr("{} Radio").replace("{}", &name)) };
         let n = tracks.len();
         let sub = format!("{name} {} · {n} {}", tr("and similar artists"), tr(if n == 1 { "song" } else { "songs" }));
-        hero(ui, &Hero { editable: false, kind, title: &title, subtitle: &sub, art: image.as_deref(), glyph: icon::PLANET, round: false, banner: None, links: &[] });
+        hero(
+            ui,
+            &Hero { editable: false, kind, title: &title, subtitle: &sub, art: image.as_deref(), glyph: icon::PLANET, round: false, banner: None, links: &[] },
+        );
         app.note_visit(Place::Mix(artist_id.clone()), &title, if orbit { "Orbit" } else { "Radio" }, image.as_deref(), false);
         let ctx = ui.ctx().clone();
         super::autoplay_page(app, &ctx, tracks);
@@ -297,7 +301,11 @@ pub fn profile_page(app: &mut App, ui: &mut Ui) {
     let name_rect = Rect::from_min_size(pos2(tx, pic.bottom() - 30.0 - g.size().y), g.size());
     ui.painter().galley(name_rect.min, g, ON_DARK);
     let n_pl = app.saved.playlists.len();
-    let since = if p.created > 0 { format!(" · {} {}", tr("Member since"), fmt_added(p.created, u64::MAX / 2).rsplit(' ').next().unwrap_or("")) } else { String::new() };
+    let since = if p.created > 0 {
+        format!(" · {} {}", tr("Member since"), fmt_added(p.created, u64::MAX / 2).rsplit(' ').next().unwrap_or(""))
+    } else {
+        String::new()
+    };
     let stats = format!("{n_pl} {} · {} {}{since}", tr(if n_pl == 1 { "playlist" } else { "playlists" }), app.saved.liked.len(), tr("liked songs"));
     paint_line(ui, pos2(tx, pic.bottom() - 20.0), &stats, regular(13.5), ON_DARK_MUTED, tw);
     let name_click = ui.interact(name_rect, egui::Id::new("profile_name"), Sense::click()).on_hover_cursor(egui::CursorIcon::Text);
@@ -330,13 +338,8 @@ pub fn profile_page(app: &mut App, ui: &mut Ui) {
         section_title(ui, "Playlists", None);
         let mut share = None;
         let mut open = None;
-        let names: Vec<(usize, String, usize, Option<String>)> = app
-            .saved
-            .playlists
-            .iter()
-            .enumerate()
-            .map(|(i, pl)| (i, pl.name.clone(), pl.tracks.len(), app.playlist_art(i)))
-            .collect();
+        let names: Vec<(usize, String, usize, Option<String>)> =
+            app.saved.playlists.iter().enumerate().map(|(i, pl)| (i, pl.name.clone(), pl.tracks.len(), app.playlist_art(i))).collect();
         for (i, name, n, art) in &names {
             ui.horizontal(|ui| {
                 let (r, resp) = ui.allocate_exact_size(vec2(48.0, 48.0), Sense::click());
@@ -421,7 +424,11 @@ pub fn profile_dialog(app: &mut App, ctx: &egui::Context) {
                 paint_icon(ui.painter(), r.center(), icon::WAVEFORM, filled_icon(30.0), Color32::WHITE);
                 ui.add_space(8.0);
                 ui.label(RichText::new(tr("Welcome to Pulse")).font(heavy(24.0)).color(pal().text));
-                ui.label(RichText::new(tr("Create your profile. It's saved on this computer only: no email or password.")).font(regular(13.0)).color(pal().text_muted));
+                ui.label(
+                    RichText::new(tr("Create your profile. It's saved on this computer only: no email or password."))
+                        .font(regular(13.0))
+                        .color(pal().text_muted),
+                );
             });
         } else {
             ui.label(RichText::new(tr("Edit profile")).font(heavy(20.0)).color(pal().text));
@@ -452,7 +459,8 @@ pub fn profile_dialog(app: &mut App, ctx: &egui::Context) {
             ui.add_space(12.0);
             ui.vertical(|ui| {
                 ui.label(RichText::new(tr("Username")).font(med(12.5)).color(pal().text_muted));
-                let r = ui.add(egui::TextEdit::singleline(&mut form.name).hint_text(tr("What should we call you?")).char_limit(30).desired_width(f32::INFINITY));
+                let r =
+                    ui.add(egui::TextEdit::singleline(&mut form.name).hint_text(tr("What should we call you?")).char_limit(30).desired_width(f32::INFINITY));
                 if form.welcome && form.name.is_empty() && !r.has_focus() {
                     r.request_focus();
                 }

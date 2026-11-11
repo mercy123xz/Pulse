@@ -306,6 +306,14 @@ struct SpEntity {
     track_list: Vec<SpTrack>,
     #[serde(rename = "coverArt")]
     cover_art: Option<SpCover>,
+    /// A single song's page names its artists here (it has no subtitle).
+    artists: Vec<SpArtist>,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct SpArtist {
+    name: String,
 }
 
 #[derive(Deserialize, Default)]
@@ -337,24 +345,53 @@ fn spotify(url: &str) -> Result<(String, Vec<Item>), String> {
 /// Songs pasted from Spotify (links copied with Ctrl+A, Ctrl+C), read one by one from each
 /// song's public embed page.
 fn spotify_songs(ids: &[String], progress: &dyn Fn(usize, usize), cancel: &AtomicBool) -> Result<(String, Vec<Item>), String> {
-    let mut items = vec![];
-    for (i, id) in ids.iter().enumerate() {
-        if cancel.load(Ordering::Relaxed) {
-            return Err("Import cancelled.".into());
+    use std::sync::atomic::AtomicUsize;
+    // Four pages at a time: a long playlist takes seconds, not minutes.
+    let found: Vec<Mutex<Option<Item>>> = ids.iter().map(|_| Mutex::new(None)).collect();
+    let (next, done) = (AtomicUsize::new(0), AtomicUsize::new(0));
+    std::thread::scope(|s| {
+        let workers: Vec<_> = (0..4)
+            .map(|_| {
+                s.spawn(|| {
+                    loop {
+                        let i = next.fetch_add(1, Ordering::Relaxed);
+                        if i >= ids.len() || cancel.load(Ordering::Relaxed) {
+                            break;
+                        }
+                        *found[i].lock().unwrap() = spotify_song(&ids[i]);
+                        done.fetch_add(1, Ordering::Relaxed);
+                    }
+                })
+            })
+            .collect();
+        while !workers.iter().all(|w| w.is_finished()) {
+            progress(done.load(Ordering::Relaxed), ids.len());
+            std::thread::sleep(std::time::Duration::from_millis(100));
         }
-        progress(i, ids.len());
-        if let Ok(html) = crate::net::get_page(&format!("https://open.spotify.com/embed/track/{id}"))
-            && let Ok((_, found)) = parse_spotify_embed(&html)
-        {
-            items.extend(found);
-        }
-        // Gentle on Spotify: a few pages a second.
-        std::thread::sleep(std::time::Duration::from_millis(150));
+    });
+    if cancel.load(Ordering::Relaxed) {
+        return Err("Import cancelled.".into());
     }
+    let items: Vec<Item> = found.into_iter().filter_map(|m| m.into_inner().ok().flatten()).collect();
     if items.is_empty() {
-        return Err("Pulse couldn't read those Spotify songs.".into());
+        return Err("Pulse couldn't read those Spotify songs. Check your connection and try again.".into());
     }
     Ok(("Spotify songs".into(), items))
+}
+
+/// One song's title and artist from its public embed page (tried twice: Spotify
+/// sometimes answers "slow down").
+fn spotify_song(id: &str) -> Option<Item> {
+    for attempt in 0..2 {
+        if let Ok(html) = crate::net::get_page(&format!("https://open.spotify.com/embed/track/{id}"))
+            && let Ok((_, mut found)) = parse_spotify_embed(&html)
+            && !found.is_empty()
+        {
+            return Some(found.remove(0));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(600 * (attempt + 1)));
+    }
+    None
 }
 
 /// How many songs a public Spotify playlist has, from its page's description
@@ -398,7 +435,8 @@ pub fn parse_spotify_embed(html: &str) -> Result<(String, Vec<Item>), String> {
     if items.is_empty()
         && let Some(title) = e.title
     {
-        items.push(Item { title, artist: e.subtitle.unwrap_or_default(), duration: (e.duration.unwrap_or(0) / 1000) as u32, art: cover, video: None });
+        let artist = e.subtitle.filter(|s| !s.is_empty()).or_else(|| e.artists.first().map(|a| a.name.clone())).unwrap_or_default();
+        items.push(Item { title, artist, duration: (e.duration.unwrap_or(0) / 1000) as u32, art: cover, video: None });
     }
     Ok((name, items))
 }
@@ -556,6 +594,15 @@ mod tests {
         let page = r#"<meta property="og:description" content="Playlist · Spotify · 1,150 items · 2.1M saves">"#;
         assert_eq!(playlist_size_from_page(page), Some(1150));
         assert_eq!(playlist_size_from_page("<html></html>"), None);
+    }
+
+    #[test]
+    fn reads_a_single_spotify_song_page() {
+        // A song's own page: no subtitle, the artists are listed instead (as Spotify serves it).
+        let html = r#"<script id="__NEXT_DATA__" type="application/json">{"props":{"pageProps":{"state":{"data":{"entity":{"type":"track","name":"Beauty And A Beat","title":"Beauty And A Beat","artists":[{"name":"Justin Bieber"},{"name":"Nicki Minaj"}],"duration":227986}}}}}}</script>"#;
+        let (_, items) = parse_spotify_embed(html).unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!((items[0].title.as_str(), items[0].artist.as_str(), items[0].duration), ("Beauty And A Beat", "Justin Bieber", 227));
     }
 
     #[test]

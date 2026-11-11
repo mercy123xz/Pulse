@@ -175,9 +175,7 @@ fn lyrics_body(app: &mut App, ui: &mut Ui, t: &Track, size: f32, place: &str, fo
 
     let center = app.saved.settings.lyrics_center;
     let layout = if center { Layout::top_down(Align::Center) } else { Layout::top_down(Align::Min) };
-    let wrap = |ui: &mut Ui, text: RichText| -> egui::Response {
-        ui.add(egui::Label::new(text).wrap().sense(Sense::click()))
-    };
+    let wrap = |ui: &mut Ui, text: RichText| -> egui::Response { ui.add(egui::Label::new(text).wrap().sense(Sense::click())) };
 
     if lyr.synced.is_empty() {
         // Plain lyrics: no timing, so nothing to highlight.

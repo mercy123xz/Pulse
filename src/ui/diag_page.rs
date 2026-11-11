@@ -59,7 +59,12 @@ pub fn diagnostics_page(app: &mut App, ui: &mut Ui) {
 
     // ------------------------------------------------------------ Self-test
     heading(ui, tr("Self-test"));
-    ui.add(egui::Label::new(RichText::new(tr("Checks that Pulse can reach the services it uses. It only asks each one for something small.")).color(pal().text_muted)).wrap());
+    ui.add(
+        egui::Label::new(
+            RichText::new(tr("Checks that Pulse can reach the services it uses. It only asks each one for something small.")).color(pal().text_muted),
+        )
+        .wrap(),
+    );
     ui.add_space(8.0);
     for (i, service) in SERVICES.iter().enumerate() {
         let check = app.diag.checks.get(i).cloned();

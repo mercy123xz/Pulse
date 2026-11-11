@@ -47,7 +47,20 @@ fn draw(app: &mut App, ui: &mut Ui, t: &Track, credits: Option<&Credits>, album:
         parts.push(format!("{} {}", fmt_thousands(*v), tr("views")));
     }
     let sub = parts.join(" · ");
-    let clicks = hero(ui, &Hero { editable: false, kind: tr("Song"), title: &t.title, subtitle: &sub, art: t.art_big(), glyph: icon::MUSIC_NOTE, round: false, banner: None, links: &names });
+    let clicks = hero(
+        ui,
+        &Hero {
+            editable: false,
+            kind: tr("Song"),
+            title: &t.title,
+            subtitle: &sub,
+            art: t.art_big(),
+            glyph: icon::MUSIC_NOTE,
+            round: false,
+            banner: None,
+            links: &names,
+        },
+    );
     if let Some(i) = clicks.link {
         let a = artists[i];
         if i == 0 {
@@ -93,7 +106,14 @@ fn draw(app: &mut App, ui: &mut Ui, t: &Track, credits: Option<&Credits>, album:
         }
         let names = app.playlist_names();
         dots_menu(ui, 24.0, tr("More options"), |ui| {
-            let mcx = MenuCtx { liked: app.liked_ids.contains(&t.id), playlists: &names, index: None, removable: false, queue_mode: false, downloaded: app.is_downloaded(&t.id) };
+            let mcx = MenuCtx {
+                liked: app.liked_ids.contains(&t.id),
+                playlists: &names,
+                index: None,
+                removable: false,
+                queue_mode: false,
+                downloaded: app.is_downloaded(&t.id),
+            };
             track_menu(ui, t, &mcx, &mut events);
         });
     });

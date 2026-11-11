@@ -107,7 +107,8 @@ pub struct ArtistInfo {
     pub albums: u64,
 }
 
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct AlbumInfo {
     pub id: String,
     pub title: String,
@@ -135,7 +136,8 @@ impl AlbumInfo {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct PlaylistInfo {
     pub id: String,
     pub title: String,

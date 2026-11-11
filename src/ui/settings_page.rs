@@ -21,14 +21,11 @@ pub fn settings_page(app: &mut App, ui: &mut Ui) {
     // ------------------------------------------------------------ Language
     section(ui, tr("Language"));
     row(ui, tr("Choose language"), tr("Changes apply right away."), |ui| {
-        egui::ComboBox::from_id_salt("language")
-            .selected_text(s.language.native_name())
-            .width(170.0)
-            .show_ui(ui, |ui| {
-                for l in Language::ALL {
-                    ui.selectable_value(&mut s.language, l, l.native_name());
-                }
-            });
+        egui::ComboBox::from_id_salt("language").selected_text(s.language.native_name()).width(170.0).show_ui(ui, |ui| {
+            for l in Language::ALL {
+                ui.selectable_value(&mut s.language, l, l.native_name());
+            }
+        });
     });
 
     // ------------------------------------------------------------ Themes
@@ -111,22 +108,38 @@ pub fn settings_page(app: &mut App, ui: &mut Ui) {
         clear = ui.button(tr("Clear cache")).clicked();
     });
     let s = &mut app.saved.settings;
-    row(ui, tr("Space for saved pictures"), tr("Covers and artist photos are kept so they aren't downloaded again. The oldest go first when this fills up."), |ui| {
-        for mb in [100u64, 300, 1000] {
-            let label = if mb >= 1000 { format!("{} GB", mb / 1000) } else { format!("{mb} MB") };
-            if ui.selectable_label(s.art_cache_mb == mb, label).clicked() {
-                s.art_cache_mb = mb;
+    row(
+        ui,
+        tr("Space for saved pictures"),
+        tr("Covers and artist photos are kept so they aren't downloaded again. The oldest go first when this fills up."),
+        |ui| {
+            for mb in [100u64, 300, 1000] {
+                let label = if mb >= 1000 { format!("{} GB", mb / 1000) } else { format!("{mb} MB") };
+                if ui.selectable_label(s.art_cache_mb == mb, label).clicked() {
+                    s.art_cache_mb = mb;
+                }
             }
-        }
-    });
-    row(ui, tr("Space for played songs"), tr("Songs you've played are kept for a while, so they start at once next time. The ones you haven't played for longest go first."), |ui| {
-        for mb in [0u64, 500, 1000, 3000] {
-            let label = if mb == 0 { tr("Off").to_string() } else if mb >= 1000 { format!("{} GB", mb / 1000) } else { format!("{mb} MB") };
-            if ui.selectable_label(s.replay_cache_mb == mb, label).clicked() {
-                s.replay_cache_mb = mb;
+        },
+    );
+    row(
+        ui,
+        tr("Space for played songs"),
+        tr("Songs you've played are kept for a while, so they start at once next time. The ones you haven't played for longest go first."),
+        |ui| {
+            for mb in [0u64, 500, 1000, 3000] {
+                let label = if mb == 0 {
+                    tr("Off").to_string()
+                } else if mb >= 1000 {
+                    format!("{} GB", mb / 1000)
+                } else {
+                    format!("{mb} MB")
+                };
+                if ui.selectable_label(s.replay_cache_mb == mb, label).clicked() {
+                    s.replay_cache_mb = mb;
+                }
             }
-        }
-    });
+        },
+    );
     let offline = s.offline_dir();
     row(ui, tr("Offline storage location"), &offline.display().to_string(), |ui| {
         #[cfg(windows)]
@@ -142,13 +155,20 @@ pub fn settings_page(app: &mut App, ui: &mut Ui) {
 
     // ------------------------------------------------------------ Performance
     section(ui, tr("Performance"));
-    row(ui, tr("Mode"), tr("Gaming Mode pauses the extras while you play a game (Ctrl+G). Ultra-low resource also drops pictures in lists and redraws less. Music plays exactly the same in every mode."), |ui| {
-        for m in [crate::perf::Mode::Normal, crate::perf::Mode::Gaming, crate::perf::Mode::UltraLow] {
-            if ui.selectable_label(s.perf_mode == m, tr(m.label())).clicked() {
-                s.perf_mode = m;
+    row(
+        ui,
+        tr("Mode"),
+        tr(
+            "Gaming Mode pauses the extras while you play a game (Ctrl+G). Ultra-low resource also drops pictures in lists and redraws less. Music plays exactly the same in every mode.",
+        ),
+        |ui| {
+            for m in [crate::perf::Mode::Normal, crate::perf::Mode::Gaming, crate::perf::Mode::UltraLow] {
+                if ui.selectable_label(s.perf_mode == m, tr(m.label())).clicked() {
+                    s.perf_mode = m;
+                }
             }
-        }
-    });
+        },
+    );
     if s.perf_mode != crate::perf::Mode::Normal {
         ui.label(RichText::new(tr("Paused in this mode (tick one to keep it on):")).font(semi(12.5)).color(pal().text_muted));
         for e in crate::perf::Extra::ALL.into_iter().filter(|e| e.off_in(s.perf_mode)) {
@@ -167,9 +187,16 @@ pub fn settings_page(app: &mut App, ui: &mut Ui) {
 
     // ------------------------------------------------------------ Mini player
     section(ui, tr("Mini player"));
-    row(ui, tr("Show the mini player"), tr("A small window with the song and controls that stays on top of games (Ctrl+M). Drag it anywhere. Over a game it shows in borderless or windowed mode, not exclusive full screen."), |ui| {
-        switch(ui, &mut s.mini_open, tr("Show the mini player"));
-    });
+    row(
+        ui,
+        tr("Show the mini player"),
+        tr(
+            "A small window with the song and controls that stays on top of games (Ctrl+M). Drag it anywhere. Over a game it shows in borderless or windowed mode, not exclusive full screen.",
+        ),
+        |ui| {
+            switch(ui, &mut s.mini_open, tr("Show the mini player"));
+        },
+    );
     row(ui, tr("Always on top"), tr("Keep it above other windows."), |ui| {
         switch(ui, &mut s.mini_on_top, tr("Always on top"));
     });
@@ -188,9 +215,16 @@ pub fn settings_page(app: &mut App, ui: &mut Ui) {
     row(ui, tr("Reduce motion"), tr("Turns off moving backgrounds and menu fades."), |ui| {
         switch(ui, &mut s.reduce_motion, tr("Reduce motion"));
     });
-    row(ui, tr("Enable hardware acceleration"), tr("Uses your graphics card to draw Pulse. Leave it on: without it Pulse is slower and some effects are off. Turn off only if the window flickers or stays blank. Restart Pulse to apply."), |ui| {
-        switch(ui, &mut s.hardware_acceleration, tr("Enable hardware acceleration"));
-    });
+    row(
+        ui,
+        tr("Enable hardware acceleration"),
+        tr(
+            "Uses your graphics card to draw Pulse. Leave it on: without it Pulse is slower and some effects are off. Turn off only if the window flickers or stays blank. Restart Pulse to apply.",
+        ),
+        |ui| {
+            switch(ui, &mut s.hardware_acceleration, tr("Enable hardware acceleration"));
+        },
+    );
 
     // ------------------------------------------------------------ Discord
     if crate::discord::available() {
@@ -235,7 +269,9 @@ fn updates_section(app: &mut App, ui: &mut Ui, ctx: &egui::Context) {
     row(
         ui,
         tr("Check for updates"),
-        tr("Once a day, Pulse asks GitHub whether there's a newer version. Nothing is installed until you choose Update now, and only if it's signed by Pulse."),
+        tr(
+            "Once a day, Pulse asks GitHub whether there's a newer version. Nothing is installed until you choose Update now, and only if it's signed by Pulse.",
+        ),
         |ui| {
             switch(ui, &mut app.saved.settings.check_updates, tr("Check for updates"));
         },
@@ -284,7 +320,13 @@ fn ask_backup_file(save: bool) -> Option<std::path::PathBuf> {
 /// and restoring them.
 fn your_data_section(app: &mut App, ui: &mut Ui, ctx: &egui::Context) {
     section(ui, tr("Your data"));
-    ui.add(egui::Label::new(RichText::new(tr("Pulse backs up your likes, playlists and history once a day and keeps the last seven. Backups stay on this PC.")).color(pal().text_muted)).wrap());
+    ui.add(
+        egui::Label::new(
+            RichText::new(tr("Pulse backs up your likes, playlists and history once a day and keeps the last seven. Backups stay on this PC."))
+                .color(pal().text_muted),
+        )
+        .wrap(),
+    );
     ui.add_space(10.0);
     ui.horizontal_wrapped(|ui| {
         if ghost_button(ui, icon::FLOPPY_DISK, "Back up now").clicked() {
@@ -334,7 +376,11 @@ fn your_data_section(app: &mut App, ui: &mut Ui, ctx: &egui::Context) {
                 crate::backup::Kind::BeforeRestore => tr("Before a restore"),
             };
             ui.label(RichText::new(crate::crash::utc(b.made)).font(med(13.0)).color(pal().text));
-            ui.label(RichText::new(format!("{kind} · {} {} · {} {}", b.liked, tr("liked"), b.playlists, tr("playlists"))).font(regular(12.5)).color(pal().text_muted));
+            ui.label(
+                RichText::new(format!("{kind} · {} {} · {} {}", b.liked, tr("liked"), b.playlists, tr("playlists")))
+                    .font(regular(12.5))
+                    .color(pal().text_muted),
+            );
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if ui.add(egui::Button::new(tr("Restore")).corner_radius(14)).clicked() {
                     match crate::backup::read(&b.path) {
@@ -368,7 +414,13 @@ fn themes_section(app: &mut App, ui: &mut Ui) {
             focus_ring(ui, &resp);
             let scheme = if selected { t.scheme_index(&app.saved.settings.scheme) } else { 0 };
             swatch(ui, Rect::from_min_size(rect.min, vec2(176.0, 100.0)), &t.schemes[scheme].palette);
-            let border = if selected { Stroke::new(2.5, pal().accent_soft) } else if resp.hovered() { Stroke::new(1.0, pal().text_muted) } else { Stroke::new(1.0, pal().border) };
+            let border = if selected {
+                Stroke::new(2.5, pal().accent_soft)
+            } else if resp.hovered() {
+                Stroke::new(1.0, pal().text_muted)
+            } else {
+                Stroke::new(1.0, pal().border)
+            };
             ui.painter().rect_stroke(Rect::from_min_size(rect.min, vec2(176.0, 100.0)), r_md(), border, egui::StrokeKind::Outside);
             let name = if t.builtin { t.name.clone() } else { format!("{}  ·  {}", t.name, tr("custom")) };
             paint_line(ui, pos2(rect.left() + 2.0, rect.top() + 108.0), &name, med(13.0), pal().text, 172.0);

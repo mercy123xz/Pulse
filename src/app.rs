@@ -20,6 +20,9 @@ pub enum Route {
     Charts,
     Search(String),
     Liked,
+    /// Albums and playlists you saved with the heart on their page.
+    LikedAlbums,
+    LikedPlaylists,
     Recent,
     Queue,
     Playlist(String),
@@ -361,6 +364,9 @@ pub struct Saved {
     pub profile: Profile,
     /// Songs whose featured artists were already looked up.
     pub featured_checked: HashSet<String>,
+    /// Albums and playlists saved with the heart on their page, newest first.
+    pub liked_albums: Vec<deezer::AlbumInfo>,
+    pub liked_playlists: Vec<deezer::PlaylistInfo>,
     /// Artist pages found by name for songs that didn't know them (name → Deezer artist id).
     pub artist_ids: HashMap<String, String>,
     /// What you searched for lately, newest first.
@@ -408,6 +414,8 @@ impl Default for Saved {
             visits: vec![],
             profile: Profile::default(),
             featured_checked: HashSet::new(),
+            liked_albums: vec![],
+            liked_playlists: vec![],
             artist_ids: HashMap::new(),
             recent_searches: vec![],
             last_queue: vec![],
@@ -866,6 +874,12 @@ impl App {
                 "recent" => Route::Recent,
                 "queue" => Route::Queue,
                 "settings" => Route::Settings,
+                "liked-albums" => Route::LikedAlbums,
+                "import" => {
+                    app.import_open = true;
+                    app.import_url = std::env::var("PULSE_DEBUG_IMPORT").unwrap_or_default();
+                    Route::Home
+                }
                 p if p.starts_with("artist:") => Route::Artist(p[7..].to_string()),
                 p if p.starts_with("search:") => Route::Search(p[7..].to_string()),
                 p => p.strip_prefix("playlist:").and_then(|n| n.parse().ok()).map(Route::Local).unwrap_or(Route::Home),
@@ -991,6 +1005,8 @@ impl App {
             }
             Route::Song(_) => return None,
             Route::Liked
+            | Route::LikedAlbums
+            | Route::LikedPlaylists
             | Route::Recent
             | Route::Queue
             | Route::Local(_)
@@ -2348,6 +2364,28 @@ impl App {
 
     pub fn playlist_names(&self) -> Vec<String> {
         self.saved.playlists.iter().map(|p| p.name.clone()).collect()
+    }
+
+    /// Saves an album to your library, or takes it out again.
+    pub fn toggle_album(&mut self, a: &deezer::AlbumInfo, ctx: &egui::Context) {
+        if let Some(i) = self.saved.liked_albums.iter().position(|x| x.id == a.id) {
+            self.saved.liked_albums.remove(i);
+            self.toast("Removed from Liked Albums", ctx);
+        } else {
+            self.saved.liked_albums.insert(0, a.clone());
+            self.toast("Saved to Liked Albums", ctx);
+        }
+    }
+
+    /// Saves a playlist to your library, or takes it out again.
+    pub fn toggle_playlist(&mut self, p: &deezer::PlaylistInfo, ctx: &egui::Context) {
+        if let Some(i) = self.saved.liked_playlists.iter().position(|x| x.id == p.id) {
+            self.saved.liked_playlists.remove(i);
+            self.toast("Removed from Liked Playlists", ctx);
+        } else {
+            self.saved.liked_playlists.insert(0, p.clone());
+            self.toast("Saved to Liked Playlists", ctx);
+        }
     }
 
     /// Opens the song's artist's page.
