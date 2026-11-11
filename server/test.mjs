@@ -97,6 +97,7 @@ r = await call("POST", "/reset/start", { who: "nobody" }); ok(r.status === 200 &
 r = await call("POST", "/reset/start", { who: "MERCY_1" }); ok(r.status === 200 && outbox.length === 1 && outbox[0].to === "new@example.com", "code mailed");
 let code = outbox[0].subject.slice(0, 6); ok(/^\d{6}$/.test(code) && outbox[0].text.includes(code), "six-digit code");
 ok(outbox[0].params.code === code && outbox[0].params.username === "mercy_1" && outbox[0].params.minutes === "15", "values for an EmailJS template");
+ok(outbox[0].params.ip === "9.9.9.9" && outbox[0].params.location && outbox[0].params.time, "where and when the reset was asked for");
 ok(!JSON.stringify(env.DB.raw.prepare("SELECT * FROM resets").all()).includes(code), "only the code's hash stored");
 const wrong = code === "000000" ? "111111" : "000000";
 r = await call("POST", "/reset/finish", { who: "mercy_1", code: wrong, password: "reset pass 3" }); ok(r.status === 400 && r.data.error === "That code is wrong.", "wrong code");

@@ -403,7 +403,11 @@ async function resetStart(c) {
 <p style="font-size:32px;font-weight:700;letter-spacing:6px;margin:0 0 16px;color:#6d28d9">${code}</p>
 <p style="margin:0 0 16px">Enter it in Pulse to choose a new password. It works for ${RESET_MINUTES} minutes.</p>
 <p style="margin:0;color:#6b6880;font-size:13px">If you didn't ask for this, you can ignore this email: your password hasn't changed.</p></div>`;
-  await sendMail(c.env, u.email, `${code} is your Pulse code`, text, html, { username: u.username, code, minutes: String(RESET_MINUTES) });
+  // Where the request came from, so the owner can tell if it wasn't them.
+  const cf = c.request.cf || {};
+  const place = [cf.city, cf.region, cf.country].filter(Boolean).join(", ") || "an unknown location";
+  const when = new Date(c.now * 1000).toUTCString();
+  await sendMail(c.env, u.email, `${code} is your Pulse code`, text, html, { username: u.username, code, minutes: String(RESET_MINUTES), ip: c.ip, location: place, time: when });
   return c.reply(200, sent);
 }
 
