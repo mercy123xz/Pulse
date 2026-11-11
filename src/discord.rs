@@ -21,6 +21,36 @@ fn app_id() -> String {
     std::env::var("PULSE_DEBUG_DISCORD_ID").unwrap_or_else(|_| APP_ID.to_string())
 }
 
+/// How the connection to Discord is going, for Settings to show.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Link {
+    /// Turned off.
+    Off,
+    /// Looking for the Discord app.
+    Looking,
+    /// No Discord app found on this PC.
+    NotRunning,
+    /// Discord is there, but Windows wouldn't let Pulse connect.
+    Blocked,
+    /// Connected; showing a song (true) or nothing playing (false).
+    Connected(bool),
+    /// Discord answered with an error.
+    Refused(String),
+}
+
+static LINK: std::sync::Mutex<Option<Link>> = std::sync::Mutex::new(None);
+
+fn set_link(l: Link) {
+    if let Ok(mut g) = LINK.lock() {
+        *g = Some(l);
+    }
+}
+
+/// How the connection to Discord is going.
+pub fn link() -> Link {
+    LINK.lock().ok().and_then(|g| g.clone()).unwrap_or(Link::Off)
+}
+
 /// Whether this build of Pulse can show a Discord status at all.
 pub fn available() -> bool {
     !app_id().is_empty()
@@ -90,6 +120,12 @@ impl Presence {
 
 /// The background thread: connects when Discord is running, sends the newest status.
 fn run(rx: Receiver<Option<Song>>) {
+    set_link(Link::Looking);
+    run_inner(rx);
+    set_link(Link::Off);
+}
+
+fn run_inner(rx: Receiver<Option<Song>>) {
     let mut conn: Option<Conn> = None;
     let mut want: Option<Song> = None;
     let mut dirty = false;
@@ -115,11 +151,14 @@ fn run(rx: Receiver<Option<Song>>) {
             if Instant::now() < next_try {
                 continue;
             }
-            conn = Conn::open();
-            if conn.is_none() {
-                // Discord isn't running (or isn't signed in): look again in a while.
-                next_try = Instant::now() + Duration::from_secs(20);
-                continue;
+            match Conn::open() {
+                Ok(c) => conn = Some(c),
+                Err(why) => {
+                    // Discord isn't running (or isn't signed in): look again in a while.
+                    set_link(why);
+                    next_try = Instant::now() + Duration::from_secs(20);
+                    continue;
+                }
             }
         }
         // Discord allows about five updates per 20 seconds.
@@ -128,12 +167,19 @@ fn run(rx: Receiver<Option<Song>>) {
         }
         let Some(c) = conn.as_mut() else { continue };
         match c.set(want.as_ref()) {
-            Ok(()) => {
+            Ok(None) => {
                 dirty = false;
                 last_sent = Some(Instant::now());
+                set_link(Link::Connected(want.is_some()));
+            }
+            Ok(Some(refused)) => {
+                dirty = false;
+                last_sent = Some(Instant::now());
+                set_link(Link::Refused(refused));
             }
             Err(_) => {
                 conn = None;
+                set_link(Link::Looking);
                 next_try = Instant::now() + Duration::from_secs(5);
             }
         }
@@ -150,15 +196,25 @@ struct Conn {
 }
 
 impl Conn {
-    fn open() -> Option<Conn> {
+    /// Connects to the first Discord app that answers, or says why none did.
+    fn open() -> Result<Conn, Link> {
+        let mut why = Link::NotRunning;
         for path in candidates() {
-            let Some(pipe) = connect(&path) else { continue };
+            let pipe = match connect(&path) {
+                Ok(p) => p,
+                Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+                    why = Link::Blocked;
+                    continue;
+                }
+                Err(_) => continue,
+            };
             let mut c = Conn { pipe, nonce: 0 };
-            if c.handshake().is_ok() {
-                return Some(c);
+            match c.handshake() {
+                Ok(()) => return Ok(c),
+                Err(e) => why = Link::Refused(e.to_string()),
             }
         }
-        None
+        Err(why)
     }
 
     fn send(&mut self, op: u32, payload: &Value) -> std::io::Result<()> {
@@ -187,10 +243,17 @@ impl Conn {
     fn handshake(&mut self) -> std::io::Result<()> {
         self.send(0, &json!({ "v": 1, "client_id": app_id() }))?;
         let (op, v) = self.recv()?;
-        if op == 1 && v["evt"] == "READY" { Ok(()) } else { Err(std::io::Error::other("Discord said no")) }
+        if op == 1 && v["evt"] == "READY" {
+            return Ok(());
+        }
+        // Discord closes the connection with a reason ("Invalid Client ID", ...).
+        let why = v["message"].as_str().or(v["data"]["message"].as_str()).unwrap_or("it didn't accept the connection");
+        crate::crash::note(&format!("Discord: {why}"));
+        Err(std::io::Error::other(why.to_string()))
     }
 
-    fn set(&mut self, song: Option<&Song>) -> std::io::Result<()> {
+    /// Sends the status. Ok(Some(reason)) if Discord didn't take it.
+    fn set(&mut self, song: Option<&Song>) -> std::io::Result<Option<String>> {
         self.nonce += 1;
         let activity = song.map_or(Value::Null, activity);
         self.send(1, &json!({ "cmd": "SET_ACTIVITY", "args": { "pid": std::process::id(), "activity": activity }, "nonce": self.nonce.to_string() }))?;
@@ -199,9 +262,11 @@ impl Conn {
             return Err(std::io::Error::other("Discord closed the connection"));
         }
         if v["evt"] == "ERROR" {
-            crate::crash::note(&format!("Discord didn't take the status: {}", v["data"]["message"].as_str().unwrap_or("unknown reason")));
+            let why = v["data"]["message"].as_str().unwrap_or("unknown reason").to_string();
+            crate::crash::note(&format!("Discord didn't take the status: {why}"));
+            return Ok(Some(why));
         }
-        Ok(())
+        Ok(None)
     }
 }
 
@@ -253,16 +318,16 @@ fn candidates() -> Vec<std::path::PathBuf> {
     out
 }
 
-fn connect(path: &std::path::Path) -> Option<Box<dyn Pipe>> {
+fn connect(path: &std::path::Path) -> std::io::Result<Box<dyn Pipe>> {
     #[cfg(windows)]
     {
-        std::fs::OpenOptions::new().read(true).write(true).open(path).ok().map(|f| Box::new(f) as Box<dyn Pipe>)
+        std::fs::OpenOptions::new().read(true).write(true).open(path).map(|f| Box::new(f) as Box<dyn Pipe>)
     }
     #[cfg(unix)]
     {
-        let s = std::os::unix::net::UnixStream::connect(path).ok()?;
+        let s = std::os::unix::net::UnixStream::connect(path)?;
         let _ = s.set_read_timeout(Some(Duration::from_secs(5)));
-        Some(Box::new(s))
+        Ok(Box::new(s))
     }
 }
 

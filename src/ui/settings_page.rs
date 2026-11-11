@@ -243,6 +243,9 @@ pub fn settings_page(app: &mut App, ui: &mut Ui) {
                 switch(ui, &mut app.saved.settings.discord_status, tr("Show what you're listening to"));
             },
         );
+        if app.saved.settings.discord_status {
+            discord_link(ui);
+        }
     }
 
     your_data_section(app, ui, &ctx);
@@ -710,4 +713,36 @@ fn eq_curve(ui: &mut Ui, gains: &mut [f32; 6]) -> bool {
         }
     }
     changed
+}
+
+/// Under the Discord switch: whether Pulse reached Discord, and what to do if not.
+fn discord_link(ui: &mut Ui) {
+    use crate::discord::Link;
+    let (good, text) = match crate::discord::link() {
+        Link::Off | Link::Looking => (true, tr("Looking for the Discord app…").to_string()),
+        Link::Connected(true) => (true, tr("Connected to Discord. Your status shows the song that's playing.").to_string()),
+        Link::Connected(false) => (true, tr("Connected to Discord. Your status shows up when a song plays.").to_string()),
+        Link::NotRunning => (
+            false,
+            tr("Discord isn't open. Open the Discord desktop app (the website version can't show what other apps are doing); Pulse finds it within 20 seconds.").to_string(),
+        ),
+        Link::Blocked => (
+            false,
+            tr("Windows wouldn't let Pulse reach Discord. This happens when one of them runs as administrator and the other doesn't: open both normally.").to_string(),
+        ),
+        Link::Refused(why) => (false, format!("{} {why}", tr("Discord didn't accept the status:"))),
+    };
+    let color = if good { pal().text_muted } else { Color32::from_rgb(255, 170, 120) };
+    ui.horizontal_wrapped(|ui| {
+        ui.add_space(4.0);
+        ui.label(RichText::new(text).font(regular(12.5)).color(color));
+    });
+    ui.label(
+        RichText::new(tr("Connected but nothing shows? In Discord, open User Settings → Activity Privacy and turn on “Share my activity”."))
+            .font(regular(12.0))
+            .color(pal().text_faint),
+    );
+    ui.add_space(8.0);
+    // The connection changes on another thread: look again in a moment.
+    ui.ctx().request_repaint_after(std::time::Duration::from_secs(1));
 }
