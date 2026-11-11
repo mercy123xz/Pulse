@@ -5,7 +5,12 @@ plugins {
 
 android {
     namespace = "app.pulse.android"
-    compileSdk = 36
+    // The newest libraries need Android 17's APIs to compile against (as NewPipe does).
+    compileSdk {
+        version = release(37) {
+            minorApiLevel = 0
+        }
+    }
 
     defaultConfig {
         applicationId = "app.pulse.android"
