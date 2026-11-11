@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<script>try{var t=localStorage.getItem("pulse-theme");document.documentElement.dataset.theme=t||(matchMedia("(prefers-color-scheme: light)").matches?"light":"dark")}catch(e){document.documentElement.dataset.theme="dark"}</script>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Playlist · Pulse</title>
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#0b0b0e">
+<link rel="icon" href="img/favicon-32.png" sizes="32x32" type="image/png">
+<style>
+:root { --bg: #0b0b0e; --surface: #16161b; --border: #2c2c36; --text: #ededf1; --muted: #a3a3b0; --accent: #7c3aed; --accent-soft: #a78bfa; color-scheme: dark; }
+* { box-sizing: border-box; }
+body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: radial-gradient(80% 60% at 50% 0%, rgba(124, 58, 237, .25), transparent 70%), var(--bg); color: var(--text); font: 400 1rem/1.6 "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, Arial, sans-serif; padding: 1.5rem; }
+main { max-width: 34rem; text-align: center; }
+h1 { font-size: clamp(1.8rem, 5vw, 2.4rem); letter-spacing: -.03em; margin: 1rem 0 .5rem; }
+p { color: var(--muted); margin: .4rem 0; }
+a { color: var(--accent-soft); }
+.btn { display: inline-flex; gap: .5rem; align-items: center; margin-top: 1.4rem; padding: .85rem 1.35rem; border-radius: 999px; background: var(--accent); color: #fff; font-weight: 600; text-decoration: none; box-shadow: 0 8px 28px rgba(124, 58, 237, .35); }
+.btn:hover { background: #6d28d9; }
+a:focus-visible { outline: 3px solid var(--accent-soft); outline-offset: 3px; border-radius: 8px; }
+.note { margin-top: 1.8rem; font-size: .9rem; }
+.logo { width: 56px; height: 56px; }
+
+/* Cursor: black arrow with a purple edge; purple over anything clickable.
+   Native cursors (no script), only for mouse users. */
+@media (pointer: fine) {
+  html { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 28 28'%3E%3Cpath d='M4 3v19.5l5.6-5.4 3.6 8.4 3.6-1.6-3.6-8.2H21z' fill='%230b0b0e' stroke='%23a78bfa' stroke-width='1.8' stroke-linejoin='round'/%3E%3C/svg%3E") 4 3, auto; }
+  a, button, summary, label, [role="button"] { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 28 28'%3E%3Cpath d='M4 3v19.5l5.6-5.4 3.6 8.4 3.6-1.6-3.6-8.2H21z' fill='%237c3aed' stroke='%23f5f3ff' stroke-width='1.8' stroke-linejoin='round'/%3E%3C/svg%3E") 4 3, pointer; }
+}
+</style>
+<style>
+main { max-width: 44rem; width: 100%; text-align: left; }
+.top { display: flex; gap: 1.2rem; align-items: center; margin-top: 1.2rem; }
+.cover { width: 132px; height: 132px; border-radius: 12px; object-fit: cover; background: var(--surface); flex: none; box-shadow: 0 10px 30px rgba(0,0,0,.4); }
+.avatar { width: 112px; height: 112px; border-radius: 50%; display: grid; place-items: center; background: linear-gradient(#a78bfa, #7c3aed); font-size: 2.6rem; font-weight: 700; color: #fff; flex: none; }
+.kind { text-transform: uppercase; letter-spacing: .08em; font-size: .75rem; font-weight: 600; color: var(--muted); margin: 0; }
+h1 { text-align: left; margin: .2rem 0 .3rem; overflow-wrap: anywhere; }
+ol { list-style: none; padding: 0; margin: 1.6rem 0 0; }
+li { display: grid; grid-template-columns: 2rem 44px 1fr auto; gap: .8rem; align-items: center; padding: .45rem .5rem; border-radius: 8px; }
+li:hover { background: var(--surface); }
+li .n { color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; }
+li img, li .ph { width: 44px; height: 44px; border-radius: 6px; object-fit: cover; background: var(--surface); }
+li .t { min-width: 0; }
+li .t b, li .t span { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+li .t span, li .d { color: var(--muted); font-size: .9rem; }
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 1rem; margin-top: 1.2rem; }
+.card { display: block; text-decoration: none; color: var(--text); background: var(--surface); padding: .7rem; border-radius: 12px; }
+.card img, .card .ph { width: 100%; aspect-ratio: 1; border-radius: 8px; object-fit: cover; background: var(--border); display: block; }
+.card b { display: block; margin-top: .5rem; overflow-wrap: anywhere; }
+.card span { color: var(--muted); font-size: .85rem; }
+.open { margin-top: 1.4rem; padding: 1rem 1.1rem; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+.open p { margin: .25rem 0; }
+.open .row { display: flex; gap: .6rem; flex-wrap: wrap; margin-top: .7rem; }
+.open button, .open a.b { font: inherit; padding: .55rem 1rem; border-radius: 999px; border: 1px solid var(--border); background: transparent; color: var(--text); text-decoration: none; }
+.open .main { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+.center { text-align: center; }
+html[data-theme="light"] .avatar { color: #fff; }
+</style>
+<link rel="stylesheet" href="site.css">
+</head>
+<body>
+<main>
+  <a href="./" aria-label="Pulse website"><svg class="logo" viewBox="0 0 30 30" aria-hidden="true"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#a78bfa"/><stop offset="1" stop-color="#7c3aed"/></linearGradient></defs><rect width="30" height="30" rx="8" fill="url(#g)"/><g fill="#fff"><rect x="7" y="12" width="2.4" height="6" rx="1.2"/><rect x="11" y="8.5" width="2.4" height="13" rx="1.2"/><rect x="15" y="6" width="2.4" height="18" rx="1.2"/><rect x="19" y="10" width="2.4" height="10" rx="1.2"/><rect x="23" y="13" width="2.4" height="4" rx="1.2"/></g></svg></a>
+  <div id="page" aria-live="polite"><p>Loading…</p></div>
+  <div class="open">
+    <p><b>Listen in Pulse</b></p>
+    <p>Copy this page's link and paste it into Pulse's search box. Pulse is free for Windows.</p>
+    <div class="row"><button class="main" id="copy" type="button">Copy link</button><a class="b" href="download/">Get Pulse</a></div>
+  </div>
+  <p class="note center"><a href="./">The Pulse website</a></p>
+</main>
+<script src="share.js"></script>
+<script>PulseShare.playlist();</script>
+<script src="site.js" defer></script>
+</body>
+</html>
