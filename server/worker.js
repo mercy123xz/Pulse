@@ -271,12 +271,14 @@ async function signup(c) {
   const username = str(b.username, 40).toLowerCase();
   checkUsername(username);
   checkPassword(b.password, username);
-  const email = str(b.email, 300).toLowerCase();
-  checkEmail(email);
+  // Pulse 1.0 doesn't send an email at all: those accounts are made without one, and
+  // Pulse 1.1 asks for it when it opens. Newer versions always send it.
+  const email = "email" in b ? str(b.email, 300).toLowerCase() : null;
+  if (email !== null) checkEmail(email);
   if (await overLimit(c, "signup", c.ip, SIGNUPS_PER_IP_PER_HOUR, 3600)) fail(429, "Too many new accounts from here. Please try again later.");
   const taken = await c.env.DB.prepare("SELECT 1 FROM users WHERE username = ?").bind(username).first();
   if (taken) fail(409, "That username is taken.");
-  await emailFree(c, email);
+  if (email) await emailFree(c, email);
   const salt = randomHex(16);
   const hash = await hashPassword(b.password, salt);
   const res = await c.env.DB.prepare("INSERT INTO users (username, email, pass_hash, pass_salt, bio, created) VALUES (?, ?, ?, ?, '', ?)")
@@ -285,7 +287,7 @@ async function signup(c) {
   await note(c, "signup", c.ip);
   const id = res.meta?.last_row_id;
   const token = await newSession(c, id);
-  return c.reply(201, { token, user: { username, bio: "", created: c.now, email } });
+  return c.reply(201, { token, user: { username, bio: "", created: c.now, email: email || "" } });
 }
 
 async function login(c) {

@@ -17,7 +17,12 @@ r = await call("GET", "/"); ok(r.status === 200 && r.data.ok, "alive");
 // signup rules
 for (const [u, p, want] of [["ab", "password1", 400], ["Bad Name", "password1", 400], ["admin", "password1", 400], [".joe", "password1", 400], ["joe", "short", 400], ["joe", "xxjoexx123", 400]])
   { r = await call("POST", "/signup", { username: u, password: p, email: u.replace(/\W/g, "") + "@example.com" }); ok(r.status === want, `signup ${u}/${p} -> ${r.status} ${r.data.error}`); }
-r = await call("POST", "/signup", { username: "nomail", password: "correct horse" }); ok(r.status === 400 && /email/.test(r.data.error), "email required");
+r = await call("POST", "/signup", { username: "nomail", password: "correct horse", email: "" }); ok(r.status === 400 && /email/.test(r.data.error), "email required");
+ip = "1.1.1.2";
+r = await call("POST", "/signup", { username: "oldapp", password: "correct horse" }); ok(r.status === 201 && r.data.user.email === "", "Pulse 1.0 (sends no email) can still sign up");
+r = await call("POST", "/signup", { username: "oldapp2", password: "correct horse" }); ok(r.status === 201, "more than one account without an email");
+r = await call("GET", "/me", undefined, { token: r.data.token }); ok(r.data.user.email === "", "and the app is told it has none");
+ip = "1.1.1.1";
 r = await call("POST", "/signup", { username: "nomail", password: "correct horse", email: "not-an-email" }); ok(r.status === 400, "email checked");
 r = await call("POST", "/signup", { username: "Mercy_1", password: "correct horse", email: " Mercy@Example.com " }); ok(r.status === 201 && /^[0-9a-f]{64}$/.test(r.data.token) && r.data.user.username === "mercy_1" && r.data.user.email === "mercy@example.com", "signup ok, lowercased");
 const tok = r.data.token;
