@@ -165,6 +165,14 @@ pub fn account_dialog(app: &mut App, ctx: &egui::Context) {
         }
         if mode == AccountMode::SignUp {
             ui.label(RichText::new(tr("Your username and the playlists you make public can be seen by anyone.")).font(regular(12.0)).color(pal().text_faint));
+            ui.add_space(4.0);
+            if ui
+                .add(egui::Label::new(RichText::new(tr("Privacy Policy")).font(med(12.0)).color(pal().accent_soft)).sense(egui::Sense::click()))
+                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                .clicked()
+            {
+                ui.ctx().open_url(egui::OpenUrl::new_tab("https://mercy123xz.github.io/Pulse/privacy/"));
+            }
             ui.add_space(14.0);
         }
         if let Some(e) = &d.error {

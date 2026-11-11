@@ -90,10 +90,14 @@ An account is free and optional: it's for making playlists public and having a p
 - **Settings → Account** changes your email or password, signs you out, or deletes your account
   along with everything you made public. Your library stays on your PC either way.
 - Accounts made before emails were needed are asked to add one the next time Pulse opens.
+- **On the website**, sign in under [Your account](https://mercy123xz.github.io/Pulse/account/) to change
+  your email or password, edit your profile, make playlists private, reset a forgotten password or
+  delete your account. New accounts are made in the app.
 
 The server keeps your username, email, profile text, public playlists and a salted hash of your
 password, never the password. It's a Cloudflare Worker; its code and setup are in [`server/`](server/).
-More in the [docs](https://mercy123xz.github.io/Pulse/docs/#accounts).
+More in the [docs](https://mercy123xz.github.io/Pulse/docs/#accounts) and the
+[Privacy Policy](https://mercy123xz.github.io/Pulse/privacy/).
 
 ## Download
 

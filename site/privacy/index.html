@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<script>try{var t=localStorage.getItem("pulse-theme");document.documentElement.dataset.theme=t||(matchMedia("(prefers-color-scheme: light)").matches?"light":"dark")}catch(e){document.documentElement.dataset.theme="dark"}</script>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Privacy Policy · Pulse</title>
+<meta name="description" content="What Pulse keeps, what it sends where, and what you can do about it.">
+<meta name="theme-color" content="#0b0b0e">
+<link rel="icon" href="../img/favicon-32.png" sizes="32x32" type="image/png">
+<style>
+:root { --bg: #0b0b0e; --surface: #16161b; --border: #2c2c36; --text: #ededf1; --muted: #a3a3b0; --accent-soft: #a78bfa; color-scheme: dark; }
+html[data-theme="light"] { --bg: #f7f6fb; --surface: #ffffff; --border: #dcd8e8; --text: #1b1a20; --muted: #5d5a6e; --accent-soft: #6d28d9; color-scheme: light; }
+* { box-sizing: border-box; }
+body { margin: 0; background: radial-gradient(80% 40% at 50% 0%, rgba(124, 58, 237, .18), transparent 70%), var(--bg); color: var(--text); font: 400 1rem/1.7 "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, Arial, sans-serif; padding: 1.5rem; }
+main { max-width: 44rem; margin: 0 auto; padding-bottom: 4rem; }
+.home { display: inline-flex; align-items: center; gap: .55rem; color: var(--text); text-decoration: none; font-weight: 700; font-size: 1.1rem; }
+.home svg { width: 30px; height: 30px; }
+h1 { font-size: clamp(1.9rem, 5vw, 2.5rem); letter-spacing: -.03em; margin: 2rem 0 .3rem; }
+h2 { font-size: 1.25rem; margin: 2.2rem 0 .5rem; }
+h3 { font-size: 1rem; margin: 1.3rem 0 .3rem; }
+p, li { color: var(--muted); }
+strong, b { color: var(--text); }
+a { color: var(--accent-soft); }
+a:focus-visible { outline: 2px solid var(--accent-soft); outline-offset: 3px; border-radius: 4px; }
+ul { padding-left: 1.2rem; }
+li { margin: .3rem 0; }
+code { font-size: .9em; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: .05rem .35rem; }
+.summary { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 1rem 1.3rem; margin-top: 1.4rem; }
+.summary ul { margin: .4rem 0 0; }
+.updated { margin: 0; font-size: .9rem; }
+</style>
+</head>
+<body>
+<main>
+  <a class="home" href="../">
+    <svg viewBox="0 0 30 30" aria-hidden="true"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#a78bfa"/><stop offset="1" stop-color="#7c3aed"/></linearGradient></defs><rect width="30" height="30" rx="8" fill="url(#g)"/><g fill="#fff"><rect x="7" y="12" width="2.4" height="6" rx="1.2"/><rect x="11" y="8.5" width="2.4" height="13" rx="1.2"/><rect x="15" y="6" width="2.4" height="18" rx="1.2"/><rect x="19" y="10" width="2.4" height="10" rx="1.2"/><rect x="23" y="13" width="2.4" height="4" rx="1.2"/></g></svg>
+    Pulse
+  </a>
+
+  <h1>Privacy Policy</h1>
+  <p class="updated">Last updated November 11, 2026</p>
+
+  <div class="summary">
+    <strong>The short version</strong>
+    <ul>
+      <li>Your library, listening history and settings stay on your PC.</li>
+      <li>An account is optional. If you make one, we keep your username, email, profile text, the playlists you make public, and a hash of your password, never the password itself.</li>
+      <li>No ads, no tracking, no analytics, and we never sell or share your information.</li>
+      <li>Delete your account any time and it's gone right away.</li>
+    </ul>
+  </div>
+
+  <p style="margin-top:1.4rem">Pulse is a free, open-source, non-commercial music player made by one developer. "We" below means the Pulse project. All of Pulse's code, including the accounts server, is public on <a href="https://github.com/mercy123xz/Pulse">GitHub</a>, so you can check everything this page says.</p>
+
+  <h2>The Pulse app</h2>
+  <p>Everything the app keeps is on your PC, in <code>%APPDATA%\pulse-player</code>: your likes, playlists, recently played songs, profile, settings, themes, backups, downloaded songs and caches. None of it is uploaded. Uninstalling keeps the folder; delete it to remove everything.</p>
+  <p>To play music, the app talks to these services. Each one sees your IP address, like any website you visit, and what's asked of it:</p>
+  <ul>
+    <li><strong>Deezer</strong>: song, album and artist info, covers and charts (what you search for and open).</li>
+    <li><strong>YouTube</strong>, through yt-dlp: finding and streaming each song you play.</li>
+    <li><strong>iTunes</strong>: covers Deezer doesn't have.</li>
+    <li><strong>LRCLIB</strong>: lyrics for the song you're playing.</li>
+    <li><strong>Google</strong>: search suggestions as you type.</li>
+    <li><strong>GitHub</strong>: checking for and downloading updates and playback tools.</li>
+    <li><strong>Discord</strong>, only if you turn on Discord status: the app talks to the Discord app on your PC, which shows the song on your profile.</li>
+  </ul>
+  <p>These services have their own privacy policies. Pulse sends them nothing about you beyond what each request needs, and no account details.</p>
+
+  <h2>Pulse accounts</h2>
+  <p>Accounts are optional and only needed to make playlists public and have a profile. If you make one, our server keeps:</p>
+  <ul>
+    <li><strong>Your username.</strong> Public: it's on your profile and your shared playlists.</li>
+    <li><strong>Your email address.</strong> Private: only used to send you a code if you forget your password. Never shown to anyone, never used for anything else, no newsletters.</li>
+    <li><strong>A hash of your password</strong> (salted PBKDF2), never the password itself.</li>
+    <li><strong>Your profile text</strong> and <strong>the playlists you make public</strong>: their names and songs (title, artist, album and cover links). Public by design. Songs from your own computer are never uploaded.</li>
+    <li><strong>Sign-in keys</strong>: only a hash of each one, which expires after 90 days or when you sign out.</li>
+    <li><strong>When you joined.</strong></li>
+  </ul>
+  <h3>Keeping it safe from abuse</h3>
+  <ul>
+    <li>To limit sign-up spam and password guessing, the server notes the IP address of sign-ups, failed sign-ins, password-reset requests and reports. These notes are deleted after a day.</li>
+    <li>When someone reports a public playlist, the server keeps the report's reason and a one-way hash of who reported it, never their IP address itself.</li>
+  </ul>
+  <h3>Password reset emails</h3>
+  <p>If you ask for a reset code, we email it to the address on your account through <strong>EmailJS</strong>, sent from Pulse's Gmail account. The email says roughly where and when the request came from (city, IP address and time, as Cloudflare sees it) so you can tell if it wasn't you. That information is only put in the email, not stored. The code itself is stored only as a hash and stops working after 15 minutes.</p>
+  <h3>Where it's stored</h3>
+  <p>The accounts server runs on <strong>Cloudflare</strong> (Workers and its D1 database). Cloudflare handles the traffic and may keep its own short-term logs, as described in its privacy policy.</p>
+  <h3>Deleting your account</h3>
+  <p>In the app (Settings → Account) or on the website (<a href="../account/">Your account</a>), you can delete your account. That removes your account, email, profile, sign-ins, reset codes and every playlist you made public, right away. You can also change your email or password, edit your profile and make playlists private there at any time.</p>
+
+  <h2>This website</h2>
+  <ul>
+    <li>The site is hosted on <strong>GitHub Pages</strong>. GitHub may log visits, as described in its privacy statement. We have no access to visitor logs and use no analytics.</li>
+    <li>The site keeps a few things in your browser (local storage), never sent anywhere except as noted: your light or dark theme, whether you've seen the intro, your @username for "Welcome back", and, if you sign in on the site, your sign-in key (sent only to the accounts server). Signing out removes the key; clearing your browser's site data removes everything.</li>
+    <li>The download button asks GitHub for the newest version.</li>
+    <li>Public playlist and profile pages load from the accounts server.</li>
+    <li><strong>"Ask about Pulse"</strong> answers from a list built into the page; nothing you type is sent while it searches. If you choose to send a question or problem report, it's posted as a <strong>public</strong> issue on Pulse's GitHub, after a Cloudflare Turnstile check that you're not a bot. Don't include personal information in it.</li>
+  </ul>
+
+  <h2>Children</h2>
+  <p>Pulse accounts are for people 13 and older. If you're under 13, please use Pulse without an account. If you believe a child under 13 has made an account, contact us and we'll delete it.</p>
+
+  <h2>Your choices and rights</h2>
+  <p>You can use Pulse fully without an account. With one, you can see and change everything we keep about you in your account settings, and delete it all at any time. If you want a copy of what's stored or have any other request, contact us and we'll help.</p>
+
+  <h2>Changes</h2>
+  <p>If this policy changes, the new version will be posted here with a new date. Big changes will also be mentioned in the release notes.</p>
+
+  <h2>Contact</h2>
+  <p>Questions about privacy: <a href="https://github.com/mercy123xz/Pulse/issues">open an issue on GitHub</a>, or use "Ask about Pulse" on the home page. Please don't post personal information publicly; say you'd like to talk privately and we'll find a way.</p>
+</main>
+</body>
+</html>

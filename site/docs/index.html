@@ -326,12 +326,15 @@ backdrop = false           # true: soft glows in the playing song's colors</code
         <p>In <strong>Settings → Account</strong> you can see your profile, change your email address or password (both ask for your password first), sign out, or delete your account. Deleting it removes your profile and every playlist you made public, right away. Your library on your computer stays.</p>
         <h3>Sharing playlists</h3>
         <p>Open one of your playlists and press <em>Make public</em>. Pulse copies its link, which opens in Pulse or on this website. Changes you make to the playlist are uploaded by themselves. <em>Make private</em> takes it down again. Songs from your Music folder are never uploaded.</p>
+        <h3>Signing in on the website</h3>
+        <p>You can also sign in on this website, under <a href="../account/">Your account</a> (the person icon at the top): change your email or password, edit your profile, make playlists private, reset a forgotten password, or delete your account. New accounts are made in the app.</p>
         <h3>What the server keeps</h3>
         <p>Accounts live on a small server (a Cloudflare Worker and its database). It keeps your username, your email, your profile text, the playlists you made public, and a salted hash of your password, never the password itself. Signing in stores only a hash of each sign-in key. Reset codes are emailed through a mail service and stored only as a hash. A public playlist that three different people report is hidden. The server code is in <a href="https://github.com/mercy123xz/Pulse/tree/main/server"><code>server/</code></a>.</p>
       </section>
 
       <section id="data" aria-labelledby="data-h">
         <h2 id="data-h">Your data</h2>
+        <p>The full details are in the <a href="../privacy/">Privacy Policy</a>.</p>
         <p>Unless you make a <a href="#accounts">Pulse account</a> and share playlists, nothing you do in Pulse leaves your PC. Everything it keeps is in <code>%APPDATA%\pulse-player</code>:</p>
         <ul>
           <li>your likes, playlists, recently played songs, profile and settings, plus a spare copy of them (<code>library.ron</code>)</li>
@@ -438,6 +441,7 @@ cargo run --release</code></pre>
       <a href="https://github.com/mercy123xz/Pulse">Source code</a>
       <a href="https://github.com/mercy123xz/Pulse/releases">All releases</a>
       <a href="https://github.com/mercy123xz/Pulse/issues">Report a problem</a>
+      <a href="../privacy/">Privacy</a>
     </nav>
     <p style="margin:0">Pulse is a free, non-commercial side project for personal listening. Song info and artwork come from Deezer; audio is streamed from YouTube with yt-dlp. Pulse isn't affiliated with or endorsed by Deezer, YouTube, Google, Spotify or SoundCloud.</p>
   </div>

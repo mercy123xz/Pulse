@@ -550,6 +550,7 @@ const STRINGS: &[(&str, [&str; 4])] = &[
     ("Discord didn't accept the status:", ["Discord no aceptó el estado:", "O Discord não aceitou o status:", "Discord n'a pas accepté le statut :", "Discord hat den Status nicht angenommen:"]),
     ("Connected but nothing shows? In Discord, open User Settings → Activity Privacy and turn on “Share my activity”.", ["¿Conectado pero no aparece nada? En Discord, abre Ajustes de usuario → Privacidad de actividad y activa «Compartir mi actividad».", "Conectado, mas nada aparece? No Discord, abra Configurações de usuário → Privacidade de atividade e ative “Compartilhar minha atividade”.", "Connecté mais rien ne s'affiche ? Dans Discord, ouvrez Paramètres utilisateur → Confidentialité de l'activité et activez « Partager mon activité ».", "Verbunden, aber nichts zu sehen? Öffne in Discord Benutzereinstellungen → Aktivitäts-Privatsphäre und schalte „Meine Aktivität teilen“ ein."]),
     ("Open on the website", ["Abrir en el sitio web", "Abrir no site", "Ouvrir sur le site", "Auf der Website öffnen"]),
+    ("Privacy Policy", ["Política de privacidad", "Política de privacidade", "Politique de confidentialité", "Datenschutzerklärung"]),
 ];
 
 #[cfg(test)]
