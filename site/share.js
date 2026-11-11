@@ -2,7 +2,7 @@
 // Everything shown comes from the accounts server and is written as text, never as HTML.
 var PulseShare = (function () {
   // The accounts server (server/ in the repo). Empty until it's set up.
-  var ACCOUNTS = "";
+  var ACCOUNTS = "https://pulse-accounts.y0hyotuube.workers.dev";
 
   function el(tag, cls, text) {
     var e = document.createElement(tag);

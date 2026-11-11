@@ -12,7 +12,7 @@ use std::sync::Mutex;
 
 /// The accounts server. Empty until it's set up (see server/README.md); online
 /// features stay hidden until then.
-const ACCOUNTS_URL: &str = "";
+const ACCOUNTS_URL: &str = "https://pulse-accounts.y0hyotuube.workers.dev";
 
 /// Where public links point: the website's page for a playlist or a profile.
 pub const SITE: &str = "https://mercy123xz.github.io/Pulse/";

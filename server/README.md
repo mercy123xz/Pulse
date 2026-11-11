@@ -20,7 +20,7 @@ database, on Cloudflare's free plan. It needs no secrets.
 6. **Check it.** Open the Worker's address (`https://pulse-accounts.<you>.workers.dev/`). It
    should say `{"ok":true,"service":"pulse-accounts"}`.
 
-Then put that address in `ACCOUNTS_URL` in `src/account.rs` and in `site/account.js`.
+Then put that address in `ACCOUNTS_URL` in `src/account.rs` and `ACCOUNTS` in `site/share.js`.
 
 ## What it stores
 
