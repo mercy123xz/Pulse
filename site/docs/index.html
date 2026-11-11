@@ -132,6 +132,7 @@ footer a:hover { text-decoration: underline; }
         <li><a href="#release">From code to download</a></li>
         <li><a href="#playback">How a song plays</a></li>
         <li><a href="#info">Where music info comes from</a></li>
+        <li><a href="#import">Importing playlists</a></li>
         <li><a href="#sound">Sound and effects</a></li>
         <li><a href="#light">Staying light</a></li>
         <li><a href="#themes">Making a theme</a></li>
@@ -164,10 +165,12 @@ footer a:hover { text-decoration: underline; }
           <li><strong>Build</strong>Every push starts a Windows build on GitHub Actions: the release <code>pulse.exe</code> and the test suite.</li>
           <li><strong>Check</strong>The build makes sure the app needs no extra DLLs and that its icon is embedded. A failure stops everything.</li>
           <li><strong>Package</strong><a href="https://jrsoftware.org/isinfo.php">Inno Setup</a> wraps the app into <code>PulseSetup-x.y.z.exe</code>, an installer that needs no administrator password.</li>
-          <li><strong>Release</strong>When the main branch has a new version number, a GitHub release is published with just the installer attached.</li>
+          <li><strong>Release</strong>When the main branch has a new version number, a GitHub release is published with the installer attached. The installer is signed with Pulse's release key, and the signature goes into the release notes.</li>
           <li><strong>Website</strong>This site lives in the repo's <code>site</code> folder and is published to GitHub Pages on every change. Its download button always fetches the newest installer.</li>
         </ol>
         <p>Versions follow <code>major.minor.patch</code>: the last number for fixes and small additions, the middle one for bigger features. The changes in each version are listed on its <a href="https://github.com/mercy123xz/Pulse/releases">release page</a>.</p>
+        <h3>Updating</h3>
+        <p>Once a day, Pulse asks GitHub whether there's a newer version and offers to install it. Before running a downloaded installer, Pulse checks two things: that the file matches the checksum GitHub lists for it, and that it carries a valid signature from Pulse's release key, whose public half is built into Pulse. If either check fails, the installer isn't run, and Pulse opens the release page instead. You can turn update checks off in Settings.</p>
       </section>
 
       <section id="playback" aria-labelledby="playback-h">
@@ -176,10 +179,10 @@ footer a:hover { text-decoration: underline; }
         <ol class="flow" aria-label="Playback steps">
           <li><strong>Song info</strong>The title, artists, album, length and cover come from Deezer's catalog.</li>
           <li><strong>Finding the audio</strong>Pulse searches YouTube with <a href="https://github.com/yt-dlp/yt-dlp">yt-dlp</a> and scores the results by title, artist and length, so it picks the right recording, not a live version or a cover.</li>
-          <li><strong>Remembering it</strong>The match is saved, so the next time you play that song Pulse skips the search.</li>
-          <li><strong>Streaming</strong>The first megabyte is fetched in order so music starts fast. The rest arrives in 1 MB pieces, three at a time, which is much quicker on most connections.</li>
+          <li><strong>Remembering it</strong>The match is saved, so the next time you play that song Pulse skips the search. The song itself is kept on disk for a while too (up to 1 GB, Settings → Storage), so playing it again starts at once with nothing to download.</li>
+          <li><strong>Streaming</strong>The first megabyte is fetched in order so music starts fast. The rest arrives in 1 MB pieces, four at a time, which is much quicker on most connections. Skipping ahead only waits for the piece you jumped to.</li>
           <li><strong>Decoding and effects</strong>The audio is decoded, then the equalizer, mono and fades are applied.</li>
-          <li><strong>Getting ready for the next one</strong>While a song plays, the next one is found and opened ahead of time, so songs change without a wait.</li>
+          <li><strong>Getting ready for the next one</strong>While a song plays, the next one is found and opened ahead of time, so songs change without a wait. Opening a playlist, album, Orbit or search also starts loading its first songs, so the one you press plays straight away.</li>
         </ol>
         <h3>Two decks, like a DJ</h3>
         <p>The audio engine has two players. Gapless playback queues the next song on the same player, so it starts on the exact sample the last one ends. Crossfade and automix start the next song on the second player and fade between the two. Automix also listens for silence at the end of a song and starts the next one where the music actually stops.</p>
@@ -196,10 +199,23 @@ footer a:hover { text-decoration: underline; }
           <li><strong>Most popular songs.</strong> Artist pages show the ten most popular songs, ordered by Deezer's popularity score.</li>
           <li><strong>Whole albums and playlists.</strong> Long albums and playlists are fetched page by page until every song is there, so playing one queues all of it, in order.</li>
           <li><strong>Missing covers</strong> are looked up in the iTunes catalog. YouTube view counts come from YouTube's public numbers.</li>
-          <li><strong>Lyrics and annotations</strong> aren't part of this version.</li>
+          <li><strong>Lyrics</strong> come from <a href="https://lrclib.net">LRCLIB</a>, a free, open lyrics library. Most come with timings, so the side panel follows along with the song.</li>
+          <li><strong>Search suggestions</strong> mix what's in your library with Google's public search suggestions, then the artist, albums, songs and playlists that match on Deezer. Popular artists come first.</li>
+          <li><strong>Recommendations</strong> ("Listeners of X also listen to", "Songs like X") are built from the artists and songs you play, using Deezer's related artists and similar songs.</li>
         </ul>
         <h3>Asking politely</h3>
         <p>Deezer allows about 50 requests every 5 seconds. Pulse keeps recent replies for ten minutes so the same question isn't asked twice, and when Deezer says it's busy, Pulse waits and tries again instead of showing an error. When you rest the pointer on an album or artist card, Pulse loads that page in the background (two at a time at most), so it opens instantly when you click.</p>
+      </section>
+
+      <section id="import" aria-labelledby="import-h">
+        <h2 id="import-h">Importing playlists</h2>
+        <p>Press the import button next to <em>Playlists</em> in the sidebar and paste a link. Pulse reads the song list from the public page, so you don't sign in anywhere:</p>
+        <ul>
+          <li><strong>YouTube and YouTube Music</strong> playlists, up to 5,000 songs. Pulse plays the exact videos in the playlist.</li>
+          <li><strong>Spotify</strong> playlists and albums. A link brings in the first 100 songs, which is all Spotify's public page shows. For a longer playlist, open it in Spotify, press Ctrl+A then Ctrl+C, and paste: that copies a link to every song.</li>
+          <li><strong>SoundCloud</strong> playlists.</li>
+        </ul>
+        <p>Each song is matched to Deezer's catalog for its cover and details, and plays from YouTube like any other.</p>
       </section>
 
       <section id="sound" aria-labelledby="sound-h">
@@ -223,6 +239,10 @@ footer a:hover { text-decoration: underline; }
           <li>Work that takes time (searching, streaming, decoding, lookups) never runs on the thread that draws the window.</li>
           <li>Moving backgrounds and other motion can be turned off in Settings, with <em>Reduce motion</em> or <em>Moving background</em>.</li>
           <li>It prefers the battery-friendly graphics chip on laptops with two.</li>
+          <li>Long lists only draw the rows you can see, so a playlist with 10,000 songs scrolls like one with 10.</li>
+          <li>Lookups that fill in details (genres, featured artists) run slowly in the background and redraw the window once per batch, not once per answer. If Pulse is offline, it tries them again another time.</li>
+          <li>Covers are kept in a cache on disk (up to 300 MB) and let go of in memory when they're off screen.</li>
+          <li><strong>Gaming Mode</strong> (the <em>Gaming</em> button in the top bar, or <kbd>Ctrl</kbd> + <kbd>G</kbd>) and <strong>Ultra-low mode</strong> (in Settings) switch off extras like animations, moving backgrounds and background lookups, for when every bit of your PC counts. The music plays the same in every mode.</li>
         </ul>
       </section>
 
@@ -314,13 +334,17 @@ backdrop = false           # true: soft glows in the playing song's colors</code
         <h2 id="data-h">Your data</h2>
         <p>Unless you make a <a href="#accounts">Pulse account</a> and share playlists, nothing you do in Pulse leaves your PC. Everything it keeps is in <code>%APPDATA%\pulse-player</code>:</p>
         <ul>
-          <li>your likes, playlists, recently played songs, profile and settings</li>
+          <li>your likes, playlists, recently played songs, profile and settings, plus a spare copy of them (<code>library.ron</code>)</li>
+          <li>backups of your library in <code>backups</code>: one each day you use Pulse (the seven newest are kept), and any you make yourself in Settings → Your data</li>
+          <li>songs you've played recently, so they start at once next time (in the cache)</li>
           <li>if you're signed in, your sign-in key (in <code>account.json</code>)</li>
           <li>your themes</li>
           <li>songs you download for offline listening (in <code>offline</code>; Settings → Storage lets you choose another place)</li>
           <li>yt-dlp and Deno, and a cache of temporary files (Settings → Storage shows its size and can clear it)</li>
         </ul>
-        <p>Pulse also plays the music files in your Windows Music folder if you turn on <em>Show Local Files</em> in Settings. The only places Pulse talks to are the ones it gets music from: Deezer for song info, YouTube for audio, iTunes for missing covers, GitHub when it fetches or updates its playback tools, and the Pulse accounts server if you use an account. Uninstalling keeps your folder, so reinstalling picks up where you left off; delete the folder to remove everything.</p>
+        <p>Pulse also plays the music files in your Windows Music folder if you turn on <em>Show Local Files</em> in Settings. The only places Pulse talks to are the ones it gets music from: Deezer for song info, YouTube for audio, iTunes for missing covers, LRCLIB for lyrics, Google for search suggestions, GitHub for playback tools and updates, and the Pulse accounts server if you use an account. Discord status, when you turn it on, talks only to the Discord app on your PC. Uninstalling keeps your folder, so reinstalling picks up where you left off; delete the folder to remove everything.</p>
+        <h3>If your library file gets damaged</h3>
+        <p>Pulse saves your library every half minute. If your PC loses power or Pulse is closed in the middle of a save, the file can be cut off. When Pulse can't read it, it opens the spare copy instead, which is saved in a way that's never left half-written. If that's missing too, it restores the newest backup. Either way Pulse tells you what happened, and keeps the damaged file in <code>backups</code>. You can also restore any backup yourself in Settings → Your data.</p>
         <p>Your playlists can be shared as a one-line code that contains just the list of songs. Nothing is uploaded: the code itself is the playlist.</p>
       </section>
 
@@ -335,6 +359,9 @@ backdrop = false           # true: soft glows in the playing song's colors</code
             <tr><td>Mute</td><td><kbd>M</kbd></td></tr>
             <tr><td>Shuffle / repeat</td><td><kbd>S</kbd> / <kbd>R</kbd></td></tr>
             <tr><td>Search</td><td><kbd>Ctrl</kbd> + <kbd>K</kbd></td></tr>
+            <tr><td>Lyrics</td><td><kbd>L</kbd></td></tr>
+            <tr><td>Mini player</td><td><kbd>Ctrl</kbd> + <kbd>M</kbd></td></tr>
+            <tr><td>Gaming Mode on / off</td><td><kbd>Ctrl</kbd> + <kbd>G</kbd></td></tr>
             <tr><td>Back / forward between pages</td><td><kbd>Alt</kbd> + <kbd>←</kbd> / <kbd>Alt</kbd> + <kbd>→</kbd>, or your mouse's side buttons</td></tr>
             <tr><td>Move between buttons and songs</td><td><kbd>Tab</kbd> / <kbd>Shift</kbd> + <kbd>Tab</kbd></td></tr>
             <tr><td>On a song: play / add to queue / play next</td><td><kbd>Enter</kbd> / <kbd>Q</kbd> / <kbd>N</kbd></td></tr>
@@ -362,6 +389,11 @@ cargo run --release</code></pre>
             <tr><td><code>src/dsp.rs</code></td><td>Equalizer, mono, fades and silence detection</td></tr>
             <tr><td><code>src/youtube.rs</code></td><td>Installing and updating yt-dlp and Deno, matching songs to videos, getting audio links</td></tr>
             <tr><td><code>src/deezer.rs</code></td><td>Song info, artwork, charts, artist and album pages</td></tr>
+            <tr><td><code>src/import.rs</code></td><td>Importing playlists from YouTube, Spotify and SoundCloud</td></tr>
+            <tr><td><code>src/suggest.rs</code></td><td>Search suggestions while you type, and how they're ranked</td></tr>
+            <tr><td><code>src/audiocache.rs</code>, <code>src/artcache.rs</code></td><td>Songs and covers kept on disk so they load at once</td></tr>
+            <tr><td><code>src/backup.rs</code></td><td>Backups, the spare copy of your library, and recovering a damaged one</td></tr>
+            <tr><td><code>src/lyrics.rs</code>, <code>src/discord.rs</code>, <code>src/update.rs</code></td><td>Lyrics, Discord status, and checked, signed updates</td></tr>
             <tr><td><code>src/account.rs</code>, <code>src/ui/online.rs</code></td><td>Accounts: signing up and in, password resets, public playlists, profiles</td></tr>
             <tr><td><code>server/</code></td><td>The accounts server (a Cloudflare Worker with a D1 database) and its tests</td></tr>
             <tr><td><code>src/app.rs</code></td><td>Pages and history, the queue, shuffle and repeat, your library, saving</td></tr>
@@ -381,6 +413,10 @@ cargo run --release</code></pre>
         <p>Pulse is downloading its playback tools (about 70 MB, once). The player bar shows the progress. After that, songs start in a few seconds.</p>
         <h3>A song won't play</h3>
         <p>YouTube may not have a full version of it, or YouTube changed something and yt-dlp hasn't caught up yet. Pulse updates yt-dlp daily, so trying again later often works. Pulse skips to the next song after a failure.</p>
+        <h3>Pulse says my library file was damaged</h3>
+        <p>Pulse has already put it right, from the spare copy (nothing lost) or the newest backup (anything since that backup is missing). If a backup is missing something you need, Settings → Your data lists every backup to restore from. The damaged file is kept in the <code>backups</code> folder.</p>
+        <h3>Covers are missing</h3>
+        <p>Pulse shows a music note in place of a cover it couldn't download, usually because you're offline. Covers come back when you're online again.</p>
         <h3>The window flickers or stays blank</h3>
         <p>Turn off <strong>Settings → Compatibility → Enable hardware acceleration</strong> and restart Pulse. It will draw with Windows' software renderer instead.</p>
         <h3>I can't sign in</h3>

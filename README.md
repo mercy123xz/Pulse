@@ -56,7 +56,8 @@
   **own playlists**, with custom covers, search, genre filters, sorting and "date added"
 - **Import playlists** from YouTube, Spotify or SoundCloud by pasting a link
 - **Download songs** for offline listening, and play the music files in your **Music folder**
-- Your library is saved on your PC, with automatic backups
+- Your library is saved on your PC, with daily backups and a spare copy: if the file is ever
+  damaged (a crash or power cut while saving), Pulse opens the spare copy or the newest backup
 
 **Share (optional)**
 - A free **Pulse account** lets you make playlists public and have a profile people can find
@@ -123,9 +124,14 @@ everything gone.
 | Mute | <kbd>M</kbd> |
 | Shuffle / repeat | <kbd>S</kbd> / <kbd>R</kbd> |
 | Search | <kbd>Ctrl</kbd> + <kbd>K</kbd> |
+| Lyrics | <kbd>L</kbd> |
+| Mini player | <kbd>Ctrl</kbd> + <kbd>M</kbd> |
+| Gaming Mode on / off | <kbd>Ctrl</kbd> + <kbd>G</kbd> |
 | Back / forward between pages | <kbd>Alt</kbd> + <kbd>←</kbd> / <kbd>Alt</kbd> + <kbd>→</kbd> (or your mouse's side buttons) |
 | Move between buttons and songs | <kbd>Tab</kbd> / <kbd>Shift</kbd> + <kbd>Tab</kbd> |
 | On a selected song: play / add to queue / play next | <kbd>Enter</kbd> / <kbd>Q</kbd> / <kbd>N</kbd> |
+| Select several songs | <kbd>Ctrl</kbd> or <kbd>Shift</kbd> + click, <kbd>Ctrl</kbd> + <kbd>A</kbd> for all |
+| Remove selected songs from your playlist | <kbd>Delete</kbd> |
 | Quit | <kbd>Ctrl</kbd> + <kbd>Q</kbd> |
 
 Right-click any song for more options, like adding it to one of your playlists.
@@ -162,6 +168,12 @@ On Linux you'll also need the ALSA development headers (`sudo apt install libaso
 | `src/account.rs`, `src/ui/online.rs` | Pulse accounts: signing up and in, password resets, public playlists, profiles |
 | `server/` | The accounts server (a Cloudflare Worker with a D1 database) and its tests |
 | `src/audiocache.rs` | Songs you played, kept on disk so they start instantly next time |
+| `src/artcache.rs` | Covers, kept on disk and let go of in memory when off screen |
+| `src/backup.rs` | Daily backups, the spare copy of your library, and recovering a damaged one |
+| `src/lyrics.rs` | Synced lyrics from LRCLIB |
+| `src/discord.rs` | Discord status, through the Discord app on your PC |
+| `src/update.rs` | Update checks; installers are only run if their signature checks out |
+| `src/perf.rs` | Gaming Mode and Ultra-low mode |
 | `src/downloads.rs` | Downloading songs for offline listening |
 | `src/local.rs` | Songs from the Music folder |
 | `src/net.rs` | Shared HTTP helpers |
@@ -184,13 +196,16 @@ Run the tests with `cargo test`, and the accounts server's with `node server/tes
 - [rodio](https://github.com/RustAudio/rodio) and [Symphonia](https://github.com/pdeljanov/Symphonia): audio playback and MP3/AAC decoding
 - [yt-dlp](https://github.com/yt-dlp/yt-dlp) and [Deno](https://deno.com): finding and streaming songs from YouTube (downloaded on first use)
 - [Deezer API](https://developers.deezer.com/api): song info, artwork and charts
+- [LRCLIB](https://lrclib.net): synced lyrics
+- [Cloudflare Workers](https://workers.cloudflare.com) and D1: the optional accounts server
 - [ureq](https://github.com/algesten/ureq) with [rustls](https://github.com/rustls/rustls): networking
 - [Inno Setup](https://jrsoftware.org/isinfo.php): the installer
 - [Phosphor Icons](https://phosphoricons.com) and the [Inter](https://rsms.me/inter/) typeface (SIL Open Font License)
 
 ## About the music
 
-Song info, artwork and charts come from the free [Deezer API](https://developers.deezer.com/api).
+Song info, artwork and charts come from the free [Deezer API](https://developers.deezer.com/api),
+and lyrics from [LRCLIB](https://lrclib.net).
 The audio is streamed from YouTube using yt-dlp. Streaming YouTube outside its own apps may go
 against YouTube's Terms of Service; use Pulse for personal listening and support the artists you
 enjoy. Pulse only plays full songs: if YouTube can't play one, Pulse says so and you can skip to the next.
