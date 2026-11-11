@@ -1,11 +1,14 @@
-# 3D headphones
+# The headphones at the top of the page
 
-`headphones.src.js` builds the headphones in the download section from simple shapes
-with [three.js](https://threejs.org) (MIT). It's bundled into `../headphones.js`:
+`headphones.src.js` builds the headphones in code with three.js. The page loads the
+bundled copy, `../headphones.js`, after everything else, and shows the still picture
+`../img/headphones.webp` until then (and for good where WebGL isn't available).
 
-```
-npm install three esbuild
-npx esbuild 3d/headphones.src.js --bundle --format=esm --minify --target=es2020 --legal-comments=eof --outfile=headphones.js
-```
+To rebuild after a change:
 
-The page loads it only when the download section comes near.
+    npm install three esbuild
+    npx esbuild headphones.src.js --bundle --format=esm --minify --target=es2020 \
+      --legal-comments=eof --outfile=../headphones.js
+
+The still picture is the model's resting pose: `mount(canvas).snapshot()` on a 900 by 900
+canvas returns it as an image.
