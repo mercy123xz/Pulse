@@ -7,8 +7,10 @@
 // password), sign-in sessions (only a hash of each session key), your profile text, and
 // the playlists you make public. Deleting your account deletes all of it.
 //
-// Sending email needs one secret: BREVO_API_KEY (or RESEND_API_KEY), plus a MAIL_FROM
-// variable with the address it comes from. See server/README.md.
+// Sending email goes through EmailJS (your own Gmail, no domain or postal address
+// needed): EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, EMAILJS_PUBLIC_KEY and the secret
+// EMAILJS_PRIVATE_KEY. Brevo (BREVO_API_KEY + MAIL_FROM) or Resend (RESEND_API_KEY +
+// MAIL_FROM) work too. See server/README.md.
 
 const ALLOWED_ORIGINS = ["https://mercy123xz.github.io", "https://pulse.is-a.software"];
 
@@ -168,9 +170,31 @@ async function emailFree(c, email, exceptId = 0) {
 const findUser = (c, who) =>
   c.env.DB.prepare(`SELECT id, username, email, pass_hash, pass_salt, bio, created FROM users WHERE ${who.includes("@") ? "email" : "username"} = ?`).bind(who).first();
 
-// Sends one email through Brevo or Resend, whichever has a key set.
-async function sendMail(env, to, subject, text, html) {
-  if (typeof env.MAIL_HOOK === "function") return env.MAIL_HOOK({ to, subject, text, html }); // tests
+const emailjsReady = (env) => !!(env.EMAILJS_SERVICE_ID && env.EMAILJS_TEMPLATE_ID && env.EMAILJS_PUBLIC_KEY && env.EMAILJS_PRIVATE_KEY);
+const mailReady = (env) => typeof env.MAIL_HOOK === "function" || emailjsReady(env) || !!(env.MAIL_FROM && (env.BREVO_API_KEY || env.RESEND_API_KEY));
+
+// Sends one email through EmailJS, Brevo or Resend, whichever is set up. `params` are
+// the values an EmailJS template fills in.
+async function sendMail(env, to, subject, text, html, params = {}) {
+  if (typeof env.MAIL_HOOK === "function") return env.MAIL_HOOK({ to, subject, text, html, params }); // tests
+  if (emailjsReady(env)) {
+    const r = await fetch("https://api.emailjs.com/api/v1.0/email/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        service_id: env.EMAILJS_SERVICE_ID,
+        template_id: env.EMAILJS_TEMPLATE_ID,
+        user_id: env.EMAILJS_PUBLIC_KEY,
+        accessToken: env.EMAILJS_PRIVATE_KEY,
+        template_params: { to_email: to, subject, message: text, ...params },
+      }),
+    });
+    if (!r.ok) {
+      console.error("emailjs", r.status, await r.text().catch(() => ""));
+      fail(502, "The email couldn't be sent. Please try again in a few minutes.");
+    }
+    return;
+  }
   const from = String(env.MAIL_FROM || "");
   const m = from.match(/^\s*(.*?)\s*<([^>]+)>\s*$/);
   const sender = m ? { name: m[1] || "Pulse", email: m[2] } : { name: "Pulse", email: from.trim() };
@@ -360,7 +384,7 @@ async function resetStart(c) {
   const b = await body(c);
   const who = str(b.who, 300).toLowerCase();
   if (!who) fail(400, "Enter your username or email address.");
-  if (!c.env.MAIL_HOOK && !(c.env.MAIL_FROM && (c.env.BREVO_API_KEY || c.env.RESEND_API_KEY))) fail(503, "Password reset isn't set up on the server yet.");
+  if (!mailReady(c.env)) fail(503, "Password reset isn't set up on the server yet.");
   if (await overLimit(c, "reset", c.ip, RESET_MAILS_PER_IP_PER_HOUR, 3600)) fail(429, "Too many codes asked for from here. Please try again later.");
   await note(c, "reset", c.ip);
   const sent = { ok: true, message: "If that account has an email address, a code is on its way. Check your spam folder if it doesn't arrive in a minute." };
@@ -379,7 +403,7 @@ async function resetStart(c) {
 <p style="font-size:32px;font-weight:700;letter-spacing:6px;margin:0 0 16px;color:#6d28d9">${code}</p>
 <p style="margin:0 0 16px">Enter it in Pulse to choose a new password. It works for ${RESET_MINUTES} minutes.</p>
 <p style="margin:0;color:#6b6880;font-size:13px">If you didn't ask for this, you can ignore this email: your password hasn't changed.</p></div>`;
-  await sendMail(c.env, u.email, `${code} is your Pulse code`, text, html);
+  await sendMail(c.env, u.email, `${code} is your Pulse code`, text, html, { username: u.username, code, minutes: String(RESET_MINUTES) });
   return c.reply(200, sent);
 }
 

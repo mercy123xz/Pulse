@@ -1,9 +1,8 @@
 # Pulse accounts server
 
 Accounts, public playlists and profiles for Pulse. It's a Cloudflare Worker with a D1
-database, on Cloudflare's free plan. To email password-reset codes it uses
-[Brevo](https://www.brevo.com) (free for up to 300 emails a day), or Resend if you have your own
-domain.
+database, on Cloudflare's free plan. Password-reset codes are emailed from your Gmail through
+[EmailJS](https://www.emailjs.com) (free), or through Brevo or Resend.
 
 ## Upgrading a server set up before emails (do this before releasing the app that needs it)
 
@@ -32,25 +31,33 @@ Existing accounts keep working. Pulse asks each one to add an email the next tim
    Set **Variable name** to `DB`, choose `pulse-accounts`, and press **Add binding**.
 6. **Check it.** Open the Worker's address (`https://pulse-accounts.<you>.workers.dev/`). It
    should say `{"ok":true,"service":"pulse-accounts"}`.
-7. **Set up email** (for "Forgot password?"):
-   1. Make a free account at [brevo.com](https://www.brevo.com).
-   2. Open the menu with your name (top right) → **Senders, Domains & Dedicated IPs → Senders →
-      Add sender**. Name: `Pulse`. Email:
-      an address you own. Brevo emails it a link: open it to confirm the address.
-   3. From the same menu, open **SMTP & API → API keys** and press **Generate a new API key**.
-      Name it `pulse-accounts` and copy it. It's only shown once.
-   4. In Cloudflare, open the Worker's **Settings → Variables and Secrets → Add**:
-      - Type **Secret**, name `BREVO_API_KEY`, value: the key you copied.
-      - Type **Text**, name `MAIL_FROM`, value: `Pulse <the address from step 2>`.
+7. **Set up email** (for "Forgot password?"). Codes are sent from your own Gmail through
+   [EmailJS](https://www.emailjs.com) (free for 200 emails a month; no domain or postal address):
+   1. Make a free EmailJS account. Under **Email Services → Add New Service**, choose **Gmail**,
+      connect the Gmail the codes should come from, and press **Create Service**. Note its
+      **Service ID**.
+   2. Under **Email Templates → Create New Template**, set:
+      - **Subject:** `{{code}} is your Pulse code`
+      - **Content:** `Hi @{{username}}, your Pulse code is {{code}}. Enter it in Pulse to choose a
+        new password. It works for {{minutes}} minutes. If you didn't ask for this, ignore this
+        email: your password hasn't changed.`
+      - **To Email** (on the right): `{{to_email}}`. **From Name:** `Pulse`.
+
+      Save it and note its **Template ID**.
+   3. Under **Account → General**, note your **Public Key** and **Private Key**. Under
+      **Account → Security**, turn on **Allow EmailJS API for non-browser applications**
+      (the server isn't a browser).
+   4. In Cloudflare, open the Worker's **Settings → Variables and Secrets** and add:
+      - Text `EMAILJS_SERVICE_ID`, `EMAILJS_TEMPLATE_ID` and `EMAILJS_PUBLIC_KEY`
+      - Secret `EMAILJS_PRIVATE_KEY`
 
       Press **Deploy**.
    5. Try it: in Pulse, press **Forgot password?** when signing in and enter your username.
 
    Until this is done, "Forgot password?" says it isn't set up yet; everything else works.
-   Emails sent from a free address (like Gmail) through a mail service sometimes land in spam.
-   With your own domain, verify the domain in Brevo and use an address on it. To use
-   [Resend](https://resend.com) instead (it needs your own domain), set `RESEND_API_KEY` in
-   place of `BREVO_API_KEY`.
+   Instead of EmailJS you can use [Brevo](https://www.brevo.com) (`BREVO_API_KEY` and
+   `MAIL_FROM` = `Pulse <address>`; it asks for a postal address) or
+   [Resend](https://resend.com) (`RESEND_API_KEY` and `MAIL_FROM`; it needs your own domain).
 
 Then put that address in `ACCOUNTS_URL` in `src/account.rs` and `ACCOUNTS` in `site/share.js`.
 
