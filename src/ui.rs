@@ -1249,6 +1249,18 @@ fn search(app: &mut App, ui: &mut Ui, q: &str) {
         {
             suggestion_row(app, ui, "search_also", &crate::deezer::Suggestion::AlsoListen(name.clone(), related.clone()));
         }
+        // The top songs start loading once the results have stayed up for a moment
+        // (not for every letter while you type), so the one you press plays at once.
+        if !r.tracks.is_empty() {
+            let key = egui::Id::new(("search_warm", &query));
+            let now = ui.input(|i| i.time);
+            let since: f64 = ui.data_mut(|d| *d.get_temp_mut_or(key, now));
+            if now - since >= 0.7 {
+                app.warm_list(&r.tracks);
+            } else {
+                ui.ctx().request_repaint_after(std::time::Duration::from_millis(250));
+            }
+        }
         if (all || filter == 1) && !r.tracks.is_empty() {
             section_title(ui, "Songs", None);
             let shown = if all { &r.tracks[..r.tracks.len().min(10)] } else { &r.tracks[..] };
