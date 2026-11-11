@@ -6,6 +6,7 @@ description = "A fast, native music player written in Rust: any song, with info 
 
 [dependencies]
 # Window + UI
+ron = "0.12"
 eframe = { version = "0.36", default-features = false, features = ["accesskit", "default_fonts", "glow", "persistence", "wayland", "x11"] }
 egui = "0.36"
 # Loads album art straight from URLs (ui.image("https://..."))

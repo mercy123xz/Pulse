@@ -761,8 +761,10 @@ pub struct App {
     /// Featured-artist lookups: waiting, and results coming back.
     featured_queue: std::collections::VecDeque<u64>,
     featured_busy: bool,
-    featured_tx: Sender<(String, Vec<deezer::ArtistRef>)>,
-    featured_rx: Receiver<(String, Vec<deezer::ArtistRef>)>,
+    featured_tx: Sender<(String, Option<Vec<deezer::ArtistRef>>)>,
+    featured_rx: Receiver<(String, Option<Vec<deezer::ArtistRef>>)>,
+    /// Songs whose featured artists couldn't be looked up this time.
+    featured_failed: HashSet<String>,
     /// Imported songs that weren't found on Deezer, checked again this session.
     rematch_tried: HashSet<String>,
     rematch_rx: Option<Receiver<Rematch>>,
@@ -852,7 +854,11 @@ pub struct App {
     views_failed: HashSet<String>,
     views_tx: Sender<(String, Option<(String, u64)>)>,
     views_rx: Receiver<(String, Option<(String, u64)>)>,
-    genre_rx: Option<Receiver<(String, Vec<String>)>>,
+    genre_rx: Option<Receiver<(String, Option<Vec<String>>)>>,
+    /// Albums whose genres couldn't be looked up this time (offline, Deezer busy).
+    genre_failed: HashSet<String>,
+    /// Said once the window is up (the library had to be recovered).
+    startup_note: Option<String>,
     genre_pending: HashSet<String>,
 }
 
@@ -863,7 +869,10 @@ impl App {
         // Pictures from the web: saved on disk, let go of in memory when off screen.
         crate::artcache::ArtLoader::install(&cc.egui_ctx);
 
-        let saved: Saved = cc.storage.and_then(|s| eframe::get_value(s, STORAGE_KEY)).unwrap_or_default();
+        // A damaged save file (cut off by a crash or power cut) is recovered from the spare
+        // copy or the newest backup, rather than starting over with an empty library.
+        let main_file = eframe::storage_dir("pulse-player").map(|d| d.join("app.ron"));
+        let (saved, load_note) = crate::backup::load(cc.storage.and_then(|s| s.get_string(STORAGE_KEY)), main_file.as_deref());
         let themes = crate::themes::list();
         crate::i18n::set_language(saved.settings.language);
         crate::perf::apply(saved.settings.perf_mode, &saved.settings.perf_keep);
@@ -963,6 +972,7 @@ impl App {
             featured_busy: false,
             featured_tx,
             featured_rx,
+            featured_failed: HashSet::new(),
             rematch_rx: None,
             told_next: None,
             themes,
@@ -986,6 +996,8 @@ impl App {
             views_tx,
             views_rx,
             genre_rx: None,
+            genre_failed: HashSet::new(),
+            startup_note: None,
             genre_pending: HashSet::new(),
         };
         // Pulse 0.2 had only a light/dark switch: carry it over to the Default theme.
@@ -1001,6 +1013,7 @@ impl App {
         crate::audiocache::set_limit_mb(app.saved.settings.replay_cache_mb);
         std::thread::spawn(crate::artcache::trim_disk);
         app.apply_theme(&cc.egui_ctx);
+        app.startup_note = load_note;
         // The first time Pulse opens (and once after updating): offer an account. The local
         // profile window comes after, if you choose "Not now".
         if crate::account::available() && crate::account::session().is_none() && !app.saved.account_asked {
@@ -1098,7 +1111,13 @@ impl App {
             ids.clear(); // keep the saved file small; ids are found again when needed
         }
         self.saved.youtube_ids = ids;
-        eframe::set_value(storage, STORAGE_KEY, &self.saved);
+        match ron::ser::to_string(&self.saved) {
+            Ok(text) => {
+                crate::backup::write_spare(&text);
+                storage.set_string(STORAGE_KEY, text);
+            }
+            Err(e) => eprintln!("couldn't save the library: {e}"),
+        }
     }
 
     /// Keeps the lookups remembered between runs from growing without end.
@@ -1982,7 +2001,16 @@ impl App {
         if let Some(rx) = &self.genre_rx {
             while let Ok((id, g)) = rx.try_recv() {
                 self.genre_pending.remove(&id);
-                self.saved.album_genres.insert(id, g);
+                match g {
+                    Some(g) => {
+                        self.saved.album_genres.insert(id, g);
+                    }
+                    // Couldn't ask (offline, Deezer busy): not remembered, so it's asked
+                    // again next time Pulse opens; skipped for now so it isn't asked in a loop.
+                    None => {
+                        self.genre_failed.insert(id);
+                    }
+                }
             }
         }
         if !self.genre_pending.is_empty() {
@@ -1992,7 +2020,7 @@ impl App {
             .iter()
             .filter_map(|t| t.album.as_ref())
             .map(|a| a.id.clone())
-            .filter(|id| deezer::is_deezer_id(id) && !self.saved.album_genres.contains_key(id))
+            .filter(|id| deezer::is_deezer_id(id) && !self.saved.album_genres.contains_key(id) && !self.genre_failed.contains(id))
             .collect::<HashSet<_>>()
             .into_iter()
             .take(40)
@@ -2007,11 +2035,12 @@ impl App {
         std::thread::spawn(move || {
             for id in missing {
                 // Albums without genres are remembered as empty, so they aren't asked for again.
-                let g = deezer::album_genres(&id).unwrap_or_default();
+                let g = deezer::album_genres(&id).ok();
                 if tx.send((id, g)).is_err() {
                     return;
                 }
-                ctx.request_repaint();
+                // One redraw for a batch of answers, not one each.
+                ctx.request_repaint_after(Duration::from_millis(800));
                 // Stay well under Deezer's limit of 50 requests per 5 seconds.
                 std::thread::sleep(Duration::from_millis(150));
             }
@@ -2166,6 +2195,7 @@ impl App {
             if let Some(n) = t.deezer_number()
                 && t.featured.is_empty()
                 && !self.saved.featured_checked.contains(&t.id)
+                && !self.featured_failed.contains(&t.id)
                 && !self.featured_queue.contains(&n)
             {
                 self.featured_queue.push_back(n);
@@ -2176,6 +2206,11 @@ impl App {
     fn run_featured(&mut self, ctx: &egui::Context) {
         while let Ok((id, featured)) = self.featured_rx.try_recv() {
             self.featured_busy = false;
+            // Couldn't ask (offline, Deezer busy): asked again another time.
+            let Some(featured) = featured else {
+                self.featured_failed.insert(id);
+                continue;
+            };
             self.saved.featured_checked.insert(id.clone());
             if !featured.is_empty() {
                 self.update_track(&id, |t| t.featured = featured.clone());
@@ -2193,9 +2228,9 @@ impl App {
         std::thread::spawn(move || {
             // Paced well under Deezer's limit, since this runs alongside everything else.
             std::thread::sleep(Duration::from_millis(250));
-            let featured = deezer::featured_artists(n).unwrap_or_default();
+            let featured = deezer::featured_artists(n).ok();
             let _ = tx.send((format!("dz:{n}"), featured));
-            ctx.request_repaint();
+            ctx.request_repaint_after(Duration::from_millis(800));
         });
     }
 
@@ -3275,6 +3310,9 @@ impl eframe::App for App {
             eprintln!("frame {} causes {:?}", ctx.cumulative_frame_nr(), ctx.repaint_causes());
         }
         self.tick(&ctx);
+        if let Some(note) = self.startup_note.take() {
+            self.toast(crate::i18n::tr(&note), &ctx);
+        }
         // Minimized: nothing to draw (the music and the mini player carry on).
         if !ctx.input(|i| i.viewport().minimized.unwrap_or(false)) {
             crate::ui::draw(self, ui);

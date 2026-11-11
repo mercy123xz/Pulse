@@ -74,6 +74,14 @@ pub fn artwork(ui: &Ui, rect: Rect, url: Option<&str>, radius: CornerRadius) {
             };
             img = img.uv(uv);
         }
+        paint_loaded(ui, img, rect);
+    }
+}
+
+/// Paints a picture once it's there. One that couldn't be downloaded (offline, a dead
+/// link) leaves the placeholder underneath, instead of egui's red "failed" mark.
+fn paint_loaded(ui: &Ui, img: egui::Image, rect: Rect) {
+    if img.load_for_size(ui.ctx(), rect.size()).is_ok() {
         img.paint_at(ui, rect);
     }
 }
@@ -122,7 +130,7 @@ pub fn artwork_cover(ui: &Ui, rect: Rect, url: Option<&str>, radius: CornerRadiu
         Rect::from_min_max(pos2(left, 0.0), pos2(left + w, 1.0))
     };
     crate::artcache::drawn(url);
-    egui::Image::new(url).uv(uv).corner_radius(radius).show_loading_spinner(false).paint_at(ui, rect);
+    paint_loaded(ui, egui::Image::new(url).uv(uv).corner_radius(radius).show_loading_spinner(false), rect);
 }
 
 pub fn vgradient(ui: &Ui, rect: Rect, top: Color32, bottom: Color32) {

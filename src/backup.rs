@@ -115,11 +115,107 @@ fn prune(kind: Kind) {
     }
 }
 
+// ---------------------------------------------------------------- the spare copy
+
+/// A second copy of the library. The main save file (eframe's) is rewritten in place, so a
+/// crash or power cut in the middle of saving can leave it cut off. This one is written to
+/// a temporary file first and only then put in place, so it's always whole.
+pub fn spare_copy() -> PathBuf {
+    crate::settings::data_dir().join("library.ron")
+}
+
+static SPARE_LAST: std::sync::Mutex<u64> = std::sync::Mutex::new(0);
+static SPARE_TURN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static SPARE_WRITING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Writes the spare copy (in the background), if the library changed since the last one.
+pub fn write_spare(text: &str) {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    text.hash(&mut h);
+    let hash = h.finish();
+    {
+        let mut last = SPARE_LAST.lock().unwrap();
+        if *last == hash {
+            return;
+        }
+        *last = hash;
+    }
+    let turn = SPARE_TURN.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+    let text = text.to_owned();
+    std::thread::spawn(move || {
+        let _one_at_a_time = SPARE_WRITING.lock();
+        if SPARE_TURN.load(std::sync::atomic::Ordering::SeqCst) != turn {
+            return; // a newer one is waiting to be written
+        }
+        if write_whole(&spare_copy(), text.as_bytes()).is_err() {
+            *SPARE_LAST.lock().unwrap() = 0; // try again next save
+        }
+    });
+}
+
+/// Writes a file so it's never seen half-written: a temporary file, then a rename.
+fn write_whole(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let tmp = path.with_extension("tmp");
+    let mut f = std::fs::File::create(&tmp)?;
+    f.write_all(bytes)?;
+    f.sync_all()?;
+    drop(f);
+    std::fs::rename(&tmp, path)
+}
+
+/// Your library as Pulse last saved it. `saved` is what the main save file holds under
+/// Pulse's name (None if nothing), `main_file` that file. If it can't be read, the spare
+/// copy is loaded, or else the newest backup; the damaged file is kept next to the backups.
+/// Returns the library and, if it had to be recovered, a message saying what happened.
+pub fn load(saved: Option<String>, main_file: Option<&Path>) -> (Saved, Option<String>) {
+    load_from(saved, main_file, &spare_copy(), &dir())
+}
+
+fn load_from(saved: Option<String>, main_file: Option<&Path>, spare: &Path, backups: &Path) -> (Saved, Option<String>) {
+    if let Some(lib) = saved.as_deref().and_then(|t| ron::from_str::<Saved>(t).ok()) {
+        return (lib, None);
+    }
+    let main_bytes = main_file.and_then(|f| std::fs::read(f).ok()).unwrap_or_default();
+    let damaged = saved.is_some() || main_bytes.windows(14).any(|w| w == b"pulse_state_v1");
+    if !damaged {
+        return (Saved::default(), None); // the first time Pulse opens
+    }
+    // Keep the damaged file, in case there's something in it worth getting back.
+    let kept = backups.join(format!("damaged-library-{}.ron", crate::crash::now()));
+    let _ = std::fs::create_dir_all(backups);
+    let _ = std::fs::write(&kept, &main_bytes);
+    if let Some(lib) = std::fs::read_to_string(spare).ok().and_then(|t| ron::from_str::<Saved>(&t).ok()) {
+        return (lib, Some("Your library file was damaged, so Pulse opened its spare copy. Nothing was lost.".into()));
+    }
+    let newest = std::fs::read_dir(backups)
+        .map(|rd| rd.flatten().filter_map(|e| info(&e.path())).collect::<Vec<_>>())
+        .unwrap_or_default()
+        .into_iter()
+        .max_by_key(|b| b.made);
+    if let Some(b) = newest
+        && let Ok(lib) = read(&b.path)
+    {
+        let mut out = Saved::default();
+        restore_into(&mut out, lib);
+        let days = crate::crash::now().saturating_sub(b.made) / 86_400;
+        let when = match days {
+            0 => "today".to_string(),
+            1 => "yesterday".to_string(),
+            n => format!("{n} days ago"),
+        };
+        return (out, Some(format!("Your library file was damaged, so Pulse restored the backup from {when}.")));
+    }
+    (Saved::default(), Some("Your library file was damaged and there was no backup to restore. A copy of it was kept in the backups folder.".into()))
+}
+
 /// All backups, newest first.
 pub fn list() -> Vec<Info> {
-    let mut out: Vec<Info> = std::fs::read_dir(dir())
-        .map(|rd| rd.flatten().filter_map(|e| info(&e.path())).collect())
-        .unwrap_or_default();
+    let mut out: Vec<Info> = std::fs::read_dir(dir()).map(|rd| rd.flatten().filter_map(|e| info(&e.path())).collect()).unwrap_or_default();
     out.sort_by_key(|b| std::cmp::Reverse(b.made));
     out
 }
@@ -212,6 +308,47 @@ mod tests {
         assert_eq!(current.volume, 0.25, "the player stays as it is");
         assert!(current.downloads.contains_key("dz:9"), "downloaded files aren't forgotten");
         let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn a_damaged_library_is_recovered() {
+        let dir = std::env::temp_dir().join(format!("pulse-recover-test-{}", std::process::id()));
+        let backups = dir.join("backups");
+        let spare = dir.join("library.ron");
+        let main = dir.join("app.ron");
+        std::fs::create_dir_all(&backups).unwrap();
+        let mut lib = Saved::default();
+        lib.liked.push(crate::deezer::Track { id: "dz:1".into(), title: "Song".into(), ..Default::default() });
+        let text = ron::ser::to_string(&lib).unwrap();
+
+        // Fine: read as it is, nothing to say.
+        let (got, note) = load_from(Some(text.clone()), Some(&main), &spare, &backups);
+        assert_eq!((got.liked.len(), note), (1, None));
+        // The first time Pulse opens: an empty library, nothing to say.
+        let (got, note) = load_from(None, Some(&main), &spare, &backups);
+        assert_eq!((got.liked.len(), note), (0, None));
+
+        // Cut off in the middle of saving, no spare copy, no backup: says so, keeps the file.
+        std::fs::write(&main, format!("{{\"pulse_state_v1\": \"{}", &text[..text.len() / 2])).unwrap();
+        let (got, note) = load_from(None, Some(&main), &spare, &backups);
+        assert!(got.liked.is_empty() && note.unwrap().contains("no backup"));
+        assert!(std::fs::read_dir(&backups).unwrap().flatten().any(|e| e.file_name().to_string_lossy().starts_with("damaged-library-")));
+
+        // With a backup: restored from it.
+        let mut older = lib.clone();
+        older.liked.push(crate::deezer::Track { id: "dz:2".into(), title: "Old".into(), ..Default::default() });
+        write_to(&older, &backups.join("library-day-1.json")).unwrap();
+        let (got, note) = load_from(Some(text[..20].to_string()), Some(&main), &spare, &backups);
+        assert_eq!(got.liked.len(), 2);
+        assert!(note.unwrap().contains("restored the backup from today"));
+
+        // With the spare copy: that comes first, and nothing is lost.
+        write_whole(&spare, text.as_bytes()).unwrap();
+        let (got, note) = load_from(None, Some(&main), &spare, &backups);
+        assert_eq!(got.liked.len(), 1);
+        assert!(note.unwrap().contains("Nothing was lost"));
+        assert!(!spare.with_extension("tmp").exists(), "no temporary file left behind");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
