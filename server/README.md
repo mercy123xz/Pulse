@@ -8,7 +8,9 @@ database, on Cloudflare's free plan. It needs no secrets.
 1. **Make the database.** In the Cloudflare dashboard, go to **Storage & databases → D1 SQL
    database → Create**. Name it `pulse-accounts`.
 2. **Make its tables.** Open the database, go to the **Console** tab, paste all of
-   [`schema.sql`](schema.sql), and press **Execute**.
+   [`schema.sql`](schema.sql) (one statement per line, no comments: the console can't read
+   comments), and press **Execute**. The **Tables** tab should then list `users`,
+   `sessions`, `playlists`, `reports` and `attempts`.
 3. **Make the Worker.** Go to **Compute (Workers) → Create → Start with Hello World**. Name it
    `pulse-accounts` and press **Deploy**.
 4. **Put the code in.** Press **Edit code**, replace everything with
