@@ -105,6 +105,7 @@ async function route(c, method, path) {
   if (method === "GET" && (p = m(/^\/users\/([A-Za-z0-9_.]{1,20})$/))) return getUser(c, p[1]);
   if (method === "GET" && path === "/search") return searchUsers(c);
   if (method === "POST" && path === "/report") return report(c);
+  if (method === "GET" && path === "/fixes") return songFixes(c);
   fail(404, "Not found.");
 }
 
@@ -540,6 +541,28 @@ async function searchUsers(c) {
     .bind(q, q + "￿")
     .all();
   return c.reply(200, { users: rows.results || [] });
+}
+
+// Song fixes: real lengths for songs the catalog lists as a 30-second clip, and the video
+// to play for songs that keep finding the wrong one. Read-only here; added in Cloudflare.
+async function songFixes(c) {
+  const ids = [...new Set((new URL(c.request.url).searchParams.get("ids") || "").split(","))]
+    .map((s) => s.trim())
+    .filter((s) => /^[a-z]+:[\w.-]{1,64}$/i.test(s))
+    .slice(0, 100);
+  const fixes = {};
+  if (ids.length) {
+    const rows = await c.env.DB.prepare(`SELECT id, duration, video FROM song_fixes WHERE id IN (${ids.map(() => "?").join(",")})`)
+      .bind(...ids)
+      .all();
+    for (const r of rows.results || []) {
+      const fix = {};
+      if (Number.isInteger(r.duration) && r.duration > 0) fix.duration = r.duration;
+      if (r.video && /^[\w-]{6,20}$/.test(r.video)) fix.video = r.video;
+      if (Object.keys(fix).length) fixes[r.id] = fix;
+    }
+  }
+  return c.reply(200, { fixes });
 }
 
 async function report(c) {

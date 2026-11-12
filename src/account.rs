@@ -197,6 +197,12 @@ fn call(method: &str, path: &str, body: Option<Value>, signed_in: bool) -> Resul
     Err(message)
 }
 
+/// Song fixes for these song ids (see `crate::fixes`). Songs without one aren't listed.
+pub fn song_fixes(ids: &[String]) -> Result<std::collections::HashMap<String, crate::fixes::Fix>, String> {
+    let v = call("GET", &format!("/fixes?ids={}", crate::net::encode(&ids.join(","))), None, false)?;
+    parse(v.get("fixes").cloned().unwrap_or(Value::Null))
+}
+
 fn parse<T: for<'de> Deserialize<'de>>(v: Value) -> Result<T, String> {
     serde_json::from_value(v).map_err(|_| "The accounts server sent something Pulse couldn't read.".to_string())
 }

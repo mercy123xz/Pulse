@@ -1030,6 +1030,24 @@ impl App {
         crate::artcache::set_limit_mb(app.saved.settings.art_cache_mb);
         crate::audiocache::set_limit_mb(app.saved.settings.replay_cache_mb);
         std::thread::spawn(crate::artcache::trim_disk);
+        // Real lengths for saved songs Deezer lists only as a clip.
+        let clips: Vec<String> = app
+            .saved
+            .liked
+            .iter()
+            .chain(&app.saved.recent)
+            .chain(app.saved.playlists.iter().flat_map(|p| &p.tracks))
+            .chain(&app.queue)
+            .filter(|t| crate::fixes::is_clip(t))
+            .map(|t| t.id.clone())
+            .collect();
+        if !clips.is_empty() {
+            let ctx = cc.egui_ctx.clone();
+            std::thread::spawn(move || {
+                crate::fixes::lookup(&clips);
+                ctx.request_repaint();
+            });
+        }
         app.apply_theme(&cc.egui_ctx);
         app.startup_note = load_note;
         // The intro every time Pulse opens, followed by "Welcome back" after the first time.
@@ -1866,9 +1884,17 @@ impl App {
     /// The current song's length in seconds. Deezer lists some songs as a 30-second clip;
     /// then it's the length of the audio actually playing.
     pub fn current_length(&self) -> u32 {
-        let listed = self.current.as_ref().map_or(0, |t| t.duration);
+        let Some(t) = &self.current else { return 0 };
+        let listed = crate::fixes::shown_length(t);
         match self.audio.length() {
-            Some(real) if !self.needs_load && listed < 60 && real.as_secs() as u32 > listed => real.as_secs() as u32,
+            Some(real) if !self.needs_load && crate::fixes::is_clip(t) && (60..86_400).contains(&real.as_secs()) => {
+                let secs = real.as_secs() as u32;
+                if listed != secs {
+                    // Shown in the lists from now on too.
+                    crate::fixes::played(&t.id, secs);
+                }
+                secs
+            }
             _ => listed,
         }
     }

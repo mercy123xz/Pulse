@@ -514,7 +514,9 @@ fn is_busy_reply(text: &str) -> bool {
 }
 
 fn tracks(list: List<DzTrack>) -> Vec<Track> {
-    list.data.into_iter().map(|t| track(t, None)).collect()
+    let mut t: Vec<Track> = list.data.into_iter().map(|t| track(t, None)).collect();
+    crate::fixes::apply(&mut t);
+    t
 }
 
 /// Home page: top songs, albums, artists and playlists.
@@ -689,7 +691,7 @@ pub fn same_title(a: &str, b: &str) -> bool {
 
 /// The song's artist: "The Black Eyed Peas" is "Black Eyed Peas", "Macklemore & Ryan
 /// Lewis" is "Macklemore", but "Made famous by Katy Perry" isn't "Katy Perry".
-fn same_artist(wanted: &[String], got: &str) -> bool {
+pub(crate) fn same_artist(wanted: &[String], got: &str) -> bool {
     use crate::youtube::norm;
     let bare = |s: String| s.strip_prefix("the").map(str::to_string).unwrap_or(s);
     let whole = bare(norm(got));
@@ -819,8 +821,10 @@ pub(crate) fn candidates_for_test(artist: &str, title: &str) -> Vec<Track> {
     let (main, _) = split_artists(artist);
     let core = crate::youtube::core_title(title);
     let precise = format!("artist:\"{}\" track:\"{}\"", main.replace('"', ""), core.replace('"', ""));
-    let mut all = get::<List<DzTrack>>("/search/track", &[("q", &precise), ("limit", "25")]).map(tracks).unwrap_or_default();
-    all.extend(get::<List<DzTrack>>("/search/track", &[("q", &format!("{main} {core}")), ("limit", "25")]).map(tracks).unwrap_or_default());
+    // Lengths as Deezer lists them (no fixes applied).
+    let raw = |l: List<DzTrack>| l.data.into_iter().map(|t| track(t, None)).collect::<Vec<_>>();
+    let mut all = get::<List<DzTrack>>("/search/track", &[("q", &precise), ("limit", "25")]).map(raw).unwrap_or_default();
+    all.extend(get::<List<DzTrack>>("/search/track", &[("q", &format!("{main} {core}")), ("limit", "25")]).map(raw).unwrap_or_default());
     all
 }
 
@@ -840,7 +844,7 @@ pub fn rank_songs(q: &str, list: Vec<Track>) -> Vec<Track> {
         let key = |x: &Track| (norm(&core_title(&x.title)), x.artist.id.clone());
         match out.iter_mut().find(|o| key(o) == key(&t)) {
             Some(o) => {
-                let full = |x: &Track| x.duration == 0 || x.duration >= 60;
+                let full = |x: &Track| x.duration >= 60;
                 if (full(&t), t.rank) > (full(o), o.rank) {
                     *o = t;
                 }
@@ -1065,7 +1069,12 @@ struct DzAlbumLabel {
 
 /// One song by its Deezer number.
 pub fn track_by_id(id: u64) -> Result<Track, String> {
-    get::<DzTrack>(&format!("/track/{id}"), &[]).map(|t| track(t, None))
+    get::<DzTrack>(&format!("/track/{id}"), &[]).map(|t| {
+        let mut t = [track(t, None)];
+        crate::fixes::apply(&mut t);
+        let [t] = t;
+        t
+    })
 }
 
 /// An artist's most popular songs.
@@ -1141,7 +1150,8 @@ pub fn album(id: &str) -> Result<(AlbumInfo, Vec<Track>), String> {
     if (list.len() as u64) < info.nb_tracks {
         list = all_pages(&format!("/album/{id}/tracks"), info.nb_tracks as usize).unwrap_or(list);
     }
-    let t = list.into_iter().map(|t| track(t, Some(&info))).collect();
+    let mut t: Vec<Track> = list.into_iter().map(|t| track(t, Some(&info))).collect();
+    crate::fixes::apply(&mut t);
     Ok((info, t))
 }
 
@@ -1171,6 +1181,7 @@ pub fn playlist(id: &str) -> Result<(PlaylistInfo, Vec<Track>), String> {
         && all.len() > t.len()
     {
         t = all.into_iter().map(|x| track(x, None)).collect();
+        crate::fixes::apply(&mut t);
     }
     Ok((info, t))
 }

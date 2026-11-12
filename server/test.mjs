@@ -135,6 +135,11 @@ r = await call("DELETE", "/me", { password: "nope" }, { token: tok3 }); ok(r.sta
 r = await call("DELETE", "/me", { password: "reset pass 3" }, { token: tok3 }); ok(r.status === 200, "deleted");
 ok(env.DB.raw.prepare("SELECT COUNT(*) n FROM playlists").get().n === 0 && env.DB.raw.prepare("SELECT COUNT(*) n FROM reports").get().n === 0, "playlists and reports gone");
 r = await call("GET", "/users/mercy_1"); ok(r.status === 404, "profile gone");
+// song fixes
+env.DB.raw.exec("INSERT INTO song_fixes (id, duration, video, note) VALUES ('dz:1', 227, NULL, 'clip'), ('dz:2', NULL, 'abcDEF12345', 'wrong video'), ('dz:3', NULL, NULL, 'empty')");
+r = await call("GET", "/fixes?ids=dz:1,dz:2,dz:3,dz:4,bad id,dz:1");
+ok(r.status === 200 && r.data.fixes["dz:1"].duration === 227 && r.data.fixes["dz:2"].video === "abcDEF12345" && !r.data.fixes["dz:3"] && !r.data.fixes["dz:4"], "song fixes");
+r = await call("GET", "/fixes"); ok(r.status === 200 && Object.keys(r.data.fixes).length === 0, "no ids, no fixes");
 // junk
 r = await worker.fetch(new Request("https://acc.example/signup", { method: "POST", body: "{nope" }), env); ok(r.status === 400, "bad json");
 r = await call("GET", "/nothing"); ok(r.status === 404, "404");

@@ -40,8 +40,8 @@ fn draw(app: &mut App, ui: &mut Ui, t: &Track, credits: Option<&Credits>, album:
     } else if let Some(al) = &t.album {
         parts.push(al.title.clone());
     }
-    if t.duration > 0 {
-        parts.push(fmt_duration(t.duration));
+    if crate::fixes::shown_length(t) > 0 {
+        parts.push(fmt_duration(crate::fixes::shown_length(t)));
     }
     if let Some((v, _)) = app.saved.views.get(&t.id) {
         parts.push(format!("{} {}", fmt_thousands(*v), tr("views")));

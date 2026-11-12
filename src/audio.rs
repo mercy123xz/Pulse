@@ -853,7 +853,7 @@ impl AudioEngine {
             }
             *timing.lock().unwrap() =
                 Some(if from_ahead { format!("Started in {:.1} s (found ahead of time)", started.elapsed().as_secs_f32()) } else { steps.summary(started) });
-            let duration = decoder.total_duration().filter(|d| !d.is_zero()).unwrap_or(expected);
+            let duration = known_or_long(decoder.total_duration(), expected);
             let ctl = Arc::new(TrackCtl::default());
             let source = Processor::new(decoder, effects, ctl.clone(), 1.0, false);
             {
@@ -993,7 +993,7 @@ impl AudioEngine {
     /// The playing song's real length, once its audio is open.
     pub fn length(&self) -> Option<Duration> {
         let sh = self.shared.lock().unwrap();
-        sh.playing.as_ref().map(|p| p.duration).filter(|d| !d.is_zero())
+        sh.playing.as_ref().map(|p| p.duration).filter(|d| !d.is_zero() && *d < UNKNOWN_LENGTH)
     }
 
     pub fn position(&self) -> Duration {
@@ -1120,7 +1120,7 @@ fn monitor_step(sh: &mut Shared, fx: &Effects, effects: &Arc<SharedEffects>, sha
             let Ok(decoder) = open_streaming_decoder(&src, still.clone(), buffered.clone()) else { return };
             let mut sh = shared.lock().unwrap();
             if still() && sh.next.as_ref().is_some_and(|n| n.id == id) {
-                let duration = decoder.total_duration().filter(|d| !d.is_zero()).unwrap_or(duration);
+                let duration = known_or_long(decoder.total_duration(), duration);
                 sh.prepared = Some(Prepared { id, decoder, duration, buffered });
             }
         });
@@ -1384,4 +1384,13 @@ mod intro_tests {
             assert!(s[i..i + 400].iter().any(|v| v.abs() > 0.02), "hit at {at}");
         }
     }
+}
+
+/// Stands in for a length nobody knows (no crossfade or "next song" until the audio ends).
+const UNKNOWN_LENGTH: Duration = Duration::from_secs(24 * 3600);
+
+/// The audio's own length, else the expected one, else "unknown" (never 0: a 0 length
+/// would move on to the next song at once).
+fn known_or_long(own: Option<Duration>, expected: Duration) -> Duration {
+    own.filter(|d| !d.is_zero()).or(Some(expected).filter(|d| !d.is_zero())).unwrap_or(UNKNOWN_LENGTH)
 }

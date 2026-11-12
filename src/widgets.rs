@@ -873,7 +873,10 @@ fn track_row(ui: &mut Ui, id: egui::Id, list: &str, i: usize, t: &Track, tracks:
     // Rows just off screen are registered too, so Tab can reach them
     // (focusing one then scrolls it into view, see `focus_ring`).
     let resp = ui.interact(rect, id, Sense::click());
-    a11y(ui, &resp, WidgetType::Button, || format!("{} by {}, {}", t.title, t.all_artists(), fmt_duration(t.duration)));
+    a11y(ui, &resp, WidgetType::Button, || match crate::fixes::shown_length(t) {
+        0 => format!("{} by {}", t.title, t.all_artists()),
+        n => format!("{} by {}, {}", t.title, t.all_artists(), fmt_duration(n)),
+    });
     // The song you came here for is scrolled into view once, even from far down the list.
     if let Some((hid, at)) = cx.highlight
         && hid == t.id
@@ -985,7 +988,11 @@ fn track_row(ui: &mut Ui, id: egui::Id, list: &str, i: usize, t: &Track, tracks:
         };
         paint_icon(ui.painter(), c.like.center(), icon::HEART, font, col);
     }
-    ui.painter().text(c.time.right_center(), Align2::RIGHT_CENTER, fmt_duration(t.duration), regular(12.5), pal().text_muted);
+    // A song whose length isn't known yet (Deezer lists only a clip) shows none.
+    let length = crate::fixes::shown_length(t);
+    if length > 0 {
+        ui.painter().text(c.time.right_center(), Align2::RIGHT_CENTER, fmt_duration(length), regular(12.5), pal().text_muted);
+    }
 
     // Interactions
     // Resting on the title (which opens the song's album or page) loads that page ahead.

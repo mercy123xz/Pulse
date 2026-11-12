@@ -2126,7 +2126,7 @@ fn queue_page(app: &mut App, ui: &mut Ui) {
 }
 
 fn total_time(tracks: &[Track]) -> String {
-    let s: u32 = tracks.iter().map(|t| t.duration).sum();
+    let s: u32 = tracks.iter().map(crate::fixes::shown_length).sum();
     let (h, m) = (s / 3600, (s % 3600) / 60);
     if h > 0 { format!("{h} hr {m} min") } else { format!("{m} min") }
 }

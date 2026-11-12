@@ -558,6 +558,10 @@ fn queries(track: &Track) -> [String; 2] {
 /// Three searches at once (as long as one): YouTube Music's songs (official album
 /// audio), and two ordinary searches for songs YouTube Music doesn't have.
 pub fn find_videos(tools: &Tools, track: &Track) -> Result<Vec<String>, String> {
+    // A song fix can name the right video (for songs that keep finding the wrong one).
+    if let Some(video) = crate::fixes::video(&track.id) {
+        return Ok(vec![video]);
+    }
     let [quoted, plain] = queries(track);
     let music_url = format!("https://music.youtube.com/search?q={}#songs", crate::net::encode(&plain));
     let (m, a, b) = std::thread::scope(|s| {
@@ -944,6 +948,7 @@ mod tests {
             }
         }
         // The same song twice (the link and the list) is only checked once.
+        let mut clips: Vec<String> = vec![];
         let mut seen = std::collections::HashSet::new();
         songs.retain(|(a, t, _)| seen.insert(format!("{}|{}", norm(a), norm(t))));
         let tools = std::env::var("PULSE_YTDLP").ok().map(|y| Tools {
@@ -954,6 +959,22 @@ mod tests {
         let (mut ok, mut flagged, mut missing) = (0, 0, 0);
         for (n, (artists, title, secs)) in songs.iter().enumerate() {
             std::thread::sleep(std::time::Duration::from_millis(250));
+            // The real song listed only as a clip: a row for the song fixes list.
+            let (main, others) = crate::deezer::split_artists(artists);
+            let names: Vec<String> = std::iter::once(&main).chain(others.iter()).map(|a| norm(a)).collect();
+            for c in crate::deezer::candidates_for_test(artists, title) {
+                if c.duration <= 30
+                    && crate::deezer::same_title(title, &c.title)
+                    && crate::deezer::same_artist(&names, &c.artist.name)
+                    && !crate::youtube::unwanted_version(title, &c.title)
+                {
+                    let row =
+                        format!("('{}', {secs}, NULL, '{} – {} (Deezer lists a clip)')", c.id, c.artist.name.replace('\'', "''"), c.title.replace('\'', "''"));
+                    if !clips.contains(&row) {
+                        clips.push(row);
+                    }
+                }
+            }
             let found = crate::deezer::find_track(artists, title, *secs);
             let mut notes: Vec<String> = vec![];
             let mut on_deezer = true;
@@ -1042,6 +1063,7 @@ mod tests {
                 println!("{video}");
             }
         }
+        println!("\nSONG FIXES SQL:\nINSERT OR REPLACE INTO song_fixes (id, duration, video, note) VALUES\n{};", clips.join(",\n"));
         println!("\nSEARCH 'Firework Katy Perry':");
         if let Ok(r) = crate::deezer::search("Firework Katy Perry") {
             for t in r.tracks.iter().take(5) {

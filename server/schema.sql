@@ -8,3 +8,11 @@ CREATE TABLE IF NOT EXISTS attempts (kind TEXT NOT NULL, key TEXT NOT NULL, at I
 CREATE INDEX IF NOT EXISTS attempts_lookup ON attempts (kind, key, at);
 CREATE UNIQUE INDEX IF NOT EXISTS users_email ON users (email) WHERE email IS NOT NULL;
 CREATE TABLE IF NOT EXISTS resets (user_id INTEGER PRIMARY KEY, code_hash TEXT NOT NULL, expires INTEGER NOT NULL, tries INTEGER NOT NULL DEFAULT 0);
+
+-- Songs the catalog gets wrong, fixed by hand (see README: "Song fixes").
+CREATE TABLE IF NOT EXISTS song_fixes (
+  id TEXT PRIMARY KEY,       -- the song's id in Pulse, e.g. "dz:3135556"
+  duration INTEGER,          -- its real length in seconds (NULL: leave as is)
+  video TEXT,                -- the YouTube video id to play (NULL: search as usual)
+  note TEXT                  -- why, for you
+);
