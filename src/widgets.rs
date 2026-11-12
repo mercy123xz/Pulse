@@ -493,6 +493,8 @@ pub fn card_grid<T>(ui: &mut Ui, items: &[T], max_rows: Option<usize>, mut each:
 #[derive(Clone)]
 pub enum TrackEvent {
     Play(usize),
+    /// The pointer rests on the song's row: find its audio now, so pressing it plays at once.
+    Warm(Track),
     /// The pointer rests on the song's title: load the page it would open.
     Preview(Track),
     /// Move an upcoming song in the queue: (its row in "Next up", rows to move; negative = up).
@@ -894,6 +896,19 @@ fn track_row(ui: &mut Ui, id: egui::Id, list: &str, i: usize, t: &Track, tracks:
     // The heart, artist and album links sit on top of the row, so "the row is hovered"
     // is "the mouse is anywhere over it" (else the heart vanishes when you point at it).
     let hovered = resp.hovered() || resp.context_menu_opened() || resp.has_focus() || ui.rect_contains_pointer(rect);
+    // Resting on a row for a moment: get the song ready (most clicks come right after).
+    if hovered && !is_current {
+        let key = egui::Id::new("row_hover_since");
+        let now = ui.input(|i| i.time);
+        let (row, since) = ui.ctx().data(|d| d.get_temp::<(egui::Id, f64)>(key)).unwrap_or((egui::Id::NULL, now));
+        if row != id {
+            ui.ctx().data_mut(|d| d.insert_temp(key, (id, now)));
+            ui.ctx().request_repaint_after(std::time::Duration::from_millis(220));
+        } else if now - since > 0.2 {
+            // Sent while the pointer stays; the app starts it once.
+            ev.push(TrackEvent::Warm(t.clone()));
+        }
+    }
     let style = &parts().track_row;
     let radius = style.radius.map(CornerRadius::same).unwrap_or(r_md());
     let is_selected = selected.contains(&i);

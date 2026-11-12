@@ -578,18 +578,27 @@ pub fn find_videos(tools: &Tools, track: &Track) -> Result<Vec<String>, String> 
     }
     let [quoted, plain] = queries(track);
     let music_url = format!("https://music.youtube.com/search?q={}#songs", crate::net::encode(&plain));
-    let (m, a, b) = std::thread::scope(|s| {
-        let m = s.spawn(|| search(tools, music_url.clone(), 6));
-        let a = s.spawn(|| search(tools, format!("ytsearch8:{quoted}"), 8));
-        let b = s.spawn(|| search(tools, format!("ytsearch8:{plain}"), 8));
-        let crashed = || Err::<Vec<SearchEntry>, String>("search crashed".into());
-        (m.join().unwrap_or_else(|_| crashed()), a.join().unwrap_or_else(|_| crashed()), b.join().unwrap_or_else(|_| crashed()))
-    });
+    let (tx, rx) = std::sync::mpsc::channel::<(bool, Result<Vec<SearchEntry>, String>)>();
+    for (is_music, target, limit) in [(true, music_url, 6), (false, format!("ytsearch8:{quoted}"), 8), (false, format!("ytsearch8:{plain}"), 8)] {
+        let (tx, tools) = (tx.clone(), tools.clone());
+        std::thread::spawn(move || {
+            let _ = tx.send((is_music, search(&tools, target, limit)));
+        });
+    }
+    drop(tx);
     let mut entries = Vec::new();
     let mut error = None;
-    for r in [m, a, b] {
+    // Three searches at once. The song's own album audio from YouTube Music, a clear
+    // match, is used as soon as it's found, without waiting for the others: that's
+    // most songs, and it saves a second or two before the music starts.
+    while let Ok((is_music, r)) = rx.recv_timeout(Duration::from_secs(40)) {
         match r {
-            Ok(mut e) => entries.append(&mut e),
+            Ok(mut e) => {
+                entries.append(&mut e);
+                if is_music && rank(track, &entries).first().is_some_and(|best| clear_match(track, best)) {
+                    break;
+                }
+            }
             Err(e) => error = Some(e),
         }
     }
@@ -599,6 +608,14 @@ pub fn find_videos(tools: &Tools, track: &Track) -> Result<Vec<String>, String> 
         (true, Some(e)) if entries.is_empty() => Err(e),
         _ => Err("Couldn't find this song on YouTube.".to_string()),
     }
+}
+
+/// Only the right song gets this: the artist's own album audio ("Artist - Topic") with the
+/// right title, and the right length (or YouTube Music didn't say how long it is).
+fn clear_match(track: &Track, e: &SearchEntry) -> bool {
+    let topic = e.channel.as_deref().or(e.uploader.as_deref()).unwrap_or("").to_lowercase().ends_with(" - topic");
+    let s = score(track, e);
+    topic && (s >= 95 || (e.duration.is_none() && s >= 55))
 }
 
 /// True once yt-dlp is installed (view counts don't start the first-time setup).
@@ -763,6 +780,15 @@ mod tests {
 
     fn entry(id: &str, title: &str, secs: f64, channel: &str) -> SearchEntry {
         SearchEntry { id: id.into(), title: title.into(), duration: Some(secs), channel: Some(channel.into()), uploader: None, view_count: None }
+    }
+
+    #[test]
+    fn a_clear_match_is_the_artists_album_audio() {
+        let t = song("Black Eyed Peas", "Meet Me Halfway", 284);
+        assert!(clear_match(&t, &entry("a", "Meet Me Halfway", 284.0, "Black Eyed Peas - Topic")));
+        assert!(!clear_match(&t, &entry("b", "Meet Me Halfway", 284.0, "Pop Hits Orchestra - Topic")));
+        assert!(!clear_match(&t, &entry("c", "Meet Me Halfway (Live)", 300.0, "Black Eyed Peas - Topic")));
+        assert!(!clear_match(&t, &entry("d", "Black Eyed Peas - Meet Me Halfway", 284.0, "BlackEyedPeasVEVO")));
     }
 
     #[test]

@@ -499,6 +499,7 @@ fn warm_one(
     prefetched: &Arc<Mutex<HashMap<String, (StreamSource, Instant)>>>,
     quality: crate::settings::Quality,
     failed: &Sender<String>,
+    linked: &dyn Fn(),
 ) {
     let fresh = prefetched.lock().unwrap().get(&t.id).filter(|(_, at)| at.elapsed() < LINK_LIFETIME).map(|(s, _)| s.clone());
     let src = match fresh {
@@ -520,6 +521,8 @@ fn warm_one(
             }
         }
     };
+    // The link is ready: playing it no longer waits for the rest (the download ahead).
+    linked();
     if !crate::audiocache::enabled() || crate::audiocache::has(&t.id) || src.url.starts_with("file://") {
         return;
     }
@@ -3044,9 +3047,16 @@ impl App {
         let track = track.clone();
         let ids = self.youtube_ids.clone();
         let prefetched = self.prefetched.clone();
+        let in_flight = self.prefetching.clone();
         let offline = self.saved.downloads.get(&track.id).cloned();
         let quality = self.saved.settings.stream_quality;
         Box::new(move |status| {
+            // Already being found (the pointer rested on it, or it's next in the queue):
+            // wait for that instead of starting over.
+            let started = Instant::now();
+            while in_flight.lock().unwrap().contains(&track.id) && started.elapsed() < Duration::from_secs(12) {
+                std::thread::sleep(Duration::from_millis(40));
+            }
             if let Some(src) = offline_source(&track, offline.as_deref()) {
                 return src;
             }
@@ -3097,6 +3107,40 @@ impl App {
         self.warm(tracks.iter().take(3).cloned().collect(), false);
     }
 
+    /// Finds one song's audio link right away (the song under the pointer), so pressing it
+    /// plays without the YouTube lookup. Only the link, never the whole song; on in every
+    /// mode but Ultra-low, since it's the difference between a song starting in about a
+    /// second or in several.
+    pub fn warm_link(&mut self, t: Track) {
+        if crate::perf::mode() == crate::perf::Mode::UltraLow || !self.needs_link(&t) {
+            return;
+        }
+        self.prefetching.lock().unwrap().insert(t.id.clone());
+        let (ids, prefetched, in_flight) = (self.youtube_ids.clone(), self.prefetched.clone(), self.prefetching.clone());
+        let quality = self.saved.settings.stream_quality;
+        std::thread::spawn(move || {
+            let known = ids.lock().unwrap().get(&t.id).cloned();
+            if let Ok((src, video)) = crate::youtube::resolve(&t, known, quality, &|_| {}) {
+                ids.lock().unwrap().insert(t.id.clone(), video);
+                let mut p = prefetched.lock().unwrap();
+                p.retain(|_, (_, at)| at.elapsed() < LINK_LIFETIME);
+                p.insert(t.id.clone(), (src, Instant::now()));
+            }
+            in_flight.lock().unwrap().remove(&t.id);
+        });
+    }
+
+    /// Does a song still need its audio link found?
+    fn needs_link(&self, t: &Track) -> bool {
+        let link_ready = self.prefetched.lock().unwrap().get(&t.id).is_some_and(|(_, at)| at.elapsed() < LINK_LIFETIME);
+        !link_ready
+            && !crate::local::is_local(&t.id)
+            && !self.saved.downloads.contains_key(&t.id)
+            && !crate::audiocache::has(&t.id)
+            && self.current.as_ref().is_none_or(|c| c.id != t.id)
+            && !self.prefetching.lock().unwrap().contains(&t.id)
+    }
+
     /// Does a song still need loading ahead?
     fn needs_warming(&self, t: &Track) -> bool {
         let link_ready = self.prefetched.lock().unwrap().get(&t.id).is_some_and(|(_, at)| at.elapsed() < LINK_LIFETIME);
@@ -3105,7 +3149,7 @@ impl App {
             && !self.prefetch_failed.contains(&t.id)
             && !crate::audiocache::has(&t.id)
             && self.current.as_ref().is_none_or(|c| c.id != t.id)
-            && !self.prefetching.lock().unwrap().contains(&t.id)
+            && !self.prefetching.lock().unwrap().iter().any(|f| f == &t.id || f.strip_prefix("dl:") == Some(t.id.as_str()))
             // Without kept songs only the link is fetched ahead.
             && (crate::audiocache::enabled() || !link_ready)
     }
@@ -3152,8 +3196,17 @@ impl App {
                     continue;
                 };
                 in_flight.lock().unwrap().insert(t.id.clone());
-                warm_one(&t, &ids, &prefetched, quality, &failed);
-                in_flight.lock().unwrap().remove(&t.id);
+                // While its link is found the song counts as in flight (playing it waits for
+                // that); while it's downloaded ahead, as "dl:<id>" (playing it doesn't wait).
+                let dl = format!("dl:{}", t.id);
+                warm_one(&t, &ids, &prefetched, quality, &failed, &|| {
+                    let mut f = in_flight.lock().unwrap();
+                    f.remove(&t.id);
+                    f.insert(dl.clone());
+                });
+                let mut f = in_flight.lock().unwrap();
+                f.remove(&t.id);
+                f.remove(&dl);
             }
         });
     }
@@ -3354,6 +3407,7 @@ impl App {
                     self.selection = (list, (0..len).collect(), Some(0));
                 }
                 TrackEvent::ClearSelection => self.selection.1.clear(),
+                TrackEvent::Warm(t) => self.warm_link(t),
                 TrackEvent::Preview(t) => {
                     let route = match t.album.as_ref().filter(|a| deezer::is_deezer_id(&a.id)) {
                         Some(al) => Route::Album(al.id.clone()),
