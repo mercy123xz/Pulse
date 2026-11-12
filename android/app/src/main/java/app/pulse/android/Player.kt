@@ -165,7 +165,7 @@ fun FullPlayer() {
             }
         }
         Row(
-            Modifier.fillMaxWidth().clickable(role = Role.Switch) { Library.setAutoplay(!Library.autoplay) }
+            Modifier.fillMaxWidth().clickable(role = Role.Switch) { Library.useAutoplay(!Library.autoplay) }
                 .semantics(mergeDescendants = true) { stateDescription = if (Library.autoplay) "On" else "Off" }
                 .padding(horizontal = 24.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,

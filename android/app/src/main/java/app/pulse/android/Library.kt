@@ -220,8 +220,8 @@ object Library {
         return played.sortedByDescending { it.count / (1.0 + (now - it.last).coerceAtLeast(0) / 86_400.0 / 14.0) }
     }
 
-    fun setTheme(t: Int) { theme = t; save() }
-    fun setAccent(a: Int) { accent = a; save() }
-    fun setLargeText(on: Boolean) { largeText = on; save() }
-    fun setAutoplay(on: Boolean) { autoplay = on; save() }
+    fun pickTheme(t: Int) { theme = t; save() }
+    fun pickAccent(a: Int) { accent = a; save() }
+    fun useLargeText(on: Boolean) { largeText = on; save() }
+    fun useAutoplay(on: Boolean) { autoplay = on; save() }
 }

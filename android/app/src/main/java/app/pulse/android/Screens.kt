@@ -541,7 +541,7 @@ fun SettingsPage() {
                 Text("Theme", color = P.text, fontSize = 16.sp, modifier = Modifier.padding(horizontal = 16.dp))
                 Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     for ((value, name) in listOf(Themes.SYSTEM to "Like my phone", Themes.DARK to "Dark", Themes.LIGHT to "Light")) {
-                        Choice(name, Library.theme == value) { Library.setTheme(value) }
+                        Choice(name, Library.theme == value) { Library.pickTheme(value) }
                     }
                 }
                 Text("Color", color = P.text, fontSize = 16.sp, modifier = Modifier.padding(start = 16.dp, top = 12.dp))
@@ -549,7 +549,7 @@ fun SettingsPage() {
                     Themes.accents.forEachIndexed { i, (name, strong, _) ->
                         val on = Library.accent == i
                         Box(
-                            Modifier.size(52.dp).clip(CircleShape).clickable(role = Role.RadioButton) { Library.setAccent(i) }
+                            Modifier.size(52.dp).clip(CircleShape).clickable(role = Role.RadioButton) { Library.pickAccent(i) }
                                 .semantics { contentDescription = name; selected = on },
                             contentAlignment = Alignment.Center,
                         ) {
@@ -559,10 +559,10 @@ fun SettingsPage() {
                         }
                     }
                 }
-                Toggle("Bigger text", "Makes all text in Pulse larger.", Library.largeText) { Library.setLargeText(it) }
+                Toggle("Bigger text", "Makes all text in Pulse larger.", Library.largeText) { Library.useLargeText(it) }
 
                 Section("Playing")
-                Toggle("Autoplay", "When the queue ends, keep playing songs like the last one.", Library.autoplay) { Library.setAutoplay(it) }
+                Toggle("Autoplay", "When the queue ends, keep playing songs like the last one.", Library.autoplay) { Library.useAutoplay(it) }
 
                 Section("About")
                 Text("Pulse for Android ${BuildConfig.VERSION_NAME}", color = P.text, fontSize = 15.sp, modifier = Modifier.padding(horizontal = 16.dp))
