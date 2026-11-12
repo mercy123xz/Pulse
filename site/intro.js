@@ -1,15 +1,16 @@
 /* The home page's intro.
  *
- * First visit: "Press to enter". The press plays a short "bum, ba dum dum dum" (made here
+ * Every visit: "Press to enter". The press plays a short "bum, ba dum dum dum" (made here
  * with the Web Audio API: there's no sound file), each hit bouncing one of the Pulse bars,
  * left to right. On the last hit the middle bar grows and sweeps across the screen, and
  * the site is behind it.
  *
- * Later visits: a small "Welcome back" in the middle of the screen for a second, with
+ * After the first visit, a small "Welcome back" follows it for a second, with
  * your @username if this browser knows it (it learns it when you open your own profile
  * from the Pulse app). Nothing is sent anywhere: it's all kept in this browser.
  *
- * Skipped with "reduce motion" and when the page is opened at a section (#download...).
+ * With "reduce motion", or when the page is opened at a section (#download...), there's
+ * no intro: only the "Welcome back".
  * The head of index.html decides which one to show before the page is drawn.
  */
 (function () {
@@ -139,9 +140,12 @@
   }
 
   // The site appears: the top of the page eases in, and the visit is remembered.
+  var again = !!store.get("pulse-visited");
   function finish() {
     store.set("pulse-visited", "1");
     root.setAttribute("data-intro", "done");
+    if (again) setTimeout(welcome, 350);
+    again = false; // once per visit (Replay intro doesn't say it again)
   }
 
   // ------------------------------------------------------------------ welcome back

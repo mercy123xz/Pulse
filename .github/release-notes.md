@@ -4,7 +4,7 @@ Works on any 64-bit Windows 10 or 11 PC.
 ## Pulse 1.2
 
 **A better first launch**
-- A short intro with its own beat the first time you open Pulse, and a quick "Welcome back, @you" after that.
+- A short intro with its own beat every time you open Pulse, followed by a quick "Welcome back, @you" once you've opened it before.
 - **Pick artists you like:** choose a few (browse by genre or search) and your home page fills with "Listeners of … also listen to" and "Songs like …" rows built from them. You can skip it.
 - Those rows now show above "Top songs right now".
 

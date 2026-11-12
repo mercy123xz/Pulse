@@ -1026,7 +1026,7 @@ impl App {
         std::thread::spawn(crate::artcache::trim_disk);
         app.apply_theme(&cc.egui_ctx);
         app.startup_note = load_note;
-        // The intro the first time, "Welcome back" after that.
+        // The intro every time Pulse opens, followed by "Welcome back" after the first time.
         {
             let name = match crate::account::session() {
                 Some(s) => format!("@{}", s.username),

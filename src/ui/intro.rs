@@ -23,16 +23,19 @@ const WIDEN: f64 = 0.35;
 const SLIDE: f64 = 0.5;
 
 pub enum Intro {
-    /// The first launch. `started`: when it began; `played`: the beat has been started.
-    First { started: Option<f64>, played: bool },
+    /// The intro with the beat, every time Pulse opens. `started`: when it began; `played`:
+    /// the beat has been started; `back`: Pulse has been opened before, so "Welcome back"
+    /// follows it (with this name).
+    First { started: Option<f64>, played: bool, back: Option<String> },
     /// "Welcome back" (with your name, if Pulse knows it).
     Welcome { started: Option<f64>, name: String },
 }
 
 impl Intro {
-    /// What to show as Pulse opens.
+    /// What to show as Pulse opens: the intro (then "Welcome back" if you've been here
+    /// before), or only "Welcome back" when animations are off.
     pub fn for_launch(first: bool, still: bool, name: String) -> Self {
-        if first && !still { Intro::First { started: None, played: false } } else { Intro::Welcome { started: None, name } }
+        if still { Intro::Welcome { started: None, name } } else { Intro::First { started: None, played: false, back: (!first).then_some(name) } }
     }
 }
 
@@ -42,7 +45,7 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
     let now = ctx.input(|i| i.time);
     let skip = ctx.input(|i| i.pointer.any_pressed() || i.events.iter().any(|e| matches!(e, egui::Event::Key { pressed: true, .. })));
     let done = match intro {
-        Intro::First { started, played } => {
+        Intro::First { started, played, .. } => {
             let t0 = *started.get_or_insert(now);
             if !*played && now - t0 >= LEAD {
                 *played = true;
@@ -71,11 +74,18 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
         }
     };
     if done {
-        if matches!(app.intro, Some(Intro::First { .. })) {
-            app.saved.intro_seen = true;
-            app.save_now = true;
+        let mut next = None;
+        if let Some(Intro::First { back, .. }) = &mut app.intro {
+            next = back.take().map(|name| Intro::Welcome { started: None, name });
+            if !app.saved.intro_seen {
+                app.saved.intro_seen = true;
+                app.save_now = true;
+            }
         }
-        app.intro = None;
+        app.intro = next;
+        if app.intro.is_some() {
+            ctx.request_repaint();
+        }
     }
 }
 
