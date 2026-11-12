@@ -15,6 +15,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.datasource.okhttp.OkHttpDataSource
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.MediaSession
@@ -48,8 +49,11 @@ class PlaybackService : MediaSessionService() {
         val requests = AtomicLong()
         val http = OkHttpDataSource.Factory(Net.client)
         val youtube = ResolvingDataSource.Factory(http) { spec -> resolve(spec, requests) }
+        // Starts playing after 1 second of audio instead of 2.5 (keeps up to 50 seconds ahead).
+        val buffering = DefaultLoadControl.Builder().setBufferDurationsMs(15_000, 50_000, 1_000, 2_000).build()
         val player = ExoPlayer.Builder(this)
             .setMediaSourceFactory(DefaultMediaSourceFactory(youtube))
+            .setLoadControl(buffering)
             .setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MUSIC).build(), true)
             .setHandleAudioBecomingNoisy(true) // pause when headphones are unplugged
             .setWakeMode(C.WAKE_MODE_NETWORK) // keep streaming with the screen off
@@ -77,10 +81,30 @@ class PlaybackService : MediaSessionService() {
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             val song = mediaItem?.song() ?: return
             Library.notePlayed(song)
+            lookAhead()
             topUp()
         }
 
-        override fun onTimelineChanged(timeline: androidx.media3.common.Timeline, reason: Int) = topUp()
+        /** Finds the next two songs on YouTube now, so Next (or the song ending) starts at once. */
+        private fun lookAhead() {
+            val tl = player.currentTimeline
+            if (tl.isEmpty) return
+            val next = ArrayList<Song>()
+            var i = player.currentMediaItemIndex
+            while (next.size < 2) {
+                i = tl.getNextWindowIndex(i, player.repeatMode.takeIf { it != Player.REPEAT_MODE_ONE } ?: Player.REPEAT_MODE_OFF, player.shuffleModeEnabled)
+                if (i == C.INDEX_UNSET || i == player.currentMediaItemIndex) break
+                player.getMediaItemAt(i).song()?.let { next.add(it) }
+            }
+            YouTube.prefetch(next)
+        }
+
+        override fun onTimelineChanged(timeline: androidx.media3.common.Timeline, reason: Int) {
+            lookAhead()
+            topUp()
+        }
+
+        override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) = lookAhead()
         override fun onRepeatModeChanged(repeatMode: Int) = topUp()
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
