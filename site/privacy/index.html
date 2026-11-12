@@ -39,13 +39,13 @@ code { font-size: .9em; background: var(--surface); border: 1px solid var(--bord
   </a>
 
   <h1>Privacy Policy</h1>
-  <p class="updated">Last updated November 11, 2026</p>
+  <p class="updated">Last updated November 12, 2026</p>
 
   <div class="summary">
     <strong>The short version</strong>
     <ul>
       <li>Your library, listening history and settings stay on your PC.</li>
-      <li>An account is optional. If you make one, we keep your username, email, profile text, the playlists you make public, and a hash of your password, never the password itself.</li>
+      <li>An account is optional. If you make one, it's stored on Pulse's server, which runs on Cloudflare: your username, email, profile text, the playlists you make public, and a hash of your password, never the password itself.</li>
       <li>No ads, no tracking, no analytics, and we never sell or share your information.</li>
       <li>Delete your account any time and it's gone right away.</li>
     </ul>
@@ -63,7 +63,8 @@ code { font-size: .9em; background: var(--surface); border: 1px solid var(--bord
     <li><strong>LRCLIB</strong>: lyrics for the song you're playing.</li>
     <li><strong>Google</strong>: search suggestions as you type.</li>
     <li><strong>GitHub</strong>: checking for and downloading updates and playback tools.</li>
-    <li><strong>Discord</strong>, only if you turn on Discord status: the app talks to the Discord app on your PC (or Legcord or Vesktop), which shows the song on your profile.</li>
+    <li><strong>Pulse's own server</strong> (on Cloudflare): fixes for songs the catalog gets wrong (it's sent the song's ID), the list of early supporters, and your account if you have one.</li>
+<li><strong>Discord</strong>, only if you turn on Discord status: the app talks to the Discord app on your PC (or Legcord or Vesktop), which shows the song on your profile.</li>
   </ul>
   <p>These services have their own privacy policies. Pulse sends them nothing about you beyond what each request needs, and no account details.</p>
 
@@ -75,9 +76,11 @@ code { font-size: .9em; background: var(--surface); border: 1px solid var(--bord
     <li><strong>A hash of your password</strong> (salted PBKDF2), never the password itself.</li>
     <li><strong>Your profile text</strong> and <strong>the playlists you make public</strong>: their names and songs (title, artist, album and cover links). Public by design. Songs from your own computer are never uploaded.</li>
     <li><strong>Sign-in keys</strong>: only a hash of each one, which expires after 90 days or when you sign out.</li>
-    <li><strong>When you joined.</strong></li>
+    <li><strong>When you joined</strong>, and whether you're one of the early supporters (the first 100 accounts), which shows a badge on your profile and your username in the app's thank-you list.</li>
   </ul>
-  <h3>Keeping it safe from abuse</h3>
+  <h3>Problem reports from the app</h3>
+<p>If you use <strong>Report a problem</strong> (or send a report after a crash), the app sends what you wrote and, if you leave it ticked, a diagnostics report: Pulse's version, your Windows version and graphics card, a few settings, how much space Pulse uses, and recent errors, with your Windows user name and any email addresses removed. It goes to a private list on GitHub that only the developer can see, and nothing is sent unless you press Send.</p>
+<h3>Keeping it safe from abuse</h3>
   <ul>
     <li>To limit sign-up spam and password guessing, the server notes the IP address of sign-ups, failed sign-ins, password-reset requests and reports. These notes are deleted after a day.</li>
     <li>When someone reports a public playlist, the server keeps the report's reason and a one-way hash of who reported it, never their IP address itself.</li>
@@ -95,7 +98,7 @@ code { font-size: .9em; background: var(--surface); border: 1px solid var(--bord
     <li>The site keeps a few things in your browser (local storage), never sent anywhere except as noted: your light or dark theme, whether you've seen the intro, your @username for "Welcome back", and, if you sign in on the site, your sign-in key (sent only to the accounts server). Signing out removes the key; clearing your browser's site data removes everything.</li>
     <li>The download button asks GitHub for the newest version.</li>
     <li>Public playlist and profile pages load from the accounts server.</li>
-    <li><strong>"Ask about Pulse"</strong> answers from a list built into the page; nothing you type is sent while it searches. If you choose to send a question or problem report, it's posted as a <strong>public</strong> issue on Pulse's GitHub, after a Cloudflare Turnstile check that you're not a bot. Don't include personal information in it.</li>
+    <li><strong>"Ask about Pulse"</strong> answers from a list built into the page; nothing you type is sent while it searches. If you choose to send a question or problem report, a question is posted as a <strong>public</strong> issue on Pulse's GitHub, and a problem report goes to a private list only the developer sees, after a Cloudflare Turnstile check that you're not a bot. Don't include personal information in it.</li>
   </ul>
 
   <h2>Children</h2>
