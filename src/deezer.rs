@@ -796,7 +796,10 @@ pub fn find_track(artist: &str, title: &str, duration: u32) -> Result<Option<Tra
 fn without_tributes(q: &str, list: Vec<Track>, artists: &[ArtistInfo]) -> Vec<Track> {
     use crate::youtube::{core_title, norm};
     let typed = norm(q);
-    let names: Vec<String> = artists.iter().map(|a| norm(&a.name)).filter(|n| n.len() >= 4 && typed.contains(n.as_str())).collect();
+    // The artists named in the search: from the artists found, and from the songs found
+    // (a search for "Firework Katy Perry" finds no artist by that name).
+    let names: Vec<String> =
+        artists.iter().map(|a| norm(&a.name)).chain(list.iter().map(|t| norm(&t.artist.name))).filter(|n| n.len() >= 4 && typed.contains(n.as_str())).collect();
     list.into_iter()
         .filter(|t| {
             let title = norm(&core_title(&t.title));
@@ -1469,7 +1472,7 @@ mod matching_tests {
         ));
         assert!(!same_recording("Die Young", "Kesha", "Die Young (Dallas K Radio Edit)"));
         assert!(!same_recording("Hips Don't Lie (feat. Wyclef Jean)", "Shakira, Wyclef Jean", "Hips Don't Lie - Bamboo (feat. Wyclef Jean)"));
-        let artists = vec![ArtistInfo { name: "Katy Perry".into(), ..Default::default() }];
+        let artists = vec![];
         let list = vec![
             t(1, "Katy Perry Firework", "Electronaut", "1", 209, 1),
             t(2, "Firework", "Katy Perry", "2", 227, 2),
