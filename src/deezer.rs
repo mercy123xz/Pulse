@@ -804,7 +804,11 @@ fn without_tributes(q: &str, list: Vec<Track>, artists: &[ArtistInfo]) -> Vec<Tr
         .filter(|t| {
             let title = norm(&core_title(&t.title));
             let own = norm(&t.all_artists());
+            let credited = own.clone() + &norm(&t.title);
+            // Named after the artist but not by them: a tribute. And when the search names
+            // an artist, only their songs (or songs crediting them).
             !names.iter().any(|n| title.contains(n.as_str()) && !own.contains(n.as_str()))
+                && (names.is_empty() || names.iter().any(|n| credited.contains(n.as_str())))
         })
         .collect()
 }
