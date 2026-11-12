@@ -9,6 +9,7 @@ class PulseApp : Application() {
     override fun onCreate() {
         super.onCreate()
         NewPipe.init(PulseDownloader(Net.client))
+        Library.load(this)
     }
 }
 

@@ -18,7 +18,7 @@ android {
         targetSdk = 35
         // Each GitHub build gets the next number, so a newer APK installs over an older one.
         versionCode = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInt()
-        versionName = "0.1.0-preview"
+        versionName = "0.2.0-preview"
     }
 
     signingConfigs {
@@ -53,6 +53,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     packaging {

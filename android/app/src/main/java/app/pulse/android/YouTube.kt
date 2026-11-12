@@ -19,14 +19,24 @@ object YouTube {
     /** Song id → the YouTube video picked for it, so playing it again skips the search. */
     private val picked = ConcurrentHashMap<String, String>()
 
+    /** Song id → its audio link and when it was found (links stop working after a few hours). */
+    private val links = ConcurrentHashMap<String, Pair<String, Long>>()
+
     fun audioUrl(song: Song): String {
+        links[song.id]?.let { (url, at) -> if (System.currentTimeMillis() - at < 2 * 3600_000L) return url }
         val video = picked[song.id] ?: find(song).also { picked[song.id] = it }
         val info = StreamInfo.getInfo(ServiceList.YouTube, video)
         val best = info.audioStreams
             .filter { it.isUrl && it.deliveryMethod == DeliveryMethod.PROGRESSIVE_HTTP }
             .maxByOrNull { it.averageBitrate }
             ?: throw IOException("YouTube has no audio for this song right now.")
+        links[song.id] = best.content to System.currentTimeMillis()
         return best.content
+    }
+
+    /** Forgets a link that stopped working, so the next try looks it up again. */
+    fun forget(songId: String) {
+        links.remove(songId)
     }
 
     private fun find(song: Song): String {
