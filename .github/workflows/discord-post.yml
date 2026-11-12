@@ -1,0 +1,20 @@
+# Posts .github/discord/post.json in #announcements through the Pulse webhook, whenever
+# that file changes on features (for one-off messages from "Pulse").
+name: Post to Discord
+on:
+  push:
+    branches: [features]
+    paths: [.github/discord/post.json]
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Post
+        env:
+          HOOK: ${{ secrets.DISCORD_ANNOUNCE_WEBHOOK }}
+        run: |
+          [ -n "$HOOK" ] || { echo "No DISCORD_ANNOUNCE_WEBHOOK secret."; exit 1; }
+          code=$(curl -sS -o /dev/null -w "%{http_code}" -H "Content-Type: application/json" --data-binary @.github/discord/post.json "$HOOK?wait=true")
+          echo "Discord answered $code"
+          [ "$code" -lt 300 ]

@@ -1,0 +1,12 @@
+{
+  "username": "Pulse",
+  "avatar_url": "https://raw.githubusercontent.com/mercy123xz/Pulse/main/assets/discord-avatar.png",
+  "allowed_mentions": { "parse": [] },
+  "embeds": [
+    {
+      "color": 16096779,
+      "title": "🥁 Psst…",
+      "description": "One theme in Pulse stays hidden until you go looking for it.\nTry searching for something that goes **tung tung tung…**\n\nFound it? Don't spoil it for everyone else 🤫"
+    }
+  ]
+}
