@@ -288,6 +288,9 @@ fn clip(s: &str) -> String {
     out
 }
 
+/// Where the status's "Get Pulse" button goes.
+const GET_PULSE: &str = "https://mercy123xz.github.io/Pulse/";
+
 fn activity(s: &Song) -> Value {
     let mut a = json!({
         "type": 2, // "Listening to"
@@ -299,6 +302,9 @@ fn activity(s: &Song) -> Value {
             "small_image": LOGO,
             "small_text": if s.times.is_some() { "Pulse" } else { "Paused" },
         },
+        // Friends who see what you're listening to can get Pulse too. (Discord shows
+        // buttons to everyone else, not on your own profile.)
+        "buttons": [{ "label": "Get Pulse", "url": GET_PULSE }],
     });
     if let Some((start, end)) = s.times {
         a["timestamps"] = json!({ "start": start, "end": end });
@@ -391,5 +397,7 @@ mod tests {
         assert_eq!(a["type"], 2);
         assert_eq!(a["assets"]["small_text"], "Paused");
         assert!(a.get("timestamps").is_none());
+        assert_eq!(a["buttons"][0]["label"], "Get Pulse");
+        assert_eq!(a["buttons"][0]["url"], GET_PULSE);
     }
 }
