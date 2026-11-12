@@ -787,6 +787,12 @@ pub fn find_track(artist: &str, title: &str, duration: u32) -> Result<Option<Tra
         let second: List<DzTrack> = get("/search/track", &[("q", &plain), ("limit", "25")])?;
         found = best_match(tracks(second), artist, title, duration);
     }
+    // Deezer lists only a clip and no fix says how long it is: the source knows.
+    if let Some(t) = found.as_mut()
+        && t.duration == 0
+    {
+        t.duration = duration;
+    }
     // Featured artists: searches don't list them; the app fills them in from the song's
     // own page once it's in the library (see `App::ensure_featured`).
     Ok(found)
