@@ -88,6 +88,13 @@ def tweet_text(version: str, body: str) -> str:
     return f"{head}\n\n{summary}{tail}"
 
 
+def soon() -> str:
+    import datetime
+
+    at = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=3)
+    return at.replace(microsecond=0).isoformat()
+
+
 def x(version: str, body: str) -> None:
     key = os.environ.get("TYPEFULLY_API_KEY", "").strip()
     if not key:
@@ -96,10 +103,12 @@ def x(version: str, body: str) -> None:
     text = tweet_text(version, body)
     call(
         f"{TYPEFULLY}/social-sets/{X_ACCOUNT}/drafts",
-        {"draft_title": f"Pulse {version} release", "publish_at": "now", "platforms": {"x": {"enabled": True, "posts": [{"text": text}]}}},
+        # Scheduled a few minutes ahead: X doesn't let posts with a link be published
+        # "now" through an API, but a scheduled one goes out normally.
+        {"draft_title": f"Pulse {version} release", "publish_at": soon(), "platforms": {"x": {"enabled": True, "posts": [{"text": text}]}}},
         {"Authorization": f"Bearer {key}"},
     )
-    print("Posted on X:\n" + text)
+    print("Scheduled on X (in 3 minutes):\n" + text)
 
 
 def check() -> int:
