@@ -1,6 +1,13 @@
 **Download `PulseSetup` below and run it** to install Pulse (no administrator password needed).
 Works on any 64-bit Windows 10 or 11 PC.
 
+## Pulse 1.2.3
+<!-- x: A glow-up for the Founders theme our first 100 members get: gold trim, gold titles and a gold play button. Thank you for being here early. -->
+
+A small update for early supporters:
+- The **Founders** theme got a glow-up: gold trim around the sidebar, cards and player, gold page titles, a gold play button and richer colors.
+- In Settings → Themes it now reads **Founders – Early Support**.
+
 ## Pulse 1.2.2
 <!-- x: Choose explicit or clean versions of songs, a Get Pulse button on your Discord status, and a gold Founders theme as a thank-you to our first 100 members. -->
 
