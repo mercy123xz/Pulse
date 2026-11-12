@@ -956,20 +956,24 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(250));
             let found = crate::deezer::find_track(artists, title, *secs);
             let mut notes: Vec<String> = vec![];
+            let mut on_deezer = true;
             let track = match found {
                 Ok(Some(t)) => t,
-                Ok(None) => {
+                Ok(None) | Err(_) => {
                     missing += 1;
-                    println!("{:>3}. MISSING  {artists} – {title} ({secs}s): not found on Deezer", n + 1);
-                    for c in crate::deezer::candidates_for_test(artists, title).iter().take(6) {
+                    on_deezer = false;
+                    println!("{:>3}. NOT ON DEEZER  {artists} – {title} ({secs}s): imported as is, played from YouTube", n + 1);
+                    for c in crate::deezer::candidates_for_test(artists, title).iter().take(4) {
                         println!("       had: {} – {} ({}s, rank {})", c.artist.name, c.title, c.duration, c.rank);
                     }
-                    continue;
-                }
-                Err(e) => {
-                    missing += 1;
-                    println!("{:>3}. ERROR    {artists} – {title}: {e}", n + 1);
-                    continue;
+                    let (main, also) = crate::deezer::split_artists(artists);
+                    Track {
+                        title: title.clone(),
+                        duration: *secs,
+                        artist: crate::deezer::ArtistRef { name: main, ..Default::default() },
+                        featured: also.into_iter().map(|name| crate::deezer::ArtistRef { name, ..Default::default() }).collect(),
+                        ..Default::default()
+                    }
                 }
             };
             if track.duration.abs_diff(*secs) > 5 {
@@ -980,7 +984,8 @@ mod tests {
             }
             // Featured artists the source credits: in the title, or (filled in by the app) the credits.
             let (_, also) = crate::deezer::split_artists(artists);
-            let credits = crate::deezer::featured_artists(track.deezer_number().unwrap_or(0)).unwrap_or_default();
+            let credits =
+                if on_deezer { crate::deezer::featured_artists(track.deezer_number().unwrap_or(0)).unwrap_or_default() } else { track.featured.clone() };
             let credited = norm(&track.title) + &norm(&track.artist.name) + &credits.iter().map(|a| norm(&a.name)).collect::<String>();
             let lost: Vec<&String> = also.iter().filter(|a| !credited.contains(&norm(a))).collect();
             if !lost.is_empty() {
@@ -1006,6 +1011,13 @@ mod tests {
                     }
                     None => notes.push(format!("no YouTube match among {} results", entries.len())),
                 }
+            }
+            if !on_deezer {
+                if !notes.is_empty() {
+                    flagged += 1;
+                }
+                println!("       {}{video}", notes.join("; "));
+                continue;
             }
             let tag = if notes.is_empty() {
                 ok += 1;
@@ -1036,6 +1048,6 @@ mod tests {
                 println!("  {} – {} ({}s, rank {})", t.all_artists(), t.title, t.duration, t.rank);
             }
         }
-        println!("\nSUMMARY: {ok} ok, {flagged} to check, {missing} not found, of {} songs", songs.len());
+        println!("\nSUMMARY: {ok} ok on Deezer, {missing} not on Deezer (played from YouTube), {flagged} to check, of {} songs", songs.len());
     }
 }

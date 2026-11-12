@@ -216,10 +216,11 @@ fn lyrics_body(app: &mut App, ui: &mut Ui, t: &Track, size: f32, place: &str, fo
             }
         }
     });
+    let length = app.current_length();
     if let Some(at) = seek
-        && t.duration > 0
+        && length > 0
     {
-        app.seek_fraction((at / t.duration as f32).clamp(0.0, 1.0));
+        app.seek_fraction((at / length as f32).clamp(0.0, 1.0));
         // Jumping is a choice to follow along from there.
         ui.data_mut(|d| d.remove::<f64>(egui::Id::new("lyrics_panel_user_scroll")));
     }

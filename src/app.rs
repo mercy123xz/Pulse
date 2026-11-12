@@ -1863,12 +1863,22 @@ impl App {
         }
     }
 
+    /// The current song's length in seconds. Deezer lists some songs as a 30-second clip;
+    /// then it's the length of the audio actually playing.
+    pub fn current_length(&self) -> u32 {
+        let listed = self.current.as_ref().map_or(0, |t| t.duration);
+        match self.audio.length() {
+            Some(real) if !self.needs_load && listed < 60 && real.as_secs() as u32 > listed => real.as_secs() as u32,
+            _ => listed,
+        }
+    }
+
     pub fn seek_fraction(&mut self, frac: f32) {
-        if let Some(t) = &self.current {
+        if self.current.is_some() {
             if self.needs_load {
                 return;
             }
-            self.audio.seek(Duration::from_secs_f32(t.duration as f32 * frac));
+            self.audio.seek(Duration::from_secs_f32(self.current_length() as f32 * frac));
         }
     }
 

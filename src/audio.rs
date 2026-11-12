@@ -5,10 +5,10 @@
 //! 2. *Stream*: download it in chunks into a shared buffer while the decoder plays
 //!    from that buffer, waiting briefly whenever it catches up with the download.
 
-use rodio::{Decoder, MixerDeviceSink, Player};
-use std::io::{self, Read, Seek, SeekFrom};
 use crate::dsp::{Processor, SharedEffects, TrackCtl};
 use rodio::Source;
+use rodio::{Decoder, MixerDeviceSink, Player};
+use std::io::{self, Read, Seek, SeekFrom};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 pub use crate::dsp::Effects;
@@ -176,11 +176,7 @@ impl Drop for StreamReader {
 /// Opens the audio and returns a decoder that can start playing right away while
 /// the rest of the file keeps downloading in the background.
 /// `still_wanted` returns false once the user has moved on to another song.
-fn open_streaming_decoder(
-    src: &StreamSource,
-    still_wanted: impl Fn() -> bool + Send + 'static,
-    buffered: Arc<Mutex<f32>>,
-) -> Result<StreamDecoder, String> {
+fn open_streaming_decoder(src: &StreamSource, still_wanted: impl Fn() -> bool + Send + 'static, buffered: Arc<Mutex<f32>>) -> Result<StreamDecoder, String> {
     if let Some(path) = src.url.strip_prefix("file://") {
         // A song on this computer: read it all at once.
         let bytes = std::fs::read(path).map_err(|e| format!("Couldn't open {path} ({e})"))?;
@@ -320,8 +316,8 @@ impl Source for StreamDecoder {
         {
             // Once everything has arrived, open it for jumping anywhere.
             let done = r.buf.state.lock().unwrap().done;
-            let fresh = build_decoder(StreamReader::new(&r.buf), r.codec, r.total, done)
-                .map_err(|e| rodio::source::SeekError::Other(Arc::new(io::Error::other(e))))?;
+            let fresh =
+                build_decoder(StreamReader::new(&r.buf), r.codec, r.total, done).map_err(|e| rodio::source::SeekError::Other(Arc::new(io::Error::other(e))))?;
             self.inner = fresh;
             if done {
                 self.reopen = None;
@@ -661,7 +657,8 @@ impl Drop for AudioEngine {
 /// The first-launch intro's beat, "bum, ba-dum-dum-DUM": when each hit lands (seconds
 /// after the start), its note (Hz), whether it has a bass thump, its loudness, and the
 /// chord on the last one. The intro's bars bounce at the same times.
-pub const INTRO_HITS: [(f32, f32, bool, f32); 5] = [(0.0, 65.4, true, 0.9), (0.42, 164.8, false, 0.45), (0.56, 196.0, false, 0.5), (0.7, 261.6, false, 0.55), (0.9, 130.8, true, 1.0)];
+pub const INTRO_HITS: [(f32, f32, bool, f32); 5] =
+    [(0.0, 65.4, true, 0.9), (0.42, 164.8, false, 0.45), (0.56, 196.0, false, 0.5), (0.7, 261.6, false, 0.55), (0.9, 130.8, true, 1.0)];
 const INTRO_CHORD: [f32; 3] = [261.6, 329.6, 392.0];
 
 /// The intro's beat as samples (mono), made here: there's no sound file.
@@ -677,11 +674,7 @@ pub fn intro_samples(rate: u32) -> Vec<f32> {
             let f = if bounce { freq * 1.5 * (1.0 / 1.5f32).powf((t / 0.06).min(1.0)) } else { freq };
             phase += std::f32::consts::TAU * f / rate_f;
             let wave = if triangle { std::f32::consts::FRAC_2_PI * phase.sin().asin() } else { phase.sin() };
-            let env = if t < 0.012 {
-                0.0001 * (gain / 0.0001).powf(t / 0.012)
-            } else {
-                gain * (0.0001 / gain).powf(((t - 0.012) / (len - 0.012)).min(1.0))
-            };
+            let env = if t < 0.012 { 0.0001 * (gain / 0.0001).powf(t / 0.012) } else { gain * (0.0001 / gain).powf(((t - 0.012) / (len - 0.012)).min(1.0)) };
             if let Some(o) = out.get_mut(start + i) {
                 *o += wave * env;
             }
@@ -858,11 +851,8 @@ impl AudioEngine {
             if !current() {
                 return;
             }
-            *timing.lock().unwrap() = Some(if from_ahead {
-                format!("Started in {:.1} s (found ahead of time)", started.elapsed().as_secs_f32())
-            } else {
-                steps.summary(started)
-            });
+            *timing.lock().unwrap() =
+                Some(if from_ahead { format!("Started in {:.1} s (found ahead of time)", started.elapsed().as_secs_f32()) } else { steps.summary(started) });
             let duration = decoder.total_duration().filter(|d| !d.is_zero()).unwrap_or(expected);
             let ctl = Arc::new(TrackCtl::default());
             let source = Processor::new(decoder, effects, ctl.clone(), 1.0, false);
@@ -998,6 +988,12 @@ impl AudioEngine {
         for d in &sh.decks {
             d.set_volume(v * v);
         }
+    }
+
+    /// The playing song's real length, once its audio is open.
+    pub fn length(&self) -> Option<Duration> {
+        let sh = self.shared.lock().unwrap();
+        sh.playing.as_ref().map(|p| p.duration).filter(|d| !d.is_zero())
     }
 
     pub fn position(&self) -> Duration {
@@ -1142,7 +1138,8 @@ fn monitor_step(sh: &mut Shared, fx: &Effects, effects: &Arc<SharedEffects>, sha
     let xf = fx.transition_secs();
     if xf > 0.0 {
         // Automix: a song that has gone quiet near its end can hand over early.
-        let silent_end = fx.automix && pos > Duration::from_secs(30) && remaining < Duration::from_secs(25) && cur_ctl.silent_for() > Duration::from_millis(1500);
+        let silent_end =
+            fx.automix && pos > Duration::from_secs(30) && remaining < Duration::from_secs(25) && cur_ctl.silent_for() > Duration::from_millis(1500);
         if remaining <= Duration::from_secs_f32(xf) || silent_end {
             let over = Duration::from_secs_f32(if silent_end { xf.min(3.0) } else { xf }).min(remaining.max(Duration::from_millis(300)));
             let pr = sh.prepared.take().unwrap();
@@ -1196,15 +1193,12 @@ pub mod tests {
                     let mut req = [0u8; 4096];
                     let n = std::io::Read::read(&mut s, &mut req).unwrap_or(0);
                     let req = String::from_utf8_lossy(&req[..n]).to_lowercase();
-                    let range = req
-                        .lines()
-                        .find_map(|l| l.strip_prefix("range: bytes="))
-                        .map(|r| {
-                            let (a, b) = r.trim().split_once('-').unwrap();
-                            let a: usize = a.parse().unwrap();
-                            let b: usize = b.parse().unwrap_or(data.len() - 1).min(data.len() - 1);
-                            (a, b)
-                        });
+                    let range = req.lines().find_map(|l| l.strip_prefix("range: bytes=")).map(|r| {
+                        let (a, b) = r.trim().split_once('-').unwrap();
+                        let a: usize = a.parse().unwrap();
+                        let b: usize = b.parse().unwrap_or(data.len() - 1).min(data.len() - 1);
+                        (a, b)
+                    });
                     let (head, body) = match range.filter(|_| ranges) {
                         Some((a, b)) => (
                             format!(
@@ -1214,10 +1208,7 @@ pub mod tests {
                             ),
                             data[a..=b].to_vec(),
                         ),
-                        None => (
-                            format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", data.len()),
-                            data.clone(),
-                        ),
+                        None => (format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", data.len()), data.clone()),
                     };
                     s.write_all(head.as_bytes()).unwrap();
                     for part in body.chunks((bytes_per_sec / 20).max(1)) {

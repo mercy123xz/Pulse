@@ -697,6 +697,39 @@ fn same_artist(wanted: &[String], got: &str) -> bool {
     wanted.iter().map(|w| bare(w.clone())).any(|w| !w.is_empty() && (w == whole || parts.contains(&w)))
 }
 
+/// Words a candidate's title may add to the source's and still be the same recording
+/// ("Firework (2010 Remaster)", "Get Lucky (Radio Edit)"); anything else ("Dallas K
+/// Radio Edit", "Bamboo", "Live at …") makes it another version.
+fn same_recording(wanted_title: &str, wanted_artists: &str, got: &str) -> bool {
+    use crate::youtube::words;
+    const FINE: [&str; 21] = [
+        "radio",
+        "edit",
+        "album",
+        "version",
+        "remaster",
+        "remastered",
+        "single",
+        "explicit",
+        "clean",
+        "original",
+        "mono",
+        "stereo",
+        "digital",
+        "deluxe",
+        "feat",
+        "ft",
+        "featuring",
+        "with",
+        "and",
+        "the",
+        "edition",
+    ];
+    let have = words(&format!("{wanted_title} {wanted_artists}"));
+    let got = words(got);
+    got.split_whitespace().all(|w| have.contains(&format!(" {w} ")) || FINE.contains(&w) || w.chars().all(|c| c.is_ascii_digit()))
+}
+
 /// Karaoke labels and cover acts ("Made famous by …", "Rihanna Cover Band").
 pub fn cover_act(artist: &str) -> bool {
     let a = crate::youtube::norm(artist);
@@ -724,7 +757,8 @@ fn best_match(candidates: Vec<Track>, artist: &str, title: &str, duration: u32) 
             let names: Vec<String> = std::iter::once(&main).chain(others.iter()).map(|a| norm(a)).collect();
             let artist_ok = want_artist.is_empty() || same_artist(&names, &t.artist.name);
             let length_ok = duration == 0 || t.duration == 0 || (t.duration.abs_diff(duration) <= 8.max(duration / 25) && t.duration * 10 >= duration * 6);
-            title_ok && artist_ok && length_ok && !unwanted_version(title, &t.title) && !cover_act(&t.artist.name)
+            let recording_ok = same_recording(title, artist, &t.title);
+            title_ok && artist_ok && length_ok && recording_ok && !unwanted_version(title, &t.title) && !cover_act(&t.artist.name)
         })
         .min_by_key(|t| {
             // Credits the same featured artists (in its title or credits).
@@ -754,6 +788,21 @@ pub fn find_track(artist: &str, title: &str, duration: u32) -> Result<Option<Tra
     // Featured artists: searches don't list them; the app fills them in from the song's
     // own page once it's in the library (see `App::ensure_featured`).
     Ok(found)
+}
+
+/// Leaves out songs named after an artist who doesn't sing them ("Katy Perry Firework" by
+/// Electronaut, "Firework (Salute to Katy Perry)"): tributes and covers. A real
+/// "(feat. …)" credit stays.
+fn without_tributes(list: Vec<Track>, artists: &[ArtistInfo]) -> Vec<Track> {
+    use crate::youtube::{core_title, norm};
+    let names: Vec<String> = artists.iter().take(3).map(|a| norm(&a.name)).filter(|n| n.len() >= 4).collect();
+    list.into_iter()
+        .filter(|t| {
+            let title = norm(&core_title(&t.title));
+            let own = norm(&t.all_artists());
+            !names.iter().any(|n| title.contains(n.as_str()) && !own.contains(n.as_str()))
+        })
+        .collect()
 }
 
 /// What Deezer offers for a song (both searches), for the live matching test.
@@ -854,7 +903,7 @@ fn search_once(q: &str) -> Result<SearchResults, String> {
         (a.name.clone(), related, songs)
     });
     Ok(SearchResults {
-        tracks: rank_songs(q, tracks(t?)),
+        tracks: without_tributes(rank_songs(q, tracks(t?)), &ranked),
         artists: ranked,
         around,
         users,
@@ -1407,6 +1456,26 @@ mod matching_tests {
         assert!(best_match(list, "JAY-Z, Rihanna, Kanye West", "Run This Town", 267).is_some());
         let list = vec![t(6, "Pump It", "The Black Eyed Peas", "9", 215, 921_100)];
         assert!(best_match(list, "Black Eyed Peas", "Pump It", 213).is_some());
+    }
+
+    #[test]
+    fn only_the_same_recording() {
+        assert!(same_recording("Firework", "Katy Perry", "Firework (2010 Remaster)"));
+        assert!(same_recording(
+            "Get Lucky (Radio Edit) [feat. Pharrell Williams and Nile Rodgers]",
+            "Daft Punk",
+            "Get Lucky (Radio Edit - feat. Pharrell Williams and Nile Rodgers)"
+        ));
+        assert!(!same_recording("Die Young", "Kesha", "Die Young (Dallas K Radio Edit)"));
+        assert!(!same_recording("Hips Don't Lie (feat. Wyclef Jean)", "Shakira, Wyclef Jean", "Hips Don't Lie - Bamboo (feat. Wyclef Jean)"));
+        let artists = vec![ArtistInfo { name: "Katy Perry".into(), ..Default::default() }];
+        let list = vec![
+            t(1, "Katy Perry Firework", "Electronaut", "1", 209, 1),
+            t(2, "Firework", "Katy Perry", "2", 227, 2),
+            t(3, "Low (feat. Katy Perry)", "Flo Rida", "3", 200, 3),
+        ];
+        let ids: Vec<String> = without_tributes(list, &artists).into_iter().map(|t| t.id).collect();
+        assert_eq!(ids, vec!["dz:2", "dz:3"]);
     }
 
     #[test]

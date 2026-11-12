@@ -3,7 +3,7 @@ name: Match test
 on:
   push:
     branches: [features]
-    paths: [tests/data/**, .github/workflows/match-test.yml]
+    paths: [tests/data/**, src/deezer.rs, src/youtube.rs, src/import.rs, .github/workflows/match-test.yml]
   workflow_dispatch:
     inputs:
       spotify:

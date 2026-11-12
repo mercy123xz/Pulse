@@ -8,12 +8,12 @@ use crate::theme::*;
 use crate::widgets::*;
 
 mod diag_page;
-mod lyrics_page;
 pub mod intro;
-mod online;
-pub mod pick_artists;
+mod lyrics_page;
 pub mod mini;
+mod online;
 mod personal;
+pub mod pick_artists;
 mod settings_page;
 mod song_page;
 
@@ -632,7 +632,9 @@ fn search_dropdown(app: &mut App, ui: &mut Ui, pill: Rect, edit: &egui::Response
                     Suggestion::Pick(p) => {
                         let (title, sub, art, round) = match p.as_ref() {
                             Pick::Artist(a) => (a.name.clone(), tr("Artist").to_string(), a.picture.clone(), true),
-                            Pick::Album(a) => (a.title.clone(), format!("{} • {}", tr(a.kind()), a.artist.name), a.cover_small.clone().or(a.cover.clone()), false),
+                            Pick::Album(a) => {
+                                (a.title.clone(), format!("{} • {}", tr(a.kind()), a.artist.name), a.cover_small.clone().or(a.cover.clone()), false)
+                            }
                             Pick::Playlist(p) => (p.title.clone(), format!("{} • {}", tr("Playlist"), p.creator), p.picture.clone(), false),
                             Pick::Song(t) => (t.title.clone(), format!("{} • {}", tr("Song"), t.all_artists()), t.art_small().map(str::to_owned), false),
                         };
@@ -644,7 +646,12 @@ fn search_dropdown(app: &mut App, ui: &mut Ui, pill: Rect, edit: &egui::Response
                         if let Pick::Artist(_) = p.as_ref() {
                             let b = Rect::from_center_size(pos2(right - 42.0, rect.center().y), vec2(84.0, 30.0));
                             let br = ui.interact(b, area_id.with(("follow", k)), Sense::click());
-                            ui.painter().rect_stroke(b, CornerRadius::same(15), Stroke::new(1.0, if br.hovered() { pal().text } else { pal().text_faint }), egui::StrokeKind::Inside);
+                            ui.painter().rect_stroke(
+                                b,
+                                CornerRadius::same(15),
+                                Stroke::new(1.0, if br.hovered() { pal().text } else { pal().text_faint }),
+                                egui::StrokeKind::Inside,
+                            );
                             ui.painter().text(b.center(), Align2::CENTER_CENTER, tr(if on { "Following" } else { "Follow" }), semi(12.0), pal().text);
                             if br.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                                 toggled = Some(k);
@@ -2312,7 +2319,7 @@ fn player_bar(app: &mut App, ui: &mut Ui) {
     // progress
     cui.add_space(2.0);
     cui.horizontal(|ui| {
-        let dur = app.current.as_ref().map(|t| t.duration).unwrap_or(0);
+        let dur = app.current_length();
         let pos = if app.needs_load { 0.0 } else { app.audio.position().as_secs_f32() };
         let frac = if dur > 0 { pos / dur as f32 } else { 0.0 };
         let shown = app.seek_preview.unwrap_or(frac);
@@ -2451,9 +2458,21 @@ fn report_dialog(app: &mut App, ctx: &egui::Context) {
         ui.set_width(460.0);
         ui.label(RichText::new(tr("Report a problem")).font(heavy(19.0)));
         ui.add_space(8.0);
-        ui.add(egui::Label::new(RichText::new(tr("What happened, and what were you doing just before? It goes to the Pulse team (only the developer can read it).")).color(pal().text_muted)).wrap());
+        ui.add(
+            egui::Label::new(
+                RichText::new(tr("What happened, and what were you doing just before? It goes to the Pulse team (only the developer can read it)."))
+                    .color(pal().text_muted),
+            )
+            .wrap(),
+        );
         ui.add_space(10.0);
-        ui.add(egui::TextEdit::multiline(&mut text).desired_rows(5).desired_width(f32::INFINITY).hint_text(tr("For example: the song stops after a few seconds when I skip quickly")).char_limit(3000));
+        ui.add(
+            egui::TextEdit::multiline(&mut text)
+                .desired_rows(5)
+                .desired_width(f32::INFINITY)
+                .hint_text(tr("For example: the song stops after a few seconds when I skip quickly"))
+                .char_limit(3000),
+        );
         ui.add_space(8.0);
         ui.checkbox(&mut include, tr("Include technical details (versions, graphics card, recent problems)"));
         ui.add_space(4.0);
