@@ -133,5 +133,5 @@ INSERT OR REPLACE INTO song_fixes (id, duration, video, note) VALUES ('dz:389238
 INSERT OR REPLACE INTO song_fixes (id, duration, video, note) VALUES ('dz:123', NULL, 'dQw4w9WgXcQ', 'wrong video');
 ```
 
-A song's id is on its page in Pulse (Copy link). The live match test (`Match test` in Actions)
+A song's id is its Deezer number with `dz:` in front (deezer.com/track/3892384211 → `dz:3892384211`). The live match test (`Match test` in Actions)
 prints the rows for every clip-only song it finds.
