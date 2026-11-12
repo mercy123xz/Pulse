@@ -22,151 +22,332 @@
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image">
+<link rel="preload" href="fonts/bricolage.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" as="image" type="image/webp" href="img/headphones.webp" fetchpriority="high">
 <style>
+@font-face { font-family: "Bricolage"; src: url("fonts/bricolage.woff2") format("woff2"); font-weight: 200 800; font-display: swap; }
+@font-face { font-family: "Inter"; src: url("fonts/inter.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
 :root {
   --bg: #0b0b0e;
   --bg-2: #0f0f13;
   --surface: #16161b;
   --surface-2: #1d1d24;
   --border: #2c2c36;
+  --line: rgba(255, 255, 255, .08);
   --text: #ededf1;
   --muted: #a3a3b0;
+  --faint: #80808e;
   --accent: #7c3aed;
   --accent-soft: #a78bfa;
+  --glow: rgba(124, 58, 237, .35);
   --radius: 14px;
-  --wrap: 1180px;
+  --wrap: 1200px;
+  --display: "Bricolage", "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
+  --body: "Inter", "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, Arial, sans-serif;
+  --ease: cubic-bezier(.2, .8, .2, 1);
+  --ease-out: cubic-bezier(.16, 1, .3, 1);
   color-scheme: dark;
 }
+html[data-theme="light"] { --line: rgba(20, 20, 40, .1); --faint: #646472; --glow: rgba(124, 58, 237, .18); }
 *, *::before, *::after { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
 @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
-body {
-  margin: 0;
-  background: var(--bg);
-  color: var(--text);
-  font: 400 1rem/1.6 "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
-  -webkit-font-smoothing: antialiased;
-}
+body { margin: 0; background: var(--bg); color: var(--text); font: 400 1rem/1.6 var(--body); -webkit-font-smoothing: antialiased; overflow-x: clip; }
 img { display: block; max-width: 100%; height: auto; }
 a { color: var(--accent-soft); }
-a:focus-visible, .btn:focus-visible { outline: 2px solid var(--accent-soft); outline-offset: 3px; border-radius: 10px; }
+a:focus-visible, .btn:focus-visible, button:focus-visible, input:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--accent-soft); outline-offset: 3px; border-radius: 10px; }
 .wrap { width: min(100% - 2.5rem, var(--wrap)); margin-inline: auto; }
+.wrap-wide { width: min(100% - 2.5rem, 1360px); margin-inline: auto; }
 .skip { position: absolute; left: -9999px; top: 0; background: var(--text); color: var(--bg); padding: .6rem 1rem; z-index: 10; }
 .skip:focus { left: 1rem; top: 1rem; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
+/* ---------- Type ---------- */
+h1, h2, h3 { font-family: var(--display); font-weight: 650; }
+h2 { font-size: clamp(2.3rem, 4.8vw, 4.1rem); line-height: 1; letter-spacing: -.04em; margin: 0 0 1.2rem; text-wrap: balance; }
+h2 em { font-style: normal; color: var(--accent-soft); }
+.label { display: flex; align-items: center; gap: .75rem; margin: 0 0 1.4rem; color: var(--muted); font-size: .78rem; font-weight: 600; letter-spacing: .16em; text-transform: uppercase; }
+.label b { color: var(--accent-soft); font-weight: 700; font-variant-numeric: tabular-nums; }
+.label::after { content: ""; flex: 0 1 4rem; height: 1px; background: var(--border); }
+.lede-x { color: var(--muted); font-size: clamp(1.05rem, 1.4vw, 1.2rem); line-height: 1.65; max-width: 34rem; margin: 0 0 1.4rem; text-wrap: pretty; }
+.note { color: var(--faint); font-size: .85rem; line-height: 1.55; }
 
-/* Buttons */
-.btn { position: relative; isolation: isolate; overflow: hidden; display: inline-flex; align-items: center; gap: .6rem; padding: .9rem 1.4rem; border-radius: 10px; border: 1px solid transparent; font-weight: 600; letter-spacing: -.005em; text-decoration: none; font-size: 1rem; line-height: 1;
-  transition: transform .35s cubic-bezier(.2, .8, .2, 1), box-shadow .35s cubic-bezier(.2, .8, .2, 1), background-color .25s ease, border-color .25s ease, color .25s ease; }
-.btn svg { transition: transform .35s cubic-bezier(.2, .8, .2, 1); }
-.btn:hover { transform: translateY(-2px); }
-.btn:active { transform: translateY(0) scale(.98); transition-duration: .08s; }
-.btn-primary { background: linear-gradient(180deg, #8b5cf6, #7c3aed); border-color: rgba(255, 255, 255, .14); color: #fff; box-shadow: inset 0 1px 0 rgba(255, 255, 255, .22), 0 1px 2px rgba(0, 0, 0, .35), 0 10px 30px -8px rgba(124, 58, 237, .55); }
-.btn-primary:hover { box-shadow: inset 0 1px 0 rgba(255, 255, 255, .28), 0 2px 4px rgba(0, 0, 0, .3), 0 18px 44px -10px rgba(124, 58, 237, .75); }
+/* ---------- Buttons ---------- */
+.btn { position: relative; isolation: isolate; overflow: hidden; display: inline-flex; align-items: center; gap: .6rem; padding: .95rem 1.45rem; border-radius: 999px; border: 1px solid transparent; font: 600 1rem/1 var(--body); letter-spacing: -.005em; text-decoration: none;
+  transition: transform .5s var(--ease-out), box-shadow .35s var(--ease), background-color .25s ease, border-color .25s ease, color .25s ease; }
+.btn svg { transition: transform .35s var(--ease); }
+.btn:active { transform: scale(.97); transition-duration: .08s; }
+.btn-primary { background: var(--accent); border-color: rgba(255, 255, 255, .16); color: #fff; box-shadow: inset 0 1px 0 rgba(255, 255, 255, .22), 0 12px 34px -10px rgba(124, 58, 237, .7); }
+.btn-primary:hover { background: #8b5cf6; box-shadow: inset 0 1px 0 rgba(255, 255, 255, .28), 0 18px 44px -12px rgba(124, 58, 237, .9); }
 .btn-primary:hover svg { transform: translateY(2px); }
-/* A sweep of light across the main button on hover. */
-.btn-primary::after { content: ""; position: absolute; inset: 0; z-index: -1; background: linear-gradient(105deg, transparent 35%, rgba(255, 255, 255, .28) 50%, transparent 65%); transform: translateX(-120%); transition: transform .7s cubic-bezier(.2, .8, .2, 1); }
+.btn-primary::after { content: ""; position: absolute; inset: 0; z-index: -1; background: linear-gradient(105deg, transparent 35%, rgba(255, 255, 255, .28) 50%, transparent 65%); transform: translateX(-120%); transition: transform .8s var(--ease); }
 .btn-primary:hover::after { transform: translateX(120%); }
-.btn-ghost { color: var(--text); background: rgba(255, 255, 255, .02); border-color: var(--border); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .04); }
-.btn-ghost:hover { background: var(--surface); border-color: color-mix(in srgb, var(--accent-soft) 45%, var(--border)); }
-@media (prefers-reduced-motion: reduce) { .btn, .btn svg, .btn-primary::after { transition: none; } .btn:hover { transform: none; } }
+.btn-ghost { color: var(--text); background: transparent; border-color: var(--border); }
+.btn-ghost:hover { border-color: color-mix(in srgb, var(--accent-soft) 55%, var(--border)); background: var(--surface); }
+.btn-lg { padding: 1.1rem 1.7rem; font-size: 1.05rem; }
+@media (prefers-reduced-motion: reduce) { .btn, .btn svg, .btn-primary::after { transition: none; } }
 
-/* Hero */
-.hero { position: relative; overflow: hidden; padding: clamp(3rem, 8vw, 6rem) 0 clamp(3rem, 6vw, 5rem); }
-.hero::before { content: ""; position: absolute; inset: -20% -10% auto 35%; height: 120%; background: radial-gradient(closest-side, rgba(124, 58, 237, .32), rgba(124, 58, 237, 0)); pointer-events: none; }
-.hero-grid { position: relative; display: grid; gap: clamp(2rem, 5vw, 3.5rem); align-items: center; }
-@media (min-width: 1000px) { .hero-grid { grid-template-columns: 1.05fr 1fr; } }
-/* The headphones: a still picture first, then the 3D ones fade in over it. */
-.stage { position: relative; width: 100%; max-width: 460px; aspect-ratio: 1; margin-inline: auto; }
-.stage::before { content: ""; position: absolute; inset: 8% 4% 10%; border-radius: 50%; background: radial-gradient(closest-side, rgba(139, 92, 246, .22), rgba(99, 102, 241, .07) 60%, transparent); pointer-events: none; }
-.stage img, .stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; transition: opacity .9s ease; }
-.stage img { object-fit: contain; pointer-events: none; }
-.stage canvas { opacity: 0; touch-action: pan-y; cursor: grab; outline-offset: 4px; }
-.stage canvas.grabbing { cursor: grabbing; }
-.stage canvas.ready { opacity: 1; }
-.stage canvas.ready + img, .stage canvas.ready ~ img { opacity: 0; }
-.stage-hint { position: absolute; left: 0; right: 0; bottom: -.4rem; margin: 0; text-align: center; font-size: .78rem; color: var(--muted); opacity: 0; transition: opacity .9s ease .6s; pointer-events: none; }
-.stage canvas.ready ~ .stage-hint { opacity: .75; }
-@media (min-width: 1000px) { .stage { max-width: 620px; margin-right: -2rem; } }
-@media (prefers-reduced-motion: reduce) { .stage img, .stage canvas, .stage-hint { transition: none; } }
-.eyebrow { display: inline-flex; gap: .5rem; align-items: center; color: var(--accent-soft); font-weight: 600; font-size: .9rem; letter-spacing: .02em; }
-h1 { font-size: clamp(2.5rem, 6vw, 4.25rem); line-height: 1.04; letter-spacing: -.035em; margin: .7rem 0 1rem; font-weight: 800; }
-h1 span { background: linear-gradient(90deg, #c4b5fd, var(--accent-soft) 40%, #8b5cf6); -webkit-background-clip: text; background-clip: text; color: transparent; }
-.lede { font-size: clamp(1.05rem, 1.6vw, 1.25rem); color: var(--muted); max-width: 34rem; margin: 0 0 1.8rem; }
-.cta { display: flex; flex-wrap: wrap; gap: .8rem; }
-.meta { margin: 1.2rem 0 0; color: var(--muted); font-size: .9rem; }
-
-/* App window frame around screenshots */
-.window { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); box-shadow: 0 30px 80px rgba(0, 0, 0, .55), 0 0 0 1px rgba(255, 255, 255, .02) inset; overflow: hidden; }
-.window-bar { display: flex; gap: 6px; padding: 10px 14px; border-bottom: 1px solid var(--border); background: var(--bg-2); }
-.window-bar i { width: 10px; height: 10px; border-radius: 50%; background: #3a3a46; }
-.window img { width: 100%; }
-
-/* Facts strip */
-.facts { border-block: 1px solid var(--border); background: var(--bg-2); }
-.facts ul { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 1rem; list-style: none; margin: 0 auto; padding: 1.6rem 0; }
-.facts strong { display: block; font-size: 1.4rem; letter-spacing: -.02em; }
-.facts span { color: var(--muted); font-size: .92rem; }
-
-/* Sections */
-section { padding: clamp(3.5rem, 8vw, 6rem) 0; }
-.kicker { color: var(--accent-soft); font-weight: 600; font-size: .9rem; margin: 0 0 .4rem; }
-h2 { font-size: clamp(1.8rem, 3.6vw, 2.6rem); line-height: 1.12; letter-spacing: -.03em; margin: 0 0 .9rem; }
-.section-lede { color: var(--muted); font-size: 1.1rem; max-width: 40rem; margin: 0 0 2.2rem; }
-.split { display: grid; gap: 2.2rem; align-items: center; }
-@media (min-width: 960px) { .split { grid-template-columns: .9fr 1.4fr; } .split.flip { grid-template-columns: 1.4fr .9fr; } .split.flip > :first-child { order: 2; } }
-.split ul { padding-left: 1.1rem; color: var(--muted); }
-.split li { margin: .4rem 0; }
-.split li strong { color: var(--text); font-weight: 600; }
-.shot { border-radius: var(--radius); border: 1px solid var(--border); overflow: hidden; background: var(--surface); }
-
-/* Wide strips (artists, playlists) */
-.strip { margin-top: 1.4rem; }
-.strip .shot { mask-image: linear-gradient(90deg, transparent, #000 4%, #000 96%, transparent); -webkit-mask-image: linear-gradient(90deg, transparent, #000 4%, #000 96%, transparent); }
-@media (max-width: 700px) {
-  .strip { overflow-x: auto; scroll-snap-type: x mandatory; }
-  .strip .shot { width: 820px; max-width: none; mask-image: none; -webkit-mask-image: none; }
+/* ---------- Hero ---------- */
+.hero { --mx: .7; --my: .4; position: relative; display: grid; align-items: center; min-height: min(100svh, 1000px); padding: 7.5rem 0 3rem; overflow: clip; }
+/* Light that drifts with the cursor (home.js sets --mx and --my). */
+.hero::before { content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: radial-gradient(42rem 34rem at calc(var(--mx) * 100%) calc(var(--my) * 100%), var(--glow), transparent 70%),
+              radial-gradient(60rem 30rem at 50% 120%, rgba(124, 58, 237, .12), transparent 70%); transition: background-position .2s; }
+.hero::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 30%; background: linear-gradient(transparent, var(--bg)); pointer-events: none; }
+.hero-grid { position: relative; z-index: 1; display: grid; gap: 1rem; }
+.hero-copy { position: relative; z-index: 2; max-width: 42rem; }
+.eyebrow { display: inline-flex; align-items: center; gap: .6rem; margin: 0 0 1.6rem; padding: .4rem .85rem .4rem .5rem; border: 1px solid var(--border); border-radius: 999px; color: var(--muted); font-size: .85rem; font-weight: 500; background: color-mix(in srgb, var(--bg) 70%, transparent); }
+.eyebrow i { display: inline-flex; align-items: flex-end; gap: 2px; height: 14px; padding: 0 .35rem; }
+.eyebrow i b { width: 2.5px; border-radius: 2px; background: var(--accent-soft); height: 50%; }
+.eyebrow i b:nth-child(2) { height: 100%; } .eyebrow i b:nth-child(3) { height: 70%; } .eyebrow i b:nth-child(4) { height: 35%; }
+h1 { font-size: clamp(3.2rem, 8.2vw, 7.4rem); line-height: .92; letter-spacing: -.055em; margin: 0 0 1.6rem; font-weight: 700; }
+h1 .h-line { display: block; overflow: hidden; padding: .04em 0 .2em; margin: -.04em 0 -.2em; }
+h1 .h-line > span { display: inline-block; }
+h1 .h-line:last-child > span { color: transparent; background: linear-gradient(95deg, #ddd6fe, var(--accent-soft) 45%, #8b5cf6); -webkit-background-clip: text; background-clip: text; }
+.hero .lede-x { font-size: clamp(1.08rem, 1.5vw, 1.28rem); max-width: 31rem; color: var(--muted); }
+.cta { display: flex; flex-wrap: wrap; gap: .8rem; align-items: center; }
+.meta { margin: 1.4rem 0 0; color: var(--faint); font-size: .88rem; }
+.meta span + span::before { content: "·"; margin: 0 .55rem; }
+@media (prefers-reduced-motion: no-preference) {
+  h1 .h-line > span, .hero .rise { animation: rise 1.1s var(--ease-out) both; animation-delay: calc(var(--i, 0) * 90ms + 120ms); }
+  html[data-intro="intro"] h1 .h-line > span, html[data-intro="intro"] .hero .rise { animation-play-state: paused; }
+  @keyframes rise { from { transform: translateY(105%); opacity: 0; } }
+  .hero .rise { animation-name: fade-up; }
+  @keyframes fade-up { from { transform: translateY(16px); opacity: 0; } }
 }
 
-/* Feature cards */
-.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1rem; }
-@media (max-width: 700px) { .cards { grid-template-columns: 1fr; } }
-.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.4rem 1.4rem 1.2rem; }
-.card svg { width: 28px; height: 28px; color: var(--accent-soft); }
-.card h3 { margin: .8rem 0 .35rem; font-size: 1.08rem; letter-spacing: -.01em; }
-.card p { margin: 0; color: var(--muted); font-size: .95rem; }
+/* The headphones: a still picture first, then the 3D ones fade in over it. */
+.stage { position: relative; width: min(100%, 560px); aspect-ratio: 1; margin: -1rem auto 0; }
+.stage::before { content: ""; position: absolute; inset: 14% 10% 16%; border-radius: 50%; background: radial-gradient(closest-side, rgba(139, 92, 246, .3), rgba(99, 102, 241, .08) 60%, transparent); filter: blur(10px); pointer-events: none; }
+.stage img, .stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; transition: opacity 1s ease; }
+.stage img { object-fit: contain; pointer-events: none; }
+.stage canvas { opacity: 0; touch-action: pan-y; cursor: grab; }
+.stage canvas.grabbing { cursor: grabbing; }
+.stage canvas.ready { opacity: 1; }
+.stage canvas.ready ~ img { opacity: 0; }
+.stage-hint { position: absolute; z-index: 2; left: 0; right: 0; bottom: 7%; margin: 0; text-align: center; font-size: .75rem; letter-spacing: .12em; text-transform: uppercase; color: var(--faint); opacity: 0; transition: opacity 1s ease .8s; pointer-events: none; }
+.stage canvas.ready ~ .stage-hint { opacity: 1; }
+@media (min-width: 1000px) {
+  .hero-grid { min-height: 34rem; align-items: center; }
+  .stage { position: absolute; z-index: 1; top: 0; bottom: 0; right: max(-6vw, calc((100vw - var(--wrap)) / -2 - 4vw)); width: min(52vw, 760px, 86svh); height: min(52vw, 760px, 86svh); margin: auto 0; aspect-ratio: auto; }
+}
+@media (prefers-reduced-motion: reduce) { .stage img, .stage canvas, .stage-hint { transition: none; } }
 
-/* Light on your PC */
-.perf { display: grid; gap: 2.5rem; align-items: center; }
-@media (min-width: 960px) { .perf { grid-template-columns: .9fr 1.1fr; gap: 4rem; } }
-.perf .copy p { color: var(--muted); font-size: 1.08rem; margin: 0 0 1rem; }
-.perf .copy .kicker { color: var(--accent-soft); font-size: .9rem; margin: 0 0 .4rem; }
-.perf .copy small { display: block; color: #80808e; font-size: .86rem; }
-.meter { margin: 0; background: var(--surface); border: 1px solid var(--border); border-radius: 18px; overflow: hidden; box-shadow: 0 40px 100px -30px rgba(0, 0, 0, .7); }
-.meter-top { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .6rem; padding: .85rem 1.2rem; border-bottom: 1px solid var(--border); background: var(--bg-2); font-size: .85rem; color: var(--muted); }
-.live { width: 8px; height: 8px; border-radius: 50%; background: var(--accent-soft); }
-@media (prefers-reduced-motion: no-preference) { .live { animation: ping 1.8s ease-out infinite; } }
-@keyframes ping { 0% { box-shadow: 0 0 0 0 rgba(167, 139, 250, .6); } 100% { box-shadow: 0 0 0 8px rgba(167, 139, 250, 0); } }
-.legend { margin-left: auto; display: flex; gap: 1rem; font-size: .8rem; white-space: nowrap; }
-.legend span { display: inline-flex; align-items: center; gap: .4rem; }
-.legend span::before { content: ""; width: 14px; height: 3px; border-radius: 2px; background: var(--c); }
-.spark { position: relative; height: 150px; border-bottom: 1px solid var(--border); overflow: hidden; background-image: linear-gradient(rgba(44, 44, 54, .55) 1px, transparent 1px); background-size: 100% 25%; }
-.spark svg { position: absolute; inset: 0; width: 200%; height: 100%; }
-@media (prefers-reduced-motion: no-preference) { .spark svg { animation: scrollspark 16s linear infinite; } }
-@keyframes scrollspark { to { transform: translateX(-50%); } }
-.spark .axis { position: absolute; right: .7rem; top: .45rem; font-size: .72rem; color: #80808e; }
-.rows-m { padding: .4rem 1.2rem 1.2rem; }
-.metric { padding-top: 1.1rem; }
-.metric h3 { margin: 0 0 .7rem; font-size: .8rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: #80808e; }
-.mrow { display: grid; grid-template-columns: 9.5rem 1fr 6.5rem; gap: 1rem; align-items: center; margin: .5rem 0; font-size: .92rem; }
-.mrow > span:first-child { color: var(--muted); }
-.mrow b { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
-.track-m { position: relative; height: 10px; border-radius: 5px; background: var(--bg-2); border: 1px solid var(--border); }
-.track-m i { position: absolute; top: -1px; bottom: -1px; left: 0; width: var(--to); border-radius: 5px; background: var(--c); }
-@media (prefers-reduced-motion: no-preference) { .meter.seen .track-m i { animation: grow 1.2s cubic-bezier(.2, .7, .2, 1) both; } @keyframes grow { from { width: 0; } } }
-.mrow.us > span:first-child { color: var(--text); font-weight: 600; }
-@media (max-width: 520px) { .mrow { grid-template-columns: 1fr 5.5rem; } .mrow .track-m { grid-column: 1 / -1; grid-row: 2; } }
+/* At a glance: one quiet line of facts under the hero */
+.facts { position: relative; z-index: 1; margin-top: clamp(2rem, 5vw, 4rem); border-top: 1px solid var(--line); }
+.facts ul { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); list-style: none; margin: 0; padding: 0; }
+.facts li { padding: 1.3rem 1.2rem 0 0; }
+.facts li + li { padding-left: 1.2rem; border-left: 1px solid var(--line); }
+.facts strong { display: block; font: 650 1.55rem/1.1 var(--display); letter-spacing: -.03em; }
+.facts span { color: var(--muted); font-size: .88rem; }
+@media (max-width: 640px) { .facts ul { grid-template-columns: 1fr 1fr; } .facts li, .facts li + li { padding: 1rem 0 0; border: 0; } }
+
+/* ---------- Sections ---------- */
+section { position: relative; padding: clamp(5rem, 11vw, 9rem) 0; }
+.rule { border-top: 1px solid var(--line); }
+.split { display: grid; gap: clamp(2.5rem, 5vw, 5rem); align-items: center; }
+.split > *, .twin > *, .perf-grid > *, .discover-head > *, .themes-head > * { min-width: 0; }
+@media (min-width: 980px) { .split { grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); } .split.flip { grid-template-columns: minmax(0, 6fr) minmax(0, 5fr); } .split.flip > :first-child { order: 2; } }
+.points { list-style: none; margin: 1.8rem 0 0; padding: 0; display: grid; gap: 0; border-top: 1px solid var(--line); max-width: 34rem; }
+.points li { display: grid; grid-template-columns: 2.4rem 1fr; gap: .4rem; padding: .95rem 0; border-bottom: 1px solid var(--line); color: var(--muted); font-size: .97rem; }
+.points li::before { content: counter(p, decimal-leading-zero); counter-increment: p; color: var(--faint); font-size: .8rem; font-variant-numeric: tabular-nums; padding-top: .15rem; }
+.points { counter-reset: p; }
+.points strong { color: var(--text); font-weight: 600; }
+.shot { border-radius: var(--radius); border: 1px solid var(--border); overflow: hidden; background: var(--surface); }
+
+/* ---------- 01 Listen: the player demo, drawn like the real app ---------- */
+@media (min-width: 980px) { .split.wide { grid-template-columns: minmax(0, 4fr) minmax(0, 7fr); } }
+.pd { margin: 0; width: 100%; }
+.pd-tag { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin: 0 0 .8rem; color: var(--faint); font-size: .74rem; letter-spacing: .12em; text-transform: uppercase; }
+.pd-tag span:last-child { letter-spacing: 0; text-transform: none; font-size: .8rem; }
+@media (max-width: 520px) { .pd-tag span:last-child { display: none; } }
+.pd-app { --bg: #0b0b0e; --side: #0f0f13; --player: #0f0f13; --card: #16161b; --hl: #1d1d24; --hl2: #24242d; --bd: #2c2c36; --tx: #ededf1; --sub: #9696a4; --faint: #80808e; --btn: #7c3aed; --act: #a78bfa; --r: 10px; --g1: #a78bfa; --g2: #4c1d95; }
+.d-app.pd-app { height: 470px; }
+html[data-theme="light"] .pd-app { --bg: #fafafc; --side: #f3f3f7; --player: #f3f3f7; --card: #ffffff; --hl: #e8e8ee; --hl2: #dedee6; --bd: #d4d4de; --tx: #14141a; --sub: #4e4e5c; --faint: #646472; --act: #6d28d9; }
+.pd-app .d-glow { opacity: .45; }
+.pd.playing .pd-app .d-glow { opacity: .7; }
+.pd-app .d-body { grid-template-columns: 176px minmax(0, 1fr); }
+.pd-app .d-nav { cursor: default; }
+.pd-app .d-search span { flex: 1; color: var(--faint); white-space: nowrap; }
+.pd-app .d-avatar { margin-left: auto; }
+.pd-app .d-acts .d-like { width: 38px; height: 38px; }
+/* Cover art made for the demo (no real album art): Pulse's bars on violet. */
+.pd-art { position: relative; display: inline-block; flex: none; overflow: hidden; width: 34px; height: 34px; border-radius: calc(var(--r) * .4); background: radial-gradient(120% 90% at 20% 10%, #c4b5fd, #7c3aed 45%, #2e1065 100%); }
+.pd-art.pd-cover { width: 118px; height: 118px; border-radius: calc(var(--r) * .8); box-shadow: 0 18px 40px rgba(76, 29, 149, .45); }
+.pd-art.now { width: 48px; height: 48px; border-radius: calc(var(--r) * .5); }
+.pd-art i { position: absolute; bottom: 20%; width: 9%; border-radius: 4px; background: rgba(255, 255, 255, .92); transform-origin: bottom; transition: transform .2s var(--ease); }
+.pd-art i:nth-child(1) { left: 18%; height: 22%; } .pd-art i:nth-child(2) { left: 32%; height: 42%; } .pd-art i:nth-child(3) { left: 46%; height: 60%; } .pd-art i:nth-child(4) { left: 60%; height: 36%; } .pd-art i:nth-child(5) { left: 74%; height: 16%; }
+.pd .i-pause, .pd.playing .i-play { display: none; }
+.pd.playing .i-pause { display: block; }
+.pd.loading .pd-toggle { opacity: .6; }
+.pd #pd-row .d-eq { display: none; }
+.pd.playing #pd-row .d-eq { display: inline-flex; }
+.pd.playing .pd-num { display: none; }
+.pd.playing #pd-row .d-t b { color: var(--act); }
+.pd-seek { position: relative; cursor: pointer; touch-action: none; transition: height .15s; }
+.pd-seek:hover, .pd-seek:focus-visible { height: 6px; }
+.pd-seek:focus-visible { outline: 2px solid var(--act); outline-offset: 4px; }
+.pd-app .d-bar i { transition: none; }
+#pd-loop[aria-pressed="true"] { color: var(--act); }
+.pd-app .d-ctrls button:disabled { opacity: .35; }
+.pd-vol { width: 96px; accent-color: var(--act); }
+.pd-status { margin: .9rem 0 0; text-align: center; color: var(--faint); font-size: .8rem; min-height: 1.2em; }
+@media (max-width: 700px) {
+  .d-app.pd-app { height: 430px; }
+  .pd-app .d-body { grid-template-columns: minmax(0, 1fr); }
+  .pd-app .d-side, .pd-app .d-vol, .pd-app .d-now .d-t, .pd-app .d-now .d-like, .pd-app .d-al, .pd-app .d-th span:nth-child(3), .pd-app .d-search kbd { display: none; }
+  .pd-app .d-player { grid-template-columns: auto minmax(0, 1fr); padding: 0 12px; }
+  .pd-app .d-th, .pd-app .d-rowplay { grid-template-columns: 26px minmax(0, 1fr) 44px; }
+  .pd-app .d-search { width: auto; flex: 1; }
+  .pd-app .d-hero { gap: 14px; }
+  .pd-art.pd-cover { width: 92px; height: 92px; }
+}
+
+/* ---------- 02 Performance: big numbers ---------- */
+.perf-grid { display: grid; gap: 3rem; }
+@media (min-width: 980px) { .perf-grid { grid-template-columns: minmax(0, 4fr) minmax(0, 7fr); gap: 5rem; align-items: end; } }
+.vs { display: grid; gap: 2.4rem; }
+.vs-row h3 { margin: 0 0 1rem; font: 600 .78rem/1 var(--body); letter-spacing: .16em; text-transform: uppercase; color: var(--faint); }
+.vs-line { display: grid; grid-template-columns: minmax(0, 15rem) 1fr; gap: 1.4rem; align-items: center; padding: .7rem 0; border-top: 1px solid var(--line); }
+.vs-line b { white-space: nowrap; font: 650 clamp(2.2rem, 4.6vw, 4rem)/1 var(--display); letter-spacing: -.05em; font-variant-numeric: tabular-nums; }
+@media (max-width: 600px) { .vs-line { grid-template-columns: 1fr; gap: .6rem; } }
+.vs-line.them b { color: var(--faint); font-size: clamp(1.6rem, 3vw, 2.4rem); }
+.vs-line span { display: grid; gap: .5rem; color: var(--muted); font-size: .9rem; }
+.vs-line i { display: block; height: 6px; border-radius: 3px; width: var(--to); background: var(--accent-soft); transform-origin: left; }
+.vs-line.them i { background: #5a5a66; }
+@media (prefers-reduced-motion: no-preference) { .vs-line i { transform: scaleX(0); transition: transform 1.4s var(--ease-out) .2s; } .vs.seen .vs-line i { transform: none; } .vs.seen .them i { transition-delay: .45s; } }
+
+/* ---------- 03 Discover: a big screenshot that settles as you scroll ---------- */
+.discover-head { display: grid; gap: 2rem; margin-bottom: clamp(3rem, 6vw, 5rem); }
+@media (min-width: 980px) { .discover-head { grid-template-columns: minmax(0, 6fr) minmax(0, 5fr); align-items: end; } }
+.showcase { --p: 1; perspective: 1600px; }
+.screen { transform: rotateX(calc((1 - var(--p)) * 16deg)) scale(calc(.92 + var(--p) * .08)); transform-origin: 50% 0; box-shadow: 0 60px 140px -40px rgba(0, 0, 0, .85), 0 0 0 1px rgba(255, 255, 255, .03); will-change: transform; }
+.screen::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(180deg, rgba(255, 255, 255, calc((1 - var(--p)) * .06)), transparent 40%); }
+.screen { position: relative; }
+.screen img { width: 100%; }
+.caption { display: flex; justify-content: space-between; gap: 1rem; flex-wrap: wrap; margin-top: 1rem; color: var(--faint); font-size: .85rem; }
+
+/* ---------- 04 Browse: tabs over real screenshots ---------- */
+.tabs { position: relative; display: inline-flex; gap: .2rem; padding: .3rem; border-radius: 999px; border: 1px solid var(--border); background: var(--bg-2); margin-bottom: 1.6rem; }
+.tabs button { position: relative; z-index: 1; padding: .65rem 1.2rem; border: 0; border-radius: 999px; background: none; color: var(--muted); font: 600 .92rem/1 var(--body); cursor: pointer; transition: color .25s; }
+.tabs button[aria-selected="true"] { color: var(--text); }
+.tabs .tab-pill { position: absolute; z-index: 0; top: .3rem; bottom: .3rem; left: 0; width: 0; border-radius: 999px; background: var(--surface-2); box-shadow: 0 1px 2px rgba(0, 0, 0, .3), inset 0 1px 0 rgba(255, 255, 255, .05); transition: transform .5s var(--ease-out), width .5s var(--ease-out); }
+.panels { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); }
+.panels > [role="tabpanel"] { min-width: 0; grid-area: 1 / 1; transition: opacity .5s var(--ease), transform .7s var(--ease-out); }
+.panels > [role="tabpanel"][hidden] { display: block; visibility: hidden; opacity: 0; transform: translateY(14px) scale(.985); pointer-events: none; }
+.panels .shot { mask-image: linear-gradient(90deg, #000 80%, transparent); -webkit-mask-image: linear-gradient(90deg, #000 80%, transparent); }
+.panels .shot img { width: 100%; }
+.panels p { margin: .9rem 0 0; color: var(--muted); font-size: .95rem; max-width: 40rem; }
+@media (max-width: 700px) { .panels .shot { overflow-x: auto; mask-image: none; -webkit-mask-image: none; } .panels .shot img { width: 760px; max-width: none; } }
+
+/* ---------- 05 Made for you: Orbits ---------- */
+.orbit { position: relative; aspect-ratio: 1; width: min(100%, 500px); margin-inline: auto; }
+.orbit svg { width: 100%; height: 100%; overflow: visible; }
+.orbit .ring { fill: none; stroke: var(--border); stroke-width: 1; }
+.orbit .spin { transform-origin: 250px 250px; transform-box: view-box; }
+/* Like real orbits: everything goes the same way, and the closer in, the faster. */
+@media (prefers-reduced-motion: no-preference) {
+  .orbit .spin { animation: orbit 26s linear infinite paused; }
+  .orbit .spin.b { animation-duration: 48s; animation-delay: -12s; }
+  .orbit .spin.c { animation-duration: 82s; animation-delay: -30s; }
+  .orbit.on .spin { animation-play-state: running; }
+  .orbit .core { animation: core-glow 4s ease-in-out infinite alternate paused; transform-origin: 250px 250px; transform-box: view-box; }
+  .orbit.on .core { animation-play-state: running; }
+  @keyframes orbit { to { transform: rotate(360deg); } }
+  @keyframes core-glow { to { filter: drop-shadow(0 0 22px rgba(167, 139, 250, .55)); } }
+}
+.orbit .dot { fill: var(--surface-2); stroke: var(--border); }
+.orbit .dot.hot { fill: var(--accent-soft); stroke: none; filter: drop-shadow(0 0 12px rgba(167, 139, 250, .8)); }
+.orbit-label { position: absolute; left: 0; right: 0; bottom: 0; text-align: center; color: var(--faint); font-size: .8rem; letter-spacing: .1em; text-transform: uppercase; }
+.trio { display: grid; gap: 0; margin-top: 2rem; border-top: 1px solid var(--line); }
+.trio article { display: grid; grid-template-columns: 2.6rem 1fr; gap: .2rem 1rem; padding: 1.3rem 0; border-bottom: 1px solid var(--line); }
+.trio svg { width: 26px; height: 26px; color: var(--accent-soft); grid-row: span 2; margin-top: .15rem; }
+.trio h3 { margin: 0; font: 650 1.2rem/1.25 var(--display); letter-spacing: -.02em; }
+.trio p { margin: .2rem 0 0; color: var(--muted); font-size: .96rem; }
+
+/* ---------- 06 Sound: the equalizer ---------- */
+.eq { margin: 0; padding: clamp(1.2rem, 3vw, 2rem); border-radius: 26px; border: 1px solid var(--border); background: linear-gradient(180deg, var(--surface), var(--bg-2)); box-shadow: 0 50px 120px -40px rgba(0, 0, 0, .7); }
+.eq-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .8rem; margin-bottom: 1.2rem; }
+.eq-head b { font: 650 1.15rem/1 var(--display); letter-spacing: -.02em; }
+.eq-presets { display: flex; gap: .4rem; overflow-x: auto; padding-bottom: .3rem; margin-bottom: 1rem; scrollbar-width: none; }
+.eq-presets button { flex: none; padding: .5rem .85rem; border-radius: 999px; border: 1px solid var(--border); background: none; color: var(--muted); font: 500 .84rem/1 var(--body); cursor: pointer; transition: color .2s, border-color .2s, background-color .2s; }
+.eq-presets button:hover { color: var(--text); border-color: #55555f; }
+.eq-presets button[aria-pressed="true"] { color: #fff; background: var(--accent); border-color: transparent; }
+.eq-graph { position: relative; height: 150px; border-radius: 14px; background: var(--bg); border: 1px solid var(--line); overflow: hidden; }
+.eq-graph svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.eq-graph .grid line { stroke: var(--line); }
+.eq-graph .curve { fill: none; stroke: var(--accent-soft); stroke-width: 2.5; vector-effect: non-scaling-stroke; stroke-linejoin: round; }
+.eq-graph .area { fill: url(#eq-fill); }
+.eq-graph .zero { stroke: var(--border); stroke-dasharray: 3 4; }
+.eq-graph span { position: absolute; right: .6rem; font-size: .68rem; color: var(--faint); font-variant-numeric: tabular-nums; }
+.eq-bands { display: grid; grid-template-columns: repeat(6, 1fr); gap: .4rem; margin-top: 1.2rem; }
+.eq-band { display: grid; justify-items: center; gap: .55rem; }
+.eq-band output { font-size: .78rem; font-variant-numeric: tabular-nums; color: var(--text); min-height: 1.2em; }
+.eq-band label { font-size: .76rem; color: var(--faint); font-variant-numeric: tabular-nums; }
+.eq-band input { -webkit-appearance: none; appearance: none; writing-mode: vertical-lr; direction: rtl; width: 30px; height: 150px; margin: 0; background: none; cursor: pointer; }
+.eq-band input::-webkit-slider-runnable-track { width: 4px; border-radius: 2px; background: var(--border); }
+.eq-band input::-moz-range-track { width: 4px; border-radius: 2px; background: var(--border); }
+.eq-band input::-webkit-slider-thumb { -webkit-appearance: none; width: 22px; height: 22px; margin-left: -9px; border-radius: 50%; background: var(--text); border: 4px solid var(--accent); box-shadow: 0 4px 12px rgba(0, 0, 0, .45); transition: transform .2s var(--ease); }
+.eq-band input::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; background: var(--text); border: 4px solid var(--accent); }
+.eq-band input:hover::-webkit-slider-thumb { transform: scale(1.12); }
+.eq-band input:focus-visible { outline: 2px solid var(--accent-soft); outline-offset: 2px; border-radius: 8px; }
+.eq-foot { display: flex; flex-wrap: wrap; align-items: center; gap: .8rem 1rem; margin-top: 1.2rem; padding-top: 1.1rem; border-top: 1px solid var(--line); }
+.eq-foot p { margin: 0; color: var(--faint); font-size: .84rem; flex: 1 1 14rem; }
+.eq-foot .btn { padding: .7rem 1.1rem; font-size: .9rem; }
+.extras { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0; margin-top: 2rem; border-top: 1px solid var(--line); }
+.extras div { padding: 1.1rem 1rem 1.1rem 0; border-bottom: 1px solid var(--line); }
+.extras div:nth-child(even) { padding-left: 1rem; border-left: 1px solid var(--line); }
+.extras b { display: block; font: 650 1.05rem/1.2 var(--display); letter-spacing: -.01em; }
+.extras span { color: var(--muted); font-size: .9rem; }
+
+/* ---------- 07 Everywhere: offline, local files, accessibility ---------- */
+.formats { display: flex; flex-wrap: wrap; gap: .2rem 1.4rem; margin: 0 0 1.6rem; padding: 0; list-style: none; font: 700 clamp(2.6rem, 6.4vw, 5.4rem)/1 var(--display); letter-spacing: -.05em; }
+.formats li { color: transparent; -webkit-text-stroke: 1.2px color-mix(in srgb, var(--text) 45%, transparent); transition: color .5s var(--ease), -webkit-text-stroke-color .5s; }
+.formats li:hover, .formats li:first-child { color: var(--text); -webkit-text-stroke-color: transparent; }
+.twin { display: grid; gap: 4rem; }
+@media (min-width: 980px) { .twin { grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: 6rem; } }
+.a11y { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); }
+.a11y li { display: flex; gap: 1rem; align-items: baseline; padding: 1rem 0; border-bottom: 1px solid var(--line); }
+.a11y li b { flex: none; width: 1.6rem; color: var(--accent-soft); font-size: .8rem; font-variant-numeric: tabular-nums; }
+.a11y li span { color: var(--muted); }
+.a11y li strong { display: block; color: var(--text); font-weight: 600; }
+.langs { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: 1.4rem; }
+.langs span { padding: .35rem .8rem; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); font-size: .85rem; }
+
+/* ---------- 08 Themes ---------- */
+.themes-head { display: grid; gap: 1.5rem; margin-bottom: 2.6rem; }
+@media (min-width: 980px) { .themes-head { grid-template-columns: minmax(0, 6fr) minmax(0, 5fr); align-items: end; } }
+.theme { transition: transform .5s var(--ease-out); }
+.theme:hover { transform: translateY(-4px); }
+.theme .mini { transition: box-shadow .4s var(--ease); }
+.theme:hover .mini { box-shadow: 0 24px 50px -20px rgba(0, 0, 0, .7); }
+
+/* ---------- Download ---------- */
+.download .box { position: relative; overflow: hidden; display: grid; gap: 2rem; align-items: end; padding: clamp(2.5rem, 6vw, 5rem) clamp(1.5rem, 5vw, 4.5rem); border-radius: 30px; border: 1px solid var(--border);
+  background: radial-gradient(80% 120% at 100% 0%, rgba(124, 58, 237, .32), transparent 60%), var(--surface); }
+@media (min-width: 900px) { .download .box { grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); } }
+.download .box h2 { font-size: clamp(2.8rem, 6.4vw, 5.6rem); margin: 0; }
+.download .box p { color: var(--muted); margin: 0 0 1.4rem; max-width: 30rem; }
+.download .box small { display: block; color: var(--faint); max-width: 34rem; margin-top: 1.2rem; font-size: .85rem; }
+.download .box .bars { position: absolute; left: 4%; bottom: -12%; display: flex; align-items: flex-end; gap: 1.2vw; opacity: .05; pointer-events: none; }
+.download .box > div { position: relative; z-index: 1; }
+.download .info { margin-top: 1.1rem; }
+.download .box .bars i { width: 3vw; max-width: 46px; border-radius: 99px; background: var(--text); }
+
+footer { border-top: 1px solid var(--line); padding: 2.4rem 0 3rem; color: var(--muted); font-size: .88rem; }
+footer .wrap { display: grid; gap: .9rem; }
+footer nav { display: flex; gap: 1.3rem; flex-wrap: wrap; }
+footer a { color: var(--text); text-decoration: none; }
+footer a:hover { text-decoration: underline; }
+
+/* ---------- Light theme ---------- */
+html[data-theme="light"] .pd, html[data-theme="light"] .eq { box-shadow: 0 40px 100px -40px rgba(30, 20, 60, .25); }
+html[data-theme="light"] .screen { box-shadow: 0 50px 120px -40px rgba(30, 20, 60, .3); }
+html[data-theme="light"] h1 .h-line, html[data-theme="light"] h1 .h-line > span { background: none; }
+html[data-theme="light"] h1 .h-line:last-child > span { background-image: linear-gradient(95deg, #5b21b6, #7c3aed 50%, #9333ea); -webkit-background-clip: text; background-clip: text; color: transparent; }
+html[data-theme="light"] .download .box { background: radial-gradient(80% 120% at 100% 0%, rgba(124, 58, 237, .14), transparent 60%), var(--surface); }
+html[data-theme="light"] .tabs .tab-pill { box-shadow: 0 1px 3px rgba(20, 20, 40, .12); background: var(--surface); }
+html[data-theme="light"] .vs-line.them i { background: #c2c2cc; }
 
 /* Themes: mini app windows drawn in CSS with each theme's real colors */
 .themes { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 1.1rem; }
@@ -370,18 +551,6 @@ figure.theme { margin: 0; }
 .is-left .d-mid { order: -1; }
 .is-left .d-ctrls { justify-content: flex-start; }
 
-/* Download */
-.download { text-align: center; }
-.download .box { position: relative; overflow: hidden; background: radial-gradient(120% 140% at 50% 0%, rgba(124, 58, 237, .28), rgba(22, 22, 27, 1) 60%); border: 1px solid var(--border); border-radius: 24px; padding: clamp(2.5rem, 6vw, 4rem) 1.5rem; }
-.download .cta { justify-content: center; }
-.download small { display: block; color: var(--muted); max-width: 38rem; margin: 1.6rem auto 0; font-size: .9rem; }
-
-footer { border-top: 1px solid var(--border); padding: 2.2rem 0 3rem; color: var(--muted); font-size: .88rem; }
-footer .wrap { display: grid; gap: .8rem; }
-footer nav { display: flex; gap: 1.2rem; flex-wrap: wrap; }
-footer a { color: var(--text); text-decoration: none; }
-footer a:hover { text-decoration: underline; }
-
 /* Cursor: black arrow with a purple edge; purple over anything clickable.
    Native cursors (no script), only for mouse users. */
 @media (pointer: fine) {
@@ -458,179 +627,286 @@ html[data-intro="intro"] .hero-grid > * { opacity: 0; transform: translateY(18px
 </header>
 
 <main id="main">
-  <section class="hero" aria-labelledby="hero-title">
-    <div class="wrap hero-grid">
-      <div>
-        <span class="eyebrow">Free &amp; open source · Windows 10 and 11</span>
-        <h1 id="hero-title">Your music, <span>without the weight.</span></h1>
-        <p class="lede">Pulse is a small, native music player written in Rust. Search any artist, press play, and hear the whole song. No ads, no browser inside, and no account needed.</p>
-        <div class="cta">
-          <a class="btn btn-primary js-download" href="download/">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 19h16"/></svg>
-            Download for Windows
-          </a>
-          <a class="btn btn-ghost" href="https://github.com/mercy123xz/Pulse">View on GitHub</a>
+  <section class="hero" id="top" aria-labelledby="hero-title">
+    <div class="wrap">
+      <div class="hero-grid">
+        <div class="hero-copy">
+          <p class="eyebrow rise" style="--i:0"><i aria-hidden="true"><b></b><b></b><b></b><b></b></i>Free and open source · Windows 10 and 11</p>
+          <h1 id="hero-title"><span class="h-line"><span style="--i:1">Your music,</span></span><span class="h-line"><span style="--i:2">without the</span></span><span class="h-line"><span style="--i:3">weight.</span></span></h1>
+          <p class="lede-x rise" style="--i:5">Pulse is a small, native music player written in Rust. Search any artist, press play, and hear the whole song. No ads, no browser inside, and no account needed.</p>
+          <div class="cta rise" style="--i:6">
+            <a class="btn btn-primary btn-lg js-download" href="download/" data-magnetic>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 19h16"/></svg>
+              Download for Windows
+            </a>
+            <a class="btn btn-ghost btn-lg" href="#listen" data-magnetic>See it play</a>
+          </div>
+          <p class="meta rise" style="--i:7"><span>Version <span class="js-version">1.2.0</span></span><span>under 10 MB</span><span>no administrator password</span></p>
         </div>
-        <p class="meta">Version <span class="js-version">1.2.0</span> · under 10 MB installer · no administrator password needed</p>
+        <div class="stage">
+          <canvas id="phones" aria-hidden="true"></canvas>
+          <img src="img/headphones.webp" width="900" height="900" fetchpriority="high" decoding="async" alt="A pair of black over-ear headphones lit in purple.">
+          <p class="stage-hint" aria-hidden="true">Move your cursor · drag to turn</p>
+        </div>
       </div>
-      <div class="stage">
-        <canvas id="phones" aria-hidden="true"></canvas>
-        <img src="img/headphones.webp" width="900" height="900" fetchpriority="high" decoding="async" alt="A pair of black over-ear headphones lit in purple.">
-        <p class="stage-hint" aria-hidden="true">Drag to turn</p>
+      <div class="facts" aria-label="At a glance">
+        <ul>
+          <li><strong>&lt; 10 MB</strong><span>installer</span></li>
+          <li><strong>Native</strong><span>Rust and DirectX 12, no web browser inside</span></li>
+          <li><strong>5 themes</strong><span>or make your own</span></li>
+          <li><strong>5 languages</strong><span>English, Español, Português, Français, Deutsch</span></li>
+          <li><strong>0 accounts</strong><span>needed: everything stays on your PC</span></li>
+        </ul>
       </div>
     </div>
   </section>
 
-  <div class="facts" aria-label="At a glance">
-    <ul class="wrap">
-      <li><strong>&lt; 10 MB</strong><span>installer</span></li>
-      <li><strong>Native</strong><span>Rust + DirectX 12, no web browser inside</span></li>
-      <li><strong>5 themes</strong><span>or make your own</span></li>
-      <li><strong>5 languages</strong><span>English, Español, Português, Français, Deutsch</span></li>
-      <li><strong>0 accounts</strong><span>everything stays on your PC</span></li>
-    </ul>
-  </div>
-
-  <section id="performance" aria-labelledby="perf-title">
-    <div class="wrap perf">
-      <div class="copy">
-        <p class="kicker">Performance</p>
-        <h2 id="perf-title">Light on your PC.</h2>
-        <p>While it plays, Pulse uses about 1% of your CPU and around 250 MB of memory. Other popular music apps can use up to 6% and more than 400 MB.</p>
-        <p>So it can stay open all day next to your games, your browser and your work, and you'll barely notice it's there.</p>
-        <small>Rough estimates from the developer's PC while playing music. Your numbers will depend on your PC.</small>
+  <section id="listen" aria-labelledby="listen-title">
+    <div class="wrap split wide">
+      <div>
+        <p class="label" data-reveal><b>01</b>Listen</p>
+        <h2 id="listen-title" data-reveal>Press play. Hear the <em>whole</em> song.</h2>
+        <p class="lede-x" data-reveal>Search any artist and every song plays from start to finish: no previews, no ads between tracks. When your queue runs out, Autoplay keeps going with music like it.</p>
+        <p class="note" data-reveal>The player here is a copy of Pulse's look, built into this website so you can try it. It really plays: the beat from Pulse's launch video, in your browser. The real Pulse is a Windows app.</p>
       </div>
-      <figure class="meter" role="group" aria-labelledby="perf-cap">
-        <figcaption class="meter-top" id="perf-cap"><span class="live" aria-hidden="true"></span>While playing music
-          <span class="legend" aria-hidden="true"><span style="--c:var(--accent-soft)">Pulse</span><span style="--c:#6e6e7c">Other music apps</span></span>
-        </figcaption>
-        <div class="spark" aria-hidden="true">
-          <span class="axis">CPU</span>
-          <svg viewBox="0 0 400 64" preserveAspectRatio="none">
-            <defs><linearGradient id="pulse-area" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#a78bfa" stop-opacity=".28"/><stop offset="1" stop-color="#a78bfa" stop-opacity="0"/></linearGradient></defs>
-            <path d="M0.0 44.0 C3.3 46.1 6.7 46.4 10.0 45.5 C13.3 44.6 16.7 40.3 20.0 38.5 C23.3 36.7 26.7 35.1 30.0 34.6 C33.3 34.1 36.7 35.7 40.0 35.6 C43.3 35.5 46.7 35.0 50.0 33.8 C53.3 32.7 56.7 29.9 60.0 28.8 C63.3 27.8 66.7 27.5 70.0 27.7 C73.3 27.8 76.7 29.6 80.0 29.9 C83.3 30.2 86.7 29.6 90.0 29.5 C93.3 29.4 96.7 28.1 100.0 29.4 C103.3 30.6 106.7 33.9 110.0 36.9 C113.3 40.0 116.7 45.6 120.0 47.5 C123.3 49.4 126.7 49.7 130.0 48.1 C133.3 46.6 136.7 41.4 140.0 38.2 C143.3 35.0 146.7 31.1 150.0 28.8 C153.3 26.6 156.7 25.8 160.0 24.8 C163.3 23.7 166.7 22.6 170.0 22.3 C173.3 22.1 176.7 21.7 180.0 23.4 C183.3 25.1 186.7 29.2 190.0 32.7 C193.3 36.1 196.7 41.8 200.0 44.0 L200.0 44.0 C203.3 46.1 206.7 46.4 210.0 45.5 C213.3 44.6 216.7 40.3 220.0 38.5 C223.3 36.7 226.7 35.1 230.0 34.6 C233.3 34.1 236.7 35.7 240.0 35.6 C243.3 35.5 246.7 35.0 250.0 33.8 C253.3 32.7 256.7 29.9 260.0 28.8 C263.3 27.8 266.7 27.5 270.0 27.7 C273.3 27.8 276.7 29.6 280.0 29.9 C283.3 30.2 286.7 29.6 290.0 29.5 C293.3 29.4 296.7 28.1 300.0 29.4 C303.3 30.6 306.7 33.9 310.0 36.9 C313.3 40.0 316.7 45.6 320.0 47.5 C323.3 49.4 326.7 49.7 330.0 48.1 C333.3 46.6 336.7 41.4 340.0 38.2 C343.3 35.0 346.7 31.1 350.0 28.8 C353.3 26.6 356.7 25.8 360.0 24.8 C363.3 23.7 366.7 22.6 370.0 22.3 C373.3 22.1 376.7 21.7 380.0 23.4 C383.3 25.1 386.7 29.2 390.0 32.7 C393.3 36.1 396.7 41.8 400.0 44.0" fill="none" stroke="#6e6e7c" stroke-width="1.8" vector-effect="non-scaling-stroke" stroke-linecap="round"/>
-            <path d="M0.0 59.8 C3.3 60.3 6.7 60.1 10.0 60.0 C13.3 59.8 16.7 59.3 20.0 59.0 C23.3 58.6 26.7 58.3 30.0 57.8 C33.3 57.2 36.7 56.5 40.0 55.8 C43.3 55.1 46.7 53.9 50.0 53.6 C53.3 53.2 56.7 53.2 60.0 53.7 C63.3 54.2 66.7 55.5 70.0 56.3 C73.3 57.1 76.7 58.1 80.0 58.5 C83.3 58.9 86.7 58.6 90.0 58.5 C93.3 58.5 96.7 58.1 100.0 58.1 C103.3 58.1 106.7 58.4 110.0 58.4 C113.3 58.4 116.7 58.4 120.0 58.1 C123.3 57.9 126.7 57.2 130.0 56.9 C133.3 56.6 136.7 56.3 140.0 56.2 C143.3 56.2 146.7 56.6 150.0 56.5 C153.3 56.5 156.7 56.3 160.0 56.0 C163.3 55.6 166.7 54.8 170.0 54.6 C173.3 54.4 176.7 54.3 180.0 54.8 C183.3 55.3 186.7 56.6 190.0 57.5 C193.3 58.3 196.7 59.4 200.0 59.8 L200.0 59.8 C203.3 60.3 206.7 60.1 210.0 60.0 C213.3 59.8 216.7 59.3 220.0 59.0 C223.3 58.6 226.7 58.3 230.0 57.8 C233.3 57.2 236.7 56.5 240.0 55.8 C243.3 55.1 246.7 53.9 250.0 53.6 C253.3 53.2 256.7 53.2 260.0 53.7 C263.3 54.2 266.7 55.5 270.0 56.3 C273.3 57.1 276.7 58.1 280.0 58.5 C283.3 58.9 286.7 58.6 290.0 58.5 C293.3 58.5 296.7 58.1 300.0 58.1 C303.3 58.1 306.7 58.4 310.0 58.4 C313.3 58.4 316.7 58.4 320.0 58.1 C323.3 57.9 326.7 57.2 330.0 56.9 C333.3 56.6 336.7 56.3 340.0 56.2 C343.3 56.2 346.7 56.6 350.0 56.5 C353.3 56.5 356.7 56.3 360.0 56.0 C363.3 55.6 366.7 54.8 370.0 54.6 C373.3 54.4 376.7 54.3 380.0 54.8 C383.3 55.3 386.7 56.6 390.0 57.5 C393.3 58.3 396.7 59.4 400.0 59.8 L400 64 L0 64 Z" fill="url(#pulse-area)" stroke="none"/>
-            <path d="M0.0 59.8 C3.3 60.3 6.7 60.1 10.0 60.0 C13.3 59.8 16.7 59.3 20.0 59.0 C23.3 58.6 26.7 58.3 30.0 57.8 C33.3 57.2 36.7 56.5 40.0 55.8 C43.3 55.1 46.7 53.9 50.0 53.6 C53.3 53.2 56.7 53.2 60.0 53.7 C63.3 54.2 66.7 55.5 70.0 56.3 C73.3 57.1 76.7 58.1 80.0 58.5 C83.3 58.9 86.7 58.6 90.0 58.5 C93.3 58.5 96.7 58.1 100.0 58.1 C103.3 58.1 106.7 58.4 110.0 58.4 C113.3 58.4 116.7 58.4 120.0 58.1 C123.3 57.9 126.7 57.2 130.0 56.9 C133.3 56.6 136.7 56.3 140.0 56.2 C143.3 56.2 146.7 56.6 150.0 56.5 C153.3 56.5 156.7 56.3 160.0 56.0 C163.3 55.6 166.7 54.8 170.0 54.6 C173.3 54.4 176.7 54.3 180.0 54.8 C183.3 55.3 186.7 56.6 190.0 57.5 C193.3 58.3 196.7 59.4 200.0 59.8 L200.0 59.8 C203.3 60.3 206.7 60.1 210.0 60.0 C213.3 59.8 216.7 59.3 220.0 59.0 C223.3 58.6 226.7 58.3 230.0 57.8 C233.3 57.2 236.7 56.5 240.0 55.8 C243.3 55.1 246.7 53.9 250.0 53.6 C253.3 53.2 256.7 53.2 260.0 53.7 C263.3 54.2 266.7 55.5 270.0 56.3 C273.3 57.1 276.7 58.1 280.0 58.5 C283.3 58.9 286.7 58.6 290.0 58.5 C293.3 58.5 296.7 58.1 300.0 58.1 C303.3 58.1 306.7 58.4 310.0 58.4 C313.3 58.4 316.7 58.4 320.0 58.1 C323.3 57.9 326.7 57.2 330.0 56.9 C333.3 56.6 336.7 56.3 340.0 56.2 C343.3 56.2 346.7 56.6 350.0 56.5 C353.3 56.5 356.7 56.3 360.0 56.0 C363.3 55.6 366.7 54.8 370.0 54.6 C373.3 54.4 376.7 54.3 380.0 54.8 C383.3 55.3 386.7 56.6 390.0 57.5 C393.3 58.3 396.7 59.4 400.0 59.8" fill="none" stroke="var(--accent-soft)" stroke-width="2.4" vector-effect="non-scaling-stroke" stroke-linecap="round"/>
-          </svg>
+      <figure class="pd" id="pd" aria-label="Website demo of a music player" data-reveal>
+        <figcaption class="pd-tag"><span>Website demo · a copy of Pulse's look</span><span>Plays in your browser</span></figcaption>
+        <div class="d-app pd-app is-glow" role="group" aria-label="Demo player">
+          <div class="d-body">
+            <nav class="d-side" aria-label="Demo pages">
+              <div class="d-brand"><span class="d-logo"><i></i><i></i><i></i><i></i></span><b>Pulse</b></div>
+              <p class="d-label">Browse</p>
+              <span class="d-nav"><svg class="" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="currentColor" stroke="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 10.4 12 3.5l8.5 6.9V21h-6v-6h-5v6h-6z"/></svg><span>Home</span></span>
+              <span class="d-nav"><svg class="" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16M7 16v-5m5 5V6m5 10v-8"/></svg><span>Charts</span></span>
+              <p class="d-label">Library</p>
+              <span class="d-nav"><span class="d-likedart"><svg class="" viewBox="0 0 24 24" width="12" height="12" aria-hidden="true" fill="currentColor" stroke="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20s-7.5-4.6-7.5-10.2A4.3 4.3 0 0 1 12 7.2a4.3 4.3 0 0 1 7.5 2.6C19.5 15.4 12 20 12 20Z"/></svg></span><span>Liked Songs</span><em id="pd-likes">0</em></span>
+              <span class="d-nav"><svg class="" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 7.5V12l3 2M20.5 12a8.5 8.5 0 1 1-17 0 8.5 8.5 0 0 1 17 0"/></svg><span>Recently Played</span></span>
+              <span class="d-nav on"><svg class="" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h12M4 11h12M4 16h7m4 0 5 3v-6z"/></svg><span>Queue</span></span>
+            </nav>
+            <div class="d-main">
+              <div class="d-glow" aria-hidden="true"></div>
+              <div class="d-top" aria-hidden="true">
+                <span class="d-ib"><svg class="" viewBox="0 0 24 24" width="17" height="17" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></span><span class="d-ib"><svg class="" viewBox="0 0 24 24" width="17" height="17" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg></span>
+                <span class="d-search"><svg class="" viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m20 20-4.4-4.4M17.2 10.6a6.6 6.6 0 1 1-13.2 0 6.6 6.6 0 0 1 13.2 0"/></svg><span>Search songs, ...</span><kbd>Ctrl K</kbd></span>
+                <span class="d-avatar"><svg class="" viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8m-7.5 8a7.5 7.5 0 0 1 15 0"/></svg></span>
+              </div>
+              <div class="d-view">
+                <div class="d-hero"><span class="pd-art pd-cover" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span><div><small>SINGLE</small><h3>back2back</h3><p class="d-sub"><b>prod. jissa</b> · from the Pulse launch video</p></div></div>
+                <div class="d-acts"><button type="button" class="d-bigplay pd-toggle" aria-label="Play"><svg class="i-play" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="currentColor" stroke="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 5.2v13.6L19 12z"/></svg><svg class="i-pause" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="currentColor" stroke="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7.5 5h3.2v14H7.5zm5.8 0h3.2v14h-3.2z"/></svg></button><button type="button" class="d-like pd-like" aria-pressed="false" aria-label="Like back2back"><svg class="" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20s-7.5-4.6-7.5-10.2A4.3 4.3 0 0 1 12 7.2a4.3 4.3 0 0 1 7.5 2.6C19.5 15.4 12 20 12 20Z"/></svg></button></div>
+                <div class="d-table">
+                  <div class="d-th" aria-hidden="true"><span>#</span><span>Title</span><span>Album</span><span><svg class="" viewBox="0 0 24 24" width="13" height="13" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 7.5V12l3 2M20.5 12a8.5 8.5 0 1 1-17 0 8.5 8.5 0 0 1 17 0"/></svg></span></div>
+                  <div class="d-row" id="pd-row"><button type="button" class="d-rowplay pd-toggle" aria-label="Play back2back"><span class="d-n"><span class="pd-num">1</span><span class="d-eq"><i></i><i></i><i></i></span></span><span class="d-tt"><span class="pd-art" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span><span class="d-t"><b>back2back</b><small>prod. jissa</small></span></span><span class="d-al">Pulse launch video</span><span class="d-len" id="pd-len">0:17</span></button><button type="button" class="d-like pd-like" aria-pressed="false" aria-label="Like back2back"><svg class="" viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20s-7.5-4.6-7.5-10.2A4.3 4.3 0 0 1 12 7.2a4.3 4.3 0 0 1 7.5 2.6C19.5 15.4 12 20 12 20Z"/></svg></button></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="d-player">
+            <div class="d-now"><span class="pd-art now" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span><span class="d-t"><b>back2back</b><small>prod. jissa</small></span><button type="button" class="d-like pd-like" aria-pressed="false" aria-label="Like back2back"><svg class="" viewBox="0 0 24 24" width="17" height="17" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20s-7.5-4.6-7.5-10.2A4.3 4.3 0 0 1 12 7.2a4.3 4.3 0 0 1 7.5 2.6C19.5 15.4 12 20 12 20Z"/></svg></button></div>
+            <div class="d-mid">
+              <div class="d-ctrls">
+                <button type="button" aria-label="Shuffle" disabled><svg class="" viewBox="0 0 24 24" width="17" height="17" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 7.5h3c4.5 0 6.5 9 11 9h3M3.5 16.5h3c1.6 0 2.8-1.2 3.8-2.8m3.4-5.4c1-1.6 2.2-2.8 3.8-2.8h3m-2.2-2.2 2.2 2.2-2.2 2.2m0 6.6 2.2 2.2-2.2 2.2"/></svg></button>
+                <button type="button" id="pd-restart" aria-label="Back to the start"><svg class="" viewBox="0 0 24 24" width="17" height="17" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 5.5v13L8 12zM6 5v14"/></svg></button>
+                <button type="button" class="d-pp pd-toggle" id="pd-play" aria-label="Play"><svg class="i-play" viewBox="0 0 24 24" width="17" height="17" aria-hidden="true" fill="currentColor" stroke="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 5.2v13.6L19 12z"/></svg><svg class="i-pause" viewBox="0 0 24 24" width="17" height="17" aria-hidden="true" fill="currentColor" stroke="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7.5 5h3.2v14H7.5zm5.8 0h3.2v14h-3.2z"/></svg></button>
+                <button type="button" aria-label="Next" disabled><svg class="" viewBox="0 0 24 24" width="17" height="17" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 5.5v13L16 12zM18 5v14"/></svg></button>
+                <button type="button" id="pd-loop" aria-label="Repeat" aria-pressed="true"><svg class="" viewBox="0 0 24 24" width="17" height="17" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 11V9.5a3 3 0 0 1 3-3h12l-2.5-2.5m2.5 9V14.5a3 3 0 0 1-3 3h-12l2.5 2.5"/></svg></button>
+              </div>
+              <div class="d-prog"><span id="pd-cur">0:00</span><span class="d-bar pd-seek" id="pd-seek" role="slider" tabindex="0" aria-label="Position in the track" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-valuetext="0:00"><i id="pd-fill" style="width:0%"></i></span><span id="pd-dur">0:17</span></div>
+            </div>
+            <div class="d-vol"><svg class="" viewBox="0 0 24 24" width="17" height="17" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9.5v5h3.5L12 18.5v-13L7.5 9.5zm11.5-1.8a5 5 0 0 1 0 8.6"/></svg><input class="pd-vol" id="pd-vol" type="range" min="0" max="100" value="80" aria-label="Volume"></div>
+          </div>
         </div>
-        <div class="rows-m">
-          <div class="metric">
-            <h3>CPU</h3>
-            <div class="mrow us"><span>Pulse</span><span class="track-m" aria-hidden="true"><i style="--to:17%;--c:var(--accent-soft)"></i></span><b>about 1%</b></div>
-            <div class="mrow"><span>Other music apps</span><span class="track-m" aria-hidden="true"><i style="--to:100%;--c:#5a5a66"></i></span><b>up to 6%</b></div>
+        <p class="pd-status" id="pd-status" aria-live="polite">Press play to load the track (1.8 MB).</p>
+      </figure>
+    </div>
+  </section>
+
+  <section id="performance" class="rule" aria-labelledby="perf-title">
+    <div class="wrap perf-grid">
+      <div>
+        <p class="label" data-reveal><b>02</b>Performance</p>
+        <h2 id="perf-title" data-reveal>Light on your PC.</h2>
+        <p class="lede-x" data-reveal>Pulse can stay open all day next to your games, your browser and your work, and you'll barely notice it's there.</p>
+        <p class="note" data-reveal>Rough estimates from the developer's PC while playing music. Your numbers will depend on your PC.</p>
+      </div>
+      <div class="vs" data-reveal>
+        <div class="vs-row">
+          <h3>CPU while playing</h3>
+          <div class="vs-line"><b>~1%</b><span>Pulse<i style="--to:17%"></i></span></div>
+          <div class="vs-line them"><b>up to 6%</b><span>Other popular music apps<i style="--to:100%"></i></span></div>
+        </div>
+        <div class="vs-row">
+          <h3>Memory while playing</h3>
+          <div class="vs-line"><b>~250 MB</b><span>Pulse<i style="--to:50%"></i></span></div>
+          <div class="vs-line them"><b>400+ MB</b><span>Other popular music apps<i style="--to:84%"></i></span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="features" class="rule" aria-labelledby="discover-title">
+    <div class="wrap discover-head">
+      <div>
+        <p class="label" data-reveal><b>03</b>Discover</p>
+        <h2 id="discover-title" data-reveal>Any song.<br>Any artist.</h2>
+      </div>
+      <div>
+        <p class="lede-x" data-reveal>Search as you type, browse the charts in 27 genres, and open any artist or album. Artist pages show their latest release, their most-played songs, and who their fans also listen to.</p>
+        <ul class="points" data-reveal>
+          <li><span><strong>Charts and genres</strong>, updated every day</span></li>
+          <li><span><strong>Artist pages</strong> with related artists</span></li>
+          <li><span><strong>Autoplay</strong> that picks up where your queue ends</span></li>
+        </ul>
+      </div>
+    </div>
+    <div class="wrap-wide showcase" id="showcase">
+      <div class="shot screen">
+        <picture>
+          <source type="image/avif" srcset="img/chart-page-800.avif 800w, img/chart-page-1140.avif 1140w, img/chart-page-1504.avif 1504w" sizes="(min-width: 1400px) 1360px, 100vw">
+          <source type="image/webp" srcset="img/chart-page-800.webp 800w, img/chart-page-1140.webp 1140w, img/chart-page-1504.webp 1504w" sizes="(min-width: 1400px) 1360px, 100vw">
+          <img src="img/chart-page-1140.webp" width="1140" height="548" loading="lazy" decoding="async" alt="Pulse's Charts page: genre buttons from Pop to Folk above a table of today's top songs.">
+        </picture>
+      </div>
+      <p class="caption"><span>The Charts page in Pulse.</span><span>Click any screenshot to see it full size.</span></p>
+    </div>
+  </section>
+
+  <section id="browse" class="rule" aria-labelledby="browse-title">
+    <div class="wrap">
+      <div class="discover-head" style="margin-bottom: 2.4rem">
+        <div>
+          <p class="label" data-reveal><b>04</b>Browse</p>
+          <h2 id="browse-title" data-reveal>Albums, artists and playlists, all in one place.</h2>
+        </div>
+        <p class="lede-x" data-reveal>Cover art everywhere, round artist portraits, and playlists for every mood. Click a song's title to jump to its album, or right-click it to like it, share it, or see who made it.</p>
+      </div>
+      <div data-reveal>
+        <div class="tabs" role="tablist" aria-label="What to look at">
+          <span class="tab-pill" aria-hidden="true"></span>
+          <button role="tab" id="tab-albums" aria-controls="panel-albums" aria-selected="true">Albums</button>
+          <button role="tab" id="tab-artists" aria-controls="panel-artists" aria-selected="false" tabindex="-1">Artists</button>
+          <button role="tab" id="tab-playlists" aria-controls="panel-playlists" aria-selected="false" tabindex="-1">Playlists</button>
+        </div>
+        <div class="panels">
+          <div role="tabpanel" id="panel-albums" aria-labelledby="tab-albums">
+            <div class="shot"><picture><source type="image/avif" srcset="img/albums.avif"><source type="image/webp" srcset="img/albums.webp"><img src="img/albums.webp" width="824" height="300" loading="lazy" decoding="async" alt="A grid of popular albums in Pulse, each with its cover, title and artist."></picture></div>
+            <p>Every album and single gets its cover, year and artist. Open one to play it in order, or shuffle it.</p>
           </div>
-          <div class="metric">
-            <h3>Memory</h3>
-            <div class="mrow us"><span>Pulse</span><span class="track-m" aria-hidden="true"><i style="--to:50%;--c:var(--accent-soft)"></i></span><b>~250 MB</b></div>
-            <div class="mrow"><span>Other music apps</span><span class="track-m" aria-hidden="true"><i style="--to:84%;--c:#5a5a66"></i></span><b>400+ MB</b></div>
+          <div role="tabpanel" id="panel-artists" aria-labelledby="tab-artists" hidden>
+            <div class="shot"><picture><source type="image/avif" srcset="img/artists.avif"><source type="image/webp" srcset="img/artists.webp"><img src="img/artists.webp" width="1226" height="326" loading="lazy" decoding="async" alt="A row of popular artists in Pulse, shown as round portraits with their names."></picture></div>
+            <p>Follow the artists you like. Their pages show their newest release, top songs and albums, and artists like them.</p>
           </div>
+          <div role="tabpanel" id="panel-playlists" aria-labelledby="tab-playlists" hidden>
+            <div class="shot"><picture><source type="image/avif" srcset="img/playlists.avif"><source type="image/webp" srcset="img/playlists.webp"><img src="img/playlists.webp" width="1226" height="327" loading="lazy" decoding="async" alt="A row of popular playlists in Pulse, from Christmas Hits to Lofi beats."></picture></div>
+            <p>Popular playlists for every mood, next to your own.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="orbits" class="rule" aria-labelledby="orbits-title">
+    <div class="wrap split flip">
+      <div>
+        <p class="label" data-reveal><b>05</b>Made for you</p>
+        <h2 id="orbits-title" data-reveal>Your music, <em>in orbit</em>.</h2>
+        <p class="lede-x" data-reveal>Your home page fills with what you play: quick shortcuts, the albums you keep coming back to, and Orbits, a daily mix built around each of your favorite artists.</p>
+        <div class="trio" data-reveal>
+          <article>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M5.6 18.4A9 9 0 0 1 12 3M18.4 5.6A9 9 0 0 1 12 21"/></svg>
+            <h3>Orbits</h3>
+            <p>Songs like an artist's, mixed with their own hits. A new mix every day.</p>
+          </article>
+          <article>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0-4-4m4 4 4-4"/><path d="M5 21h14"/></svg>
+            <h3>Bring your playlists</h3>
+            <p>Paste a link from YouTube, Spotify or SoundCloud and Pulse rebuilds the playlist. Share yours with a one-line code.</p>
+          </article>
+          <article>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7h18M3 12h18M3 17h10"/></svg>
+            <h3>Playlists your way</h3>
+            <p>Your own covers, search, genre filters, sorting, "date added", and selection with Ctrl and Shift.</p>
+          </article>
+        </div>
+      </div>
+      <div class="orbit" id="orbit" aria-hidden="true">
+        <svg viewBox="0 0 500 500">
+          <defs><radialGradient id="core" cx="50%" cy="40%" r="60%"><stop offset="0" stop-color="#c4b5fd"/><stop offset=".55" stop-color="#7c3aed"/><stop offset="1" stop-color="#2e1065"/></radialGradient></defs>
+          <circle class="ring" cx="250" cy="250" r="95"/><circle class="ring" cx="250" cy="250" r="160"/><circle class="ring" cx="250" cy="250" r="225"/>
+          <g class="spin"><circle class="dot hot" cx="250" cy="155" r="9"/><circle class="dot" cx="345" cy="250" r="6"/><circle class="dot" cx="183" cy="317" r="7"/></g>
+          <g class="spin b"><circle class="dot" cx="410" cy="250" r="10"/><circle class="dot hot" cx="137" cy="137" r="7"/><circle class="dot" cx="250" cy="410" r="8"/><circle class="dot" cx="113" cy="330" r="5"/></g>
+          <g class="spin c"><circle class="dot" cx="250" cy="25" r="7"/><circle class="dot" cx="455" cy="340" r="9"/><circle class="dot hot" cx="60" cy="370" r="6"/><circle class="dot" cx="91" cy="91" r="5"/><circle class="dot" cx="410" cy="95" r="6"/></g>
+          <rect class="core" x="205" y="205" width="90" height="90" rx="24" fill="url(#core)"/>
+          <g fill="#fff"><rect x="222" y="241" width="7" height="18" rx="3.5"/><rect x="234" y="230" width="7" height="40" rx="3.5"/><rect x="246.5" y="222" width="7" height="56" rx="3.5"/><rect x="259" y="235" width="7" height="30" rx="3.5"/><rect x="271" y="244" width="7" height="12" rx="3.5"/></g>
+        </svg>
+        <span class="orbit-label">Your most-played artists, at the center of it</span>
+      </div>
+    </div>
+  </section>
+
+  <section id="sound" class="rule" aria-labelledby="sound-title">
+    <div class="wrap split">
+      <div>
+        <p class="label" data-reveal><b>06</b>Sound</p>
+        <h2 id="sound-title" data-reveal>Shape the sound.</h2>
+        <p class="lede-x" data-reveal>A six-band equalizer with eight presets. Try it here: these sliders shape the demo track on this page with the same bands and presets as Pulse's equalizer.</p>
+        <div class="extras" data-reveal>
+          <div><b>Crossfade</b><span>Up to 10 seconds between songs</span></div>
+          <div><b>Gapless</b><span>Albums play without a pause</span></div>
+          <div><b>Automix</b><span>Smooth handovers between songs</span></div>
+          <div><b>Mono audio</b><span>Both ears get everything</span></div>
+        </div>
+      </div>
+      <figure class="eq" id="eq" aria-labelledby="eq-title" data-reveal>
+        <div class="eq-head"><b id="eq-title">Equalizer</b><span class="note">Website demo</span></div>
+        <div class="eq-presets" role="group" aria-label="Presets"></div>
+        <div class="eq-graph">
+          <svg viewBox="0 0 600 150" preserveAspectRatio="none" aria-hidden="true">
+            <defs><linearGradient id="eq-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#a78bfa" stop-opacity=".32"/><stop offset="1" stop-color="#a78bfa" stop-opacity="0"/></linearGradient></defs>
+            <g class="grid"><line x1="0" y1="37.5" x2="600" y2="37.5"/><line x1="0" y1="112.5" x2="600" y2="112.5"/></g>
+            <line class="zero" x1="0" y1="75" x2="600" y2="75"/>
+            <path class="area" d=""/><path class="curve" d=""/>
+          </svg>
+          <span style="top:.4rem">+12 dB</span><span style="top:calc(50% - .5rem)">0</span><span style="bottom:.4rem">−12 dB</span>
+        </div>
+        <div class="eq-bands"></div>
+        <div class="eq-foot">
+          <p id="eq-say" aria-live="polite">Press Play to hear these settings on the demo track.</p>
+          <button class="btn btn-ghost" id="eq-play" type="button">Play the demo track</button>
         </div>
       </figure>
     </div>
   </section>
 
-  <section id="features" aria-labelledby="discover-title">
-    <div class="wrap split">
+  <section id="everywhere" class="rule" aria-labelledby="offline-title">
+    <div class="wrap twin">
       <div>
-        <p class="kicker">Discover</p>
-        <h2 id="discover-title">Any song. Any artist.</h2>
-        <p class="section-lede">Search as you type, browse the charts in 27 genres, and open any artist or album. Songs play in full, and when your queue runs out, Pulse keeps going with music like it.</p>
-        <ul>
-          <li><strong>Charts and genres</strong> updated every day</li>
-          <li><strong>Artist pages</strong> with their latest release and most-viewed songs</li>
-          <li><strong>Autoplay</strong> that picks up where your queue ends</li>
+        <p class="label" data-reveal><b>07</b>Offline and local</p>
+        <ul class="formats" aria-label="File types Pulse plays" data-reveal><li>MP3</li><li>FLAC</li><li>WAV</li><li>M4A</li><li>OGG</li></ul>
+        <h2 id="offline-title" data-reveal>No signal? Keep listening.</h2>
+        <p class="lede-x" data-reveal>Save songs for when you're offline, and play the music files already in your Music folder, right next to everything you stream.</p>
+      </div>
+      <div>
+        <p class="label" data-reveal><b>08</b>Made for everyone</p>
+        <ul class="a11y" data-reveal>
+          <li><b>01</b><span><strong>Full keyboard control</strong>Every button and list works without a mouse.</span></li>
+          <li><b>02</b><span><strong>Screen readers</strong>Buttons and songs are named for screen readers.</span></li>
+          <li><b>03</b><span><strong>High contrast mode</strong>For when you need the edges to stand out.</span></li>
+          <li><b>04</b><span><strong>Readable colors</strong>Text colors meet WCAG AA contrast.</span></li>
         </ul>
-      </div>
-      <div class="shot">
-        <picture>
-          <source type="image/avif" srcset="img/charts.avif">
-          <source type="image/webp" srcset="img/charts.webp">
-          <img src="img/charts.webp" width="752" height="470" loading="lazy" decoding="async" alt="The Discover section of Pulse's home page: genre buttons from Pop to Folk, above a table of today's top songs.">
-        </picture>
+        <div class="langs" aria-label="Languages" data-reveal><span>English</span><span>Español</span><span>Português</span><span>Français</span><span>Deutsch</span></div>
       </div>
     </div>
   </section>
 
-  <section aria-labelledby="library-title" style="padding-top: 0">
-    <div class="wrap split flip">
-      <div>
-        <p class="kicker">Browse</p>
-        <h2 id="library-title">Albums, artists and playlists, all in one place.</h2>
-        <p class="section-lede">Cover art everywhere, round artist portraits, and playlists for every mood. Click a song's title to jump to its album, or right-click it to like it, share it, or see who made it.</p>
-      </div>
-      <div class="shot">
-        <picture>
-          <source type="image/avif" srcset="img/albums.avif">
-          <source type="image/webp" srcset="img/albums.webp">
-          <img src="img/albums.webp" width="824" height="300" loading="lazy" decoding="async" alt="A grid of popular albums in Pulse, each with its cover, title and artist.">
-        </picture>
-      </div>
-    </div>
-    <div class="wrap strip">
-      <div class="shot">
-        <picture>
-          <source type="image/avif" srcset="img/artists.avif">
-          <source type="image/webp" srcset="img/artists.webp">
-          <img src="img/artists.webp" width="1226" height="326" loading="lazy" decoding="async" alt="A row of popular artists in Pulse, shown as round portraits with their names.">
-        </picture>
-      </div>
-    </div>
-    <div class="wrap strip">
-      <div class="shot">
-        <picture>
-          <source type="image/avif" srcset="img/playlists.avif">
-          <source type="image/webp" srcset="img/playlists.webp">
-          <img src="img/playlists.webp" width="1226" height="327" loading="lazy" decoding="async" alt="A row of popular playlists in Pulse, from Christmas Hits to Lofi beats.">
-        </picture>
-      </div>
-    </div>
-  </section>
-
-  <section aria-labelledby="more-title" style="padding-top: 0">
+  <section id="themes" class="rule" aria-labelledby="themes-title">
     <div class="wrap">
-      <p class="kicker">And more</p>
-      <h2 id="more-title">Small app. Lots inside.</h2>
-      <p class="section-lede">Everything you'd expect from a music player, and a few things you might not.</p>
-      <div class="cards">
-        <article class="card">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0-4-4m4 4 4-4"/><path d="M5 21h14"/></svg>
-          <h3>Bring your playlists</h3>
-          <p>Paste a link from YouTube, Spotify or SoundCloud and Pulse rebuilds the playlist. Share yours with friends using a one-line code.</p>
-        </article>
-        <article class="card">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg>
-          <h3>Sound the way you like</h3>
-          <p>A six-band equalizer with presets, crossfade up to 10 seconds, gapless playback, automix and mono audio.</p>
-        </article>
-        <article class="card">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21s-7-4.5-9.5-9A5.5 5.5 0 0 1 12 6a5.5 5.5 0 0 1 9.5 6c-2.5 4.5-9.5 9-9.5 9z"/></svg>
-          <h3>Made for you</h3>
-          <p>Your home page fills with what you play: quick shortcuts, Orbits built around your favorite artists, and the albums you keep coming back to.</p>
-        </article>
-        <article class="card">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7h18M3 12h18M3 17h10"/></svg>
-          <h3>Playlists your way</h3>
-          <p>Your own covers, search, genre filters, sorting, "date added", and Spotify-style selection with Ctrl and Shift.</p>
-        </article>
-        <article class="card">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4z"/><path d="M14 17h6M17 14v6"/></svg>
-          <h3>Offline and local files</h3>
-          <p>Save songs for when you're offline, and play the MP3, FLAC, WAV, M4A and OGG files in your Music folder.</p>
-        </article>
-        <article class="card">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/></svg>
-          <h3>Made for everyone</h3>
-          <p>Full keyboard control, screen-reader support, high contrast mode, and text colors that meet WCAG AA contrast.</p>
-        </article>
+      <div class="themes-head">
+        <div>
+          <p class="label" data-reveal><b>09</b>Themes</p>
+          <h2 id="themes-title" data-reveal>Make it look like yours.</h2>
+        </div>
+        <p class="lede-x" data-reveal>Five themes come built in, each with a dark and a light version. Some glow softly in the colors of the song that's playing. Try them below, or make your own with a color file, a little CSS and a layout file. Spicetify color schemes work as they are.</p>
       </div>
-    </div>
-  </section>
-
-  <section id="themes" aria-labelledby="themes-title" style="padding-top: 0">
-    <div class="wrap">
-      <p class="kicker">Themes</p>
-      <h2 id="themes-title">Make it look like yours.</h2>
-      <p class="section-lede">Five themes come built in, each with a dark and a light version. Some glow softly in the colors of the song that's playing. Have a look below, or make your own with a color file, a little CSS and a layout file. Spicetify color schemes work as they are, and Pulse reloads your theme the moment you save it.</p>
       <div class="demo js-demo">
       <div class="themes">
         <figure class="theme">
@@ -678,9 +954,27 @@ html[data-intro="intro"] .hero-grid > * { opacity: 0; transform: translateY(18px
     </div>
   </section>
 
-  <section id="download" class="download" aria-labelledby="download-title" style="padding-top: 0">
+  <section id="download" class="download" aria-labelledby="download-title">
     <div class="wrap">
-    <div class="info">
+      <div class="box" data-reveal>
+        <div>
+          <p class="label"><b>10</b>Download</p>
+          <h2 id="download-title">Ready when you are.</h2>
+        </div>
+        <div>
+          <p>Download the installer, run it, and press play. It installs just for you, adds Pulse to the Start menu, and uninstalls cleanly from Windows Settings.</p>
+          <div class="cta">
+            <a class="btn btn-primary btn-lg js-download" href="download/" data-magnetic>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 19h16"/></svg>
+              Download Pulse <span class="js-version">1.2.0</span>
+            </a>
+            <a class="btn btn-ghost btn-lg" href="docs/">Read the docs</a>
+          </div>
+          <small>Windows may show "Windows protected your PC" the first time, as it does for any new app without a paid signing certificate. Click <em>More info</em>, then <em>Run anyway</em>. The first song you play takes a moment longer while Pulse sets up YouTube playback (about 70 MB, once).</small>
+        </div>
+        <div class="bars" aria-hidden="true"><i style="height:9vw"></i><i style="height:17vw"></i><i style="height:24vw"></i><i style="height:14vw"></i><i style="height:7vw"></i></div>
+      </div>
+    <div class="info" data-reveal>
       <div class="panel" aria-labelledby="new-title">
         <h3 id="new-title"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l2.4 5.2 5.6.6-4.2 3.8 1.2 5.5L12 15.3 7 18.1l1.2-5.5L4 8.8l5.6-.6z"/></svg>What's new</h3>
         <figure class="launch">
@@ -725,21 +1019,10 @@ html[data-intro="intro"] .hero-grid > * { opacity: 0; transform: translateY(18px
         </ul>
       </div>
     </div>
-      <div class="box">
-        <h2 id="download-title">Ready when you are.</h2>
-        <p class="section-lede" style="margin-inline:auto">Download the installer, run it, and press play. It installs just for you, adds Pulse to the Start menu, and uninstalls cleanly from Windows Settings.</p>
-        <div class="cta">
-          <a class="btn btn-primary js-download" href="download/">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 19h16"/></svg>
-            Download Pulse <span class="js-version">1.2.0</span>
-          </a>
-          <a class="btn btn-ghost" href="docs/">Read the docs</a>
-        </div>
-        <small>Windows may show "Windows protected your PC" the first time, as it does for any new app without a paid signing certificate. Click <em>More info</em>, then <em>Run anyway</em>. The first song you play takes a moment longer while Pulse sets up YouTube playback (about 70 MB, once).</small>
-      </div>
     </div>
   </section>
 </main>
+
 
 <footer>
   <div class="wrap">
@@ -889,21 +1172,11 @@ html[data-intro="intro"] .hero-grid > * { opacity: 0; transform: translateY(18px
   });
 })();
 </script>
-<script>
-</script>
-<script>
-// The usage bars grow in when the chart comes into view.
-(function () {
-  var m = document.querySelector(".meter");
-  if (!m || !("IntersectionObserver" in window)) return;
-  var o = new IntersectionObserver(function (e) { if (e[0].isIntersecting) { m.classList.add("seen"); o.disconnect(); } }, { threshold: .4 });
-  o.observe(m);
-})();
-</script>
 <script src="intro.js" defer></script>
 <script src="demo.js" defer></script>
 <script src="ask.js" defer></script>
 <script src="site.js" defer></script>
+<script src="home.js" defer></script>
 <script>
 // 3D headphones: loaded after the page itself; the still picture stays if they can't run.
 (function () {

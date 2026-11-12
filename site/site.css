@@ -43,6 +43,7 @@ html { scroll-padding-top: 90px; }
   .nav .theme-btn { margin-left: auto; }
   .nav > .btn { padding: .55rem .9rem; }
 }
+@media (max-width: 440px) { .nav { gap: .35rem; } .nav > .btn { padding: .55rem .8rem; font-size: .85rem; } }
 @media (max-width: 380px) { .nav > .btn { display: none; } }
 @media (prefers-reduced-motion: no-preference) {
   .menu-panel:not([hidden]) { animation: menu-in .18s ease-out; }
