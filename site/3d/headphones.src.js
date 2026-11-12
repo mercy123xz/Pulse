@@ -1,7 +1,8 @@
 // The headphones at the top of the page: an original pair of over-ear headphones, built
-// from shapes in code (no model file), lit like a studio product shot. They lean toward
-// the cursor, can be dragged around to look at any side (and keep turning for a moment
-// when let go), and float gently when left alone.
+// from shapes in code (no model file), lit like a studio product shot. They turn toward
+// the cursor on a spring (the reflections and the rim light follow it too), can be dragged
+// around to look at any side (and keep turning for a moment when let go), and otherwise
+// hold still. On touch screens, scrolling past them turns them a little instead.
 // Bundled with three.js into ../headphones.js: see 3d/README.md.
 //
 // Draws only while on screen and the tab is visible. With "reduce motion" on, nothing
@@ -74,8 +75,9 @@ export function mount(canvas) {
   key.shadow.radius = 5;
   scene.add(key);
   const RIM = 26;
+  const RIM_Y = 1.2;
   const rim = new PointLight(0x8b5cf6, RIM, 14);
-  rim.position.set(3.2, 1.2, -2.6);
+  rim.position.set(3.2, RIM_Y, -2.6);
   scene.add(rim);
   const back = new PointLight(0x6d5df6, 14, 14);
   back.position.set(-3.4, 0.4, -2.4);
@@ -375,19 +377,23 @@ export function mount(canvas) {
   const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
   const area = canvas.closest("section") || canvas;
   let followX = 0, followY = 0, wantX = 0, wantY = 0; // where the cursor is, -1..1
+  let speedX = 0, speedY = 0; // the spring's speed toward the cursor
   let hover = 0, wantHover = 0;
   let spinY = 0, spinX = 0, velY = 0, velX = 0; // what dragging has added
   let dragging = false, lastX = 0, lastY = 0, lastMove = 0, idleSince = 0;
   let visible = true, running = false, last = 0, clock = 0;
 
   const draw = () => {
-    const bob = still ? 0 : Math.sin(clock * 0.9) * 0.045;
-    const sway = still ? 0 : Math.sin(clock * 0.45) * 0.06;
-    model.rotation.set(REST_X + spinX + followY * 0.16, REST_Y + spinY + followX * 0.34 + sway, 0);
-    model.position.set(followX * 0.1, bob - followY * 0.05, 0);
+    // A breath of movement only: they answer to you, not to a timer.
+    const bob = still ? 0 : Math.sin(clock * 0.8) * 0.012;
+    model.rotation.set(REST_X + spinX + followY * 0.2, REST_Y + spinY + followX * 0.42, followX * -0.03);
+    model.position.set(followX * 0.14, bob - followY * 0.06, 0);
+    // The studio turns a little the other way, so the reflections slide across the cups.
+    if (scene.environmentRotation) scene.environmentRotation.set(followY * -0.12, followX * -0.5, 0);
     model.scale.setScalar(1 + hover * 0.025);
     rim.intensity = RIM * (1 + hover * 0.7);
-    rim.position.x = 3.2 - followX * 1.2;
+    rim.position.x = 3.2 - followX * 1.6;
+    rim.position.y = RIM_Y - followY * 0.9;
     back.position.y = 0.4 + followY * 0.8;
     light.emissiveIntensity = 2.2 + (still ? 0 : Math.sin(clock * 2.2) * 0.7) + hover * 1.5;
     shadow.material.opacity = 0.9 - bob * 3;
@@ -402,8 +408,12 @@ export function mount(canvas) {
     const dt = Math.min((now - last) / 1000, 0.05);
     last = now;
     clock += dt;
-    followX = settle(followX, wantX, 4, dt);
-    followY = settle(followY, wantY, 4, dt);
+    // A spring that settles with a hint of overshoot: quick to answer, soft to stop.
+    const K = 42, DAMP = 9.5;
+    speedX += ((wantX - followX) * K - speedX * DAMP) * dt;
+    speedY += ((wantY - followY) * K - speedY * DAMP) * dt;
+    followX += speedX * dt;
+    followY += speedY * dt;
     hover = settle(hover, wantHover, 6, dt);
     if (!dragging) {
       // Keep turning for a moment, then come back round to face the front.
@@ -418,7 +428,7 @@ export function mount(canvas) {
       }
     }
     draw();
-    const moving = dragging || Math.abs(velY) > 0.002 || Math.abs(spinX) > 0.002 || Math.abs(spinY - Math.round(spinY / (Math.PI * 2)) * Math.PI * 2) > 0.002;
+    const moving = dragging || Math.abs(wantX - followX) > 0.001 || Math.abs(speedX) > 0.001 || Math.abs(wantY - followY) > 0.001 || Math.abs(velY) > 0.002 || Math.abs(spinX) > 0.002 || Math.abs(spinY - Math.round(spinY / (Math.PI * 2)) * Math.PI * 2) > 0.002;
     if (still && !moving) {
       running = false;
       return;
@@ -445,6 +455,18 @@ export function mount(canvas) {
     document.documentElement.addEventListener("pointerleave", () => {
       wantX = wantY = 0;
     });
+    // No cursor (phones, tablets): scrolling down past them turns them a little.
+    if (matchMedia("(hover: none)").matches) {
+      const onScroll = () => {
+        const r = area.getBoundingClientRect();
+        const p = Math.max(0, Math.min(1, -r.top / Math.max(r.height, 1)));
+        wantX = -0.35 + p * 1.6;
+        wantY = p * 0.5;
+        start();
+      };
+      window.addEventListener("scroll", onScroll, { passive: true });
+      onScroll();
+    }
   }
   canvas.addEventListener("pointerenter", (e) => {
     if (e.pointerType === "mouse") wantHover = 1;

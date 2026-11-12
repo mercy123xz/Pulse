@@ -95,8 +95,8 @@
   // or with reduced motion, everything simply shows.
   if (!("IntersectionObserver" in window) || (window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches)) return;
   var targets = document.querySelectorAll(
-    "main section:not(.hero) .kicker, main section:not(.hero) h2, main section:not(.hero) .section-lede, " +
-    "main .shot, main .card, main .panel, main .meter, main .demo, main .facts li, main .box, " +
+    "main [data-reveal], main section:not(.hero) .kicker, main section:not(.hero) h2, main section:not(.hero) .section-lede, " +
+    "main .shot:not(.screen):not([role=tabpanel] .shot), main .card, main .panel, main .meter, main .demo, main .facts li, main .box, " +
     "article section > h2, article section > p, article .flow li, article pre, article table, article .callout"
   );
   var vh = window.innerHeight;
