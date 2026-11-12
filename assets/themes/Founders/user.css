@@ -1,11 +1,28 @@
-/* Founders: warm gold details and slightly rounder corners. */
+/* Founders: gold trim on everything, like a framed record. */
 :root {
   --radius-sm: 8px;
   --radius-md: 12px;
   --radius-lg: 18px;
 }
 
+.sidebar {
+  border-right: 1px solid var(--spice-gold-dim);
+}
+
+.player-bar {
+  border-top: 1px solid var(--spice-gold-dim);
+}
+
+.hero {
+  border: 1px solid var(--spice-gold-dim);
+  color: var(--spice-gold);
+}
+
+.card {
+  border: 1px solid var(--spice-gold-dim);
+}
+
 .play-button {
-  background: var(--spice-button-active);
+  background: var(--spice-gold);
   color: var(--spice-main);
 }

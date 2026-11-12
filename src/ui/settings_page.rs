@@ -474,16 +474,25 @@ fn themes_section(app: &mut App, ui: &mut Ui) {
                 Stroke::new(1.0, pal().border)
             };
             ui.painter().rect_stroke(Rect::from_min_size(rect.min, vec2(176.0, 100.0)), r_md(), border, egui::StrokeKind::Outside);
+            // The special themes say what they are, in their own color.
+            let special = t.builtin && (t.name == crate::themes::SUPPORTERS_THEME || t.name == crate::themes::SECRET_THEME);
             let name = if !t.builtin {
                 format!("{}  ·  {}", t.name, tr("custom"))
             } else if t.name == crate::themes::SUPPORTERS_THEME {
-                format!("{}  ·  {}", t.name, tr("early supporters"))
+                format!("{} – {}", t.name, tr("Early Support"))
             } else if t.name == crate::themes::SECRET_THEME {
-                format!("{}  ·  {}", t.name, tr("secret"))
+                format!("{} – {}", t.name, tr("Secret"))
             } else {
                 t.name.clone()
             };
-            paint_line(ui, pos2(rect.left() + 2.0, rect.top() + 108.0), &name, med(13.0), pal().text, 172.0);
+            // The theme's own accent, from its scheme that matches Pulse's light or dark right now.
+            let dark = |c: Color32| (c.r() as u32 + c.g() as u32 + c.b() as u32) < 384;
+            let color = if special {
+                t.schemes.iter().find(|sc| dark(sc.palette.bg) == dark(pal().bg)).map_or(pal().accent_soft, |sc| sc.palette.accent_soft)
+            } else {
+                pal().text
+            };
+            paint_line(ui, pos2(rect.left() + 2.0, rect.top() + 108.0), &name, semi(13.0), color, 172.0);
             let n = t.schemes.len();
             let sub = if n == 1 { "1 scheme".to_string() } else { format!("{n} schemes") };
             paint_line(ui, pos2(rect.left() + 2.0, rect.top() + 124.0), &sub, regular(11.5), pal().text_muted, 172.0);
