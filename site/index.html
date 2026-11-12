@@ -245,15 +245,17 @@ html[data-theme="light"] .pd-app { --bg: #fafafc; --side: #f3f3f7; --player: #f3
 .orbit svg { width: 100%; height: 100%; overflow: visible; }
 .orbit .ring { fill: none; stroke: var(--border); stroke-width: 1; }
 .orbit .spin { transform-origin: 250px 250px; transform-box: view-box; }
-/* Like real orbits: everything goes the same way, and the closer in, the faster. */
+/* Like real orbits: everything goes the same way, and the closer in, the faster. They run
+   even with reduced motion turned on (slow, small and not a flash), just at half speed. */
+.orbit .spin { animation: orbit 26s linear infinite paused; }
+.orbit .spin.b { animation-duration: 48s; animation-delay: -12s; }
+.orbit .spin.c { animation-duration: 82s; animation-delay: -30s; }
+.orbit.on .spin { animation-play-state: running; }
+@keyframes orbit { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .orbit .spin { animation-duration: 52s; } .orbit .spin.b { animation-duration: 96s; } .orbit .spin.c { animation-duration: 164s; } }
 @media (prefers-reduced-motion: no-preference) {
-  .orbit .spin { animation: orbit 26s linear infinite paused; }
-  .orbit .spin.b { animation-duration: 48s; animation-delay: -12s; }
-  .orbit .spin.c { animation-duration: 82s; animation-delay: -30s; }
-  .orbit.on .spin { animation-play-state: running; }
   .orbit .core { animation: core-glow 4s ease-in-out infinite alternate paused; transform-origin: 250px 250px; transform-box: view-box; }
   .orbit.on .core { animation-play-state: running; }
-  @keyframes orbit { to { transform: rotate(360deg); } }
   @keyframes core-glow { to { filter: drop-shadow(0 0 22px rgba(167, 139, 250, .55)); } }
 }
 .orbit .dot { fill: var(--surface-2); stroke: var(--border); }
