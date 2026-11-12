@@ -2502,6 +2502,52 @@ fn report_dialog(app: &mut App, ctx: &egui::Context) {
     }
 }
 
+/// "Pulse 1.2.1 is available": asked once each time Pulse opens with an update out, after
+/// the intro. "Later" leaves the banner at the top.
+fn update_dialog(app: &mut App, ctx: &egui::Context) {
+    use crate::update::Status;
+    let Status::Available(release) = &app.updater.status else {
+        return;
+    };
+    if app.update_asked || app.intro.is_some() || app.account_dialog.is_some() || app.picker.is_some() || app.report.is_some() {
+        return;
+    }
+    let (version, page) = (release.version.clone(), release.page.clone());
+    let (mut later, mut update) = (false, false);
+    egui::Modal::new(egui::Id::new("update_available")).frame(dialog_frame()).show(ctx, |ui| {
+        ui.set_width(400.0);
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(egui_phosphor::regular::ARROW_CIRCLE_UP).size(24.0).color(pal().accent));
+            ui.label(RichText::new(format!("{} {} {}", tr("Pulse"), version, tr("is available."))).font(heavy(19.0)));
+        });
+        ui.add_space(8.0);
+        ui.add(egui::Label::new(RichText::new(tr("It only takes a moment: Pulse restarts and your library stays as it is.")).color(pal().text_muted)).wrap());
+        ui.add_space(16.0);
+        ui.horizontal(|ui| {
+            if ui.add(egui::Button::new(tr("What's new")).frame_when_inactive(false).corner_radius(16)).clicked() {
+                ctx.open_url(egui::OpenUrl::new_tab(&page));
+            }
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if ui.add(egui::Button::new(RichText::new(tr("Update now")).color(Color32::WHITE)).fill(pal().accent).corner_radius(16)).clicked() {
+                    update = true;
+                }
+                if ui.add(egui::Button::new(RichText::new(tr("Later"))).corner_radius(16)).clicked() {
+                    later = true;
+                }
+            });
+        });
+        if ui.input(|i| i.key_pressed(Key::Escape)) {
+            later = true;
+        }
+    });
+    if update || later {
+        app.update_asked = true;
+    }
+    if update {
+        app.start_update(ctx);
+    }
+}
+
 /// Asks before a backup replaces your library.
 fn restore_dialog(app: &mut App, ctx: &egui::Context) {
     let Some((label, lib)) = app.pending_restore.take() else {
@@ -2549,6 +2595,7 @@ fn restore_dialog(app: &mut App, ctx: &egui::Context) {
 fn dialogs(app: &mut App, ctx: &egui::Context) {
     crash_dialog(app, ctx);
     report_dialog(app, ctx);
+    update_dialog(app, ctx);
     restore_dialog(app, ctx);
     credits_dialog(app, ctx);
     import_dialog(app, ctx);

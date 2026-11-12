@@ -1,6 +1,23 @@
 **Download `PulseSetup` below and run it** to install Pulse (no administrator password needed).
 Works on any 64-bit Windows 10 or 11 PC.
 
+## Pulse 1.2.1
+
+**Songs play the right version**
+- Imported playlists no longer pick covers, karaoke copies, instrumentals, remixes, live or sped-up versions, unless the song's title asks for one.
+- When the catalog doesn't have the original (it happens with some big hits), the song is imported as it is and played from YouTube by its real artist, instead of a lookalike.
+- Featured artists stay on imported songs ("Ride Wit Me" with City Spud).
+- Playback prefers the song's own album audio over the music video, and skips 30-second clips.
+- Songs the catalog only lists as a 30-second clip ("Firework") play in full and show their real length.
+
+**Better search**
+- The most popular version of a song comes first, with duplicate versions folded into one.
+- Searching for an artist and a song shows that artist's songs, not tributes and piano covers.
+
+**Also new**
+- **Report a problem** in Settings and on the Diagnostics page sends a report straight to the developer, and a crash offers to send one too.
+- Pulse checks for updates every time it opens and asks if you'd like to update.
+
 ## Pulse 1.2
 
 **A better first launch**

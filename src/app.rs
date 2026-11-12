@@ -787,6 +787,9 @@ pub struct App {
     pub report: Option<(String, bool)>,
     /// A report being sent: the answer arrives here.
     pub report_sending: Option<std::sync::mpsc::Receiver<Result<(), String>>>,
+    /// Checked for an update since Pulse opened / asked about it (once per launch).
+    pub update_checked_launch: bool,
+    pub update_asked: bool,
     /// The day (days since 1970) the daily backup was last checked.
     backup_day: u64,
     /// Backups listed in Settings (read when the page opens), and one waiting to be
@@ -959,6 +962,8 @@ impl App {
             crash_notice: crate::crash::unseen(),
             report: None,
             report_sending: None,
+            update_checked_launch: false,
+            update_asked: false,
             backup_day: 0,
             backups: None,
             backups_rx: None,
@@ -1611,8 +1616,9 @@ impl App {
         }
     }
 
-    /// The daily update check (a little after start, not in Gaming or Ultra-low mode),
-    /// and closing Pulse when an installer has been started.
+    /// The update check: every time Pulse opens (a few seconds in, so it doesn't slow the
+    /// start), and once a day while it stays open (not in Gaming or Ultra-low mode). Also
+    /// closes Pulse when an installer has been started.
     fn updates(&mut self, ctx: &egui::Context) {
         if self.updater.poll() {
             self.save_now = true;
@@ -1621,6 +1627,12 @@ impl App {
         }
         let s = &mut self.saved.settings;
         let idle = matches!(self.updater.status, crate::update::Status::Idle);
+        if s.check_updates && idle && !self.update_checked_launch && ctx.input(|i| i.time) > 4.0 {
+            self.update_checked_launch = true;
+            s.update_checked_at = crate::crash::now();
+            self.updater.check(ctx);
+            return;
+        }
         if s.check_updates && idle && crate::perf::on(crate::perf::Extra::Lookups) && ctx.input(|i| i.time) > 15.0 {
             let now = crate::crash::now();
             if now.saturating_sub(s.update_checked_at) >= 86_400 {

@@ -489,6 +489,7 @@ const STRINGS: &[(&str, [&str; 4])] = &[
     ("Create profile", ["Crear perfil", "Criar perfil", "Créer le profil", "Profil erstellen"]),
     ("Save", ["Guardar", "Salvar", "Enregistrer", "Speichern"]),
     ("Later", ["Más tarde", "Mais tarde", "Plus tard", "Später"]),
+    ("It only takes a moment: Pulse restarts and your library stays as it is.", ["Solo tarda un momento: Pulse se reinicia y tu biblioteca se queda como está.", "Leva só um momento: o Pulse reinicia e sua biblioteca fica como está.", "Ça ne prend qu'un instant : Pulse redémarre et votre bibliothèque reste telle quelle.", "Es dauert nur einen Moment: Pulse startet neu und deine Bibliothek bleibt, wie sie ist."]),
     ("Pick a name with at least 2 characters.", ["Elige un nombre de al menos 2 caracteres.", "Escolha um nome com pelo menos 2 caracteres.", "Choisissez un nom d'au moins 2 caractères.", "Wähle einen Namen mit mindestens 2 Zeichen."]),
     ("Names can be up to 30 characters.", ["Los nombres pueden tener hasta 30 caracteres.", "Os nomes podem ter até 30 caracteres.", "Les noms peuvent compter jusqu'à 30 caractères.", "Namen können bis zu 30 Zeichen haben."]),
     ("Use letters, numbers, spaces, _ . or -", ["Usa letras, números, espacios, _ . o -", "Use letras, números, espaços, _ . ou -", "Utilisez des lettres, chiffres, espaces, _ . ou -", "Nutze Buchstaben, Zahlen, Leerzeichen, _ . oder -"]),
