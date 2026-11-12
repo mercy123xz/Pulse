@@ -19,6 +19,7 @@
   <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-22c55e"></a>
   <a href="https://discord.gg/9mXy7v9wZ6"><img alt="Discord" src="https://img.shields.io/badge/Discord-join-5865f2?logo=discord&logoColor=white"></a>
   <a href="https://mastodon.social/@mercy123xz"><img alt="Mastodon" src="https://img.shields.io/badge/Mastodon-@mercy123xz-6364ff?logo=mastodon&logoColor=white"></a>
+  <a href="https://x.com/ListenToPulse"><img alt="X" src="https://img.shields.io/badge/X-@ListenToPulse-000000?logo=x&logoColor=white"></a>
 </p>
 
 <p align="center">
@@ -223,6 +224,7 @@ Run the tests with `cargo test`, and the accounts server's with `node server/tes
 ## Community
 
 - **Discord:** [discord.gg/9mXy7v9wZ6](https://discord.gg/9mXy7v9wZ6) for help, feedback, and showing off your themes
+- **X:** [@ListenToPulse](https://x.com/ListenToPulse) for news, releases and clips
 - **Mastodon:** [@mercy123xz@mastodon.social](https://mastodon.social/@mercy123xz) for news and releases
 - **Problems and ideas:** [open an issue](https://github.com/mercy123xz/Pulse/issues), or use *Ask about Pulse* on the [website](https://mercy123xz.github.io/Pulse/)
 
