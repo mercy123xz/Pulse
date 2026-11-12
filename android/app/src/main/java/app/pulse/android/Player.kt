@@ -114,10 +114,12 @@ fun FullPlayer() {
     val app = LocalApp.current
     val p = app.player
     val song = p.song
+    var lyrics by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxSize().background(P.bg)) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(Ic.DOWN, "Close the player") { app.playerOpen = false }
             Text("Now playing", color = P.muted, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center, modifier = Modifier.weight(1f))
+            IconButton(Ic.LYRICS, if (lyrics) "Hide lyrics" else "Show lyrics", if (lyrics) P.accentText else P.text) { lyrics = !lyrics }
             IconButton(Ic.QUEUE, "Queue") { app.queueOpen = true }
         }
         if (song == null) {
@@ -125,7 +127,11 @@ fun FullPlayer() {
             return
         }
         Column(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 24.dp), verticalArrangement = Arrangement.Center) {
-            Cover(song.cover, Modifier.fillMaxWidth().aspectRatio(1f), RoundedCornerShape(14.dp))
+            if (lyrics) {
+                Box(Modifier.weight(1f).fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(P.surface)) { LyricsView(song, Modifier.fillMaxSize()) }
+            } else {
+                Cover(song.cover, Modifier.fillMaxWidth().aspectRatio(1f), RoundedCornerShape(14.dp))
+            }
             Spacer(Modifier.height(24.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {

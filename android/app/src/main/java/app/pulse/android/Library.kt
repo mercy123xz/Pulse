@@ -13,8 +13,8 @@ import java.io.File
 import java.util.UUID
 import java.util.concurrent.Executors
 
-/** One of your playlists. */
-data class Playlist(val id: String, val name: String, val songs: List<Song>)
+/** One of your playlists. `publicId`: its id on the Pulse accounts server while it's public. */
+data class Playlist(val id: String, val name: String, val songs: List<Song>, val publicId: String? = null)
 
 /** Something you opened or played from: a tile in "Recently played". */
 data class Place(val kind: String, val id: String, val title: String, val subtitle: String, val image: String?) {
@@ -62,6 +62,10 @@ object Library {
     val played = mutableStateListOf<Played>()
     /** Ids of the last songs played, newest first (Autoplay skips them). */
     val recentSongs = mutableStateListOf<String>()
+    /** Artists you follow (picked at the start, or Follow on their page). */
+    val followed = mutableStateListOf<Artist>()
+    /** "Pick artists you like" has been shown (picked or skipped). */
+    var artistsPicked by mutableStateOf(false)
 
     var theme by mutableStateOf(Themes.SYSTEM)
     var accent by mutableStateOf(0)
@@ -82,7 +86,7 @@ object Library {
         o.optJSONArray("playlists")?.let { a ->
             for (i in 0 until a.length()) {
                 val p = a.getJSONObject(i)
-                playlists.add(Playlist(p.optString("id"), p.optString("name"), songs(p.optJSONArray("songs"))))
+                playlists.add(Playlist(p.optString("id"), p.optString("name"), songs(p.optJSONArray("songs")), p.optString("publicId").ifEmpty { null }))
             }
         }
         o.optJSONArray("recent")?.let { a ->
@@ -98,6 +102,13 @@ object Library {
             }
         }
         o.optJSONArray("recentSongs")?.let { a -> for (i in 0 until a.length()) recentSongs.add(a.optString(i)) }
+        o.optJSONArray("followed")?.let { a ->
+            for (i in 0 until a.length()) {
+                val f = a.getJSONObject(i)
+                followed.add(Artist(f.optString("id"), f.optString("name"), f.optString("picture").ifEmpty { null }))
+            }
+        }
+        artistsPicked = o.optBoolean("artistsPicked", false)
         theme = o.optInt("theme", Themes.SYSTEM)
         accent = o.optInt("accent", 0).coerceIn(0, Themes.accents.size - 1)
         largeText = o.optBoolean("largeText", false)
@@ -118,10 +129,12 @@ object Library {
         val o = JSONObject()
             .put("version", 1)
             .put("liked", arr(liked))
-            .put("playlists", JSONArray().also { a -> playlists.forEach { a.put(JSONObject().put("id", it.id).put("name", it.name).put("songs", arr(it.songs))) } })
+            .put("playlists", JSONArray().also { a -> playlists.forEach { a.put(JSONObject().put("id", it.id).put("name", it.name).put("songs", arr(it.songs)).put("publicId", it.publicId ?: "")) } })
             .put("recent", JSONArray().also { a -> recent.forEach { a.put(JSONObject().put("kind", it.kind).put("id", it.id).put("title", it.title).put("subtitle", it.subtitle).put("image", it.image ?: "")) } })
             .put("played", JSONArray().also { a -> played.forEach { a.put(JSONObject().put("id", it.id).put("name", it.name).put("picture", it.picture ?: "").put("count", it.count).put("last", it.last)) } })
             .put("recentSongs", JSONArray(recentSongs.toList()))
+            .put("followed", JSONArray().also { a -> followed.forEach { a.put(JSONObject().put("id", it.id).put("name", it.name).put("picture", it.picture ?: "")) } })
+            .put("artistsPicked", artistsPicked)
             .put("theme", theme).put("accent", accent).put("largeText", largeText).put("autoplay", autoplay)
         val text = o.toString()
         val target = file
@@ -151,8 +164,10 @@ object Library {
 
     // ------------------------------------------------------------------ playlists
 
-    fun newPlaylist(name: String, first: Song? = null): Playlist {
-        val p = Playlist(UUID.randomUUID().toString(), name.trim().ifEmpty { "My playlist" }, listOfNotNull(first))
+    fun newPlaylist(name: String, first: Song? = null): Playlist = newPlaylist(name, listOfNotNull(first))
+
+    fun newPlaylist(name: String, songs: List<Song>): Playlist {
+        val p = Playlist(UUID.randomUUID().toString(), name.trim().ifEmpty { "My playlist" }, songs.distinctBy { it.id })
         playlists.add(0, p)
         save()
         return p
@@ -178,6 +193,24 @@ object Library {
 
     fun removeFrom(id: String, index: Int) = change(id) { p -> p.copy(songs = p.songs.filterIndexed { i, _ -> i != index }) }
     fun rename(id: String, name: String) = change(id) { it.copy(name = name.trim().ifEmpty { it.name }) }
+    fun setPublicId(id: String, publicId: String?) = change(id) { it.copy(publicId = publicId) }
+
+    // ------------------------------------------------------------------ artists you follow
+
+    fun follows(id: String) = followed.any { it.id == id }
+
+    fun toggleFollow(a: Artist) {
+        val i = followed.indexOfFirst { it.id == a.id }
+        if (i >= 0) followed.removeAt(i) else followed.add(0, a)
+        save()
+    }
+
+    /** Saves the artists picked at the start. */
+    fun pickArtists(picked: List<Artist>) {
+        for (a in picked) if (!follows(a.id)) followed.add(a)
+        artistsPicked = true
+        save()
+    }
 
     fun deletePlaylist(id: String) {
         playlists.removeAll { it.id == id }

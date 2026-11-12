@@ -1,6 +1,7 @@
 package app.pulse.android
 
 import android.content.ComponentName
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -47,6 +48,22 @@ class MainActivity : ComponentActivity() {
                 CompositionLocalProvider(LocalApp provides app) { Shell() }
             }
         }
+        // The first time: "Pick artists you like" (not for people who've played plenty already).
+        if (!Library.artistsPicked) {
+            if (Library.played.size < 10 && Library.followed.isEmpty()) app.go(Screen.PickArtists) else Library.pickArtists(emptyList())
+        }
+        openFrom(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        openFrom(intent)
+    }
+
+    /** Opened from a Pulse link (a shared playlist or profile), or shared text from another app. */
+    private fun openFrom(intent: Intent?) {
+        val text = intent?.dataString ?: intent?.getStringExtra(Intent.EXTRA_TEXT) ?: return
+        if (!app.openLink(text) && Importer.detect(text) != null) app.go(Screen.ImportPage(text))
     }
 
     override fun onStart() {
@@ -80,7 +97,7 @@ fun Shell() {
     // Keeps the seek bar moving.
     LaunchedEffect(Unit) {
         while (true) {
-            delay(500)
+            delay(250)
             app.controller?.let { c -> if (c.isPlaying) app.player.position = c.currentPosition }
         }
     }

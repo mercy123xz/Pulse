@@ -120,6 +120,52 @@ object Deezer {
             runCatching { songs(data("/artist/${a.id}/top?limit=$each")) }.getOrDefault(emptyList())
         }
 
+    /** Genres offered when picking artists (Deezer genre id and name), as on the desktop app. */
+    val GENRES = listOf(
+        116 to "Rap/Hip Hop", 132 to "Pop", 165 to "R&B", 152 to "Rock", 85 to "Alternative", 113 to "Dance",
+        106 to "Electro", 197 to "Latin Music", 464 to "Metal", 84 to "Country", 169 to "Soul & Funk", 122 to "Reggaeton",
+    )
+
+    /** Popular artists overall (genre 0) or in one genre. */
+    fun genreArtists(genre: Int, limit: Int = 30): List<Artist> =
+        if (genre == 0) topArtists(limit) else data("/genre/$genre/artists?limit=$limit").map(::artist)
+
+    /** One song by its Deezer number. */
+    fun songById(id: String): Song? = song(get("/track/$id"))
+
+    /** "Songs like X": the artist's radio without the artist's own songs. */
+    fun songsLike(artistId: String): List<Song> {
+        val radio = runCatching { songs(data("/artist/$artistId/radio?limit=40")) }.getOrDefault(emptyList())
+        val others = radio.filter { it.artistId != artistId }
+        return (others.ifEmpty { similarArtistsSongs(artistId, 4) }).distinctBy { it.id }.take(20)
+    }
+
+    private fun norm(s: String) = s.lowercase().filter { it.isLetterOrDigit() }
+
+    /** The title without "(feat. …)" and similar extras. */
+    fun coreTitle(title: String): String {
+        val lower = title.lowercase()
+        val cut = listOf("(feat", "(ft.", "(with ", "[feat", " feat.", " ft. ").mapNotNull { m -> lower.indexOf(m).takeIf { it >= 0 } }.minOrNull()
+        return (if (cut == null) title else title.substring(0, cut)).trim()
+    }
+
+    /** The Deezer song that matches a title, artist and length, as the desktop app's import does. */
+    fun findTrack(artist: String, title: String, duration: Int): Song? {
+        val wantTitle = norm(coreTitle(title))
+        val wantArtist = norm(artist)
+        fun pick(list: List<Song>): Song? = list.filter { t ->
+            val got = norm(coreTitle(t.title))
+            val titleOk = wantTitle.isNotEmpty() && (got == wantTitle || got.contains(wantTitle) || wantTitle.contains(got))
+            val a = norm(t.artist)
+            val artistOk = wantArtist.isEmpty() || (a.isNotEmpty() && (wantArtist.contains(a) || a.contains(wantArtist)))
+            val lengthOk = duration == 0 || t.duration == 0 || kotlin.math.abs(t.duration - duration) <= 8
+            titleOk && artistOk && lengthOk
+        }.minByOrNull { if (duration == 0) 0 else kotlin.math.abs(it.duration - duration) }
+        val precise = "artist:\"${artist.replace("\"", "")}\" track:\"${coreTitle(title).replace("\"", "")}\""
+        pick(songs(data("/search/track?q=${q(precise)}&limit=10")))?.let { return it }
+        return pick(songs(data("/search/track?q=${q("$artist ${coreTitle(title)}")}&limit=10")))
+    }
+
     /**
      * An Orbit: songs like an artist's (their radio) mixed with their own hits, shuffled
      * the same way all day so the mix stays put until tomorrow. As on the desktop app.

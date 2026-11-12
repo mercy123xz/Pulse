@@ -276,6 +276,7 @@ fun SongMenu(song: Song, open: Boolean, close: () -> Unit, extra: List<Pair<Stri
             add(item("Add to playlist…") { app.addingToPlaylist = song })
             if (song.artistId.isNotEmpty()) add(item("Go to artist") { app.go(Screen.ArtistPage(song.artistId, song.artist)) })
             if (song.albumId.isNotEmpty()) add(item("Go to album") { app.go(Screen.AlbumPage(song.albumId, song.album)) })
+            add(item("Lyrics") { app.go(Screen.LyricsPage(song)) })
             addAll(extra)
         }
         for ((text, run) in items) {

@@ -15,11 +15,17 @@ data class Song(
     val albumId: String = "",
     /** The artist's photo, when Deezer sent one with the song. */
     val artistPicture: String? = null,
+    /** The exact YouTube video to play (songs imported from a YouTube playlist). */
+    val video: String? = null,
 ) {
+    /** A song Deezer knows (its id is a number), as opposed to one from an import. */
+    val onDeezer: Boolean get() = id.isNotEmpty() && id.all { it.isDigit() }
+
     fun toJson(): JSONObject = JSONObject()
         .put("id", id).put("title", title).put("artist", artist).put("album", album)
         .put("cover", cover ?: "").put("duration", duration)
         .put("artistId", artistId).put("albumId", albumId).put("artistPicture", artistPicture ?: "")
+        .put("video", video ?: "")
 
     fun toJsonString(): String = toJson().toString()
 
@@ -34,6 +40,7 @@ data class Song(
             artistId = o.optString("artistId"),
             albumId = o.optString("albumId"),
             artistPicture = o.optString("artistPicture").ifEmpty { null },
+            video = o.optString("video").ifEmpty { null },
         )
 
         fun fromJson(s: String): Song = fromJson(JSONObject(s))

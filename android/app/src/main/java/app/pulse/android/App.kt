@@ -21,6 +21,12 @@ sealed interface Screen {
     data class AlbumPage(val id: String, val title: String) : Screen
     data class PlaylistPage(val id: String) : Screen
     data class OrbitPage(val artistId: String, val name: String, val picture: String?) : Screen
+    data object AccountPage : Screen
+    data class ProfilePage(val name: String) : Screen
+    data class PublicPage(val id: String) : Screen
+    data class ImportPage(val text: String = "") : Screen
+    data object PickArtists : Screen
+    data class LyricsPage(val song: Song) : Screen
 }
 
 /** One song in the queue: where it is in the player's list, and whether it's playing. */
@@ -168,6 +174,13 @@ class App {
 
     fun removeFromQueue(index: Int) {
         controller?.removeMediaItem(index)
+    }
+
+    /** Opens a Pulse playlist or profile link (from the website, a message, or a paste). */
+    fun openLink(text: String): Boolean {
+        val (kind, value) = Account.readLink(text) ?: return false
+        go(if (kind == "playlist") Screen.PublicPage(value) else Screen.ProfilePage(value))
+        return true
     }
 
     fun like(song: Song) {

@@ -96,7 +96,7 @@ object YouTube {
     }
 
     private fun lookUp(song: Song): String {
-        val video = picked[song.id] ?: find(song).also {
+        val video = song.video ?: picked[song.id] ?: find(song).also {
             picked[song.id] = it
             saveMatches()
         }

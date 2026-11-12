@@ -10,6 +10,7 @@ class PulseApp : Application() {
         super.onCreate()
         NewPipe.init(PulseDownloader(Net.client))
         Library.load(this)
+        Account.load(this)
         YouTube.start(this)
     }
 }

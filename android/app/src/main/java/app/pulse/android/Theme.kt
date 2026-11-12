@@ -127,6 +127,10 @@ object Ic {
     const val CLOSE = "M6 6l12 12 M18 6L6 18"
     const val PERSON = "M12 4a4 4 0 1 1 0 8a4 4 0 1 1 0-8z M4 21a8 8 0 0 1 16 0"
     const val ALBUM = "M12 3a9 9 0 1 1 0 18a9 9 0 1 1 0-18z M12 10a2 2 0 1 1 0 4a2 2 0 1 1 0-4z"
+    const val CHECK = "M5 12.5l4.5 4.5L19 7.5"
+    const val SHARE = "M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7 M16 6l-4-4-4 4 M12 2v13"
+    const val LYRICS = "M4 6h11 M4 11h11 M4 16h7 M17 19V9l4-1 M17 19a2 2 0 1 1-4 0a2 2 0 1 1 4 0z"
+    const val IMPORT = "M12 3v12 M7 10l5 5 5-5 M5 21h14"
 }
 
 private val parsed = HashMap<String, androidx.compose.ui.graphics.Path>()

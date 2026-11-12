@@ -71,6 +71,12 @@ fun Page(screen: Screen) {
         is Screen.AlbumPage -> AlbumScreen(screen)
         is Screen.PlaylistPage -> PlaylistScreen(screen)
         is Screen.OrbitPage -> OrbitScreen(screen)
+        Screen.AccountPage -> AccountScreen()
+        is Screen.ProfilePage -> ProfileScreen(screen)
+        is Screen.PublicPage -> PublicScreen(screen)
+        is Screen.ImportPage -> ImportScreen(screen)
+        Screen.PickArtists -> PickArtistsScreen()
+        is Screen.LyricsPage -> LyricsScreen(screen)
     }
 }
 
@@ -96,6 +102,17 @@ fun HomePage() {
                     Icon(Ic.SEARCH, P.muted, 20.dp)
                     Spacer(Modifier.width(10.dp))
                     Text("Search songs, artists…", color = P.muted, fontSize = 15.sp)
+                }
+                val me = Account.username
+                if (me != null) {
+                    Box(
+                        Modifier.padding(start = 6.dp).size(40.dp).clip(CircleShape).background(P.accent)
+                            .clickable(role = Role.Button, onClickLabel = "Your account") { app.go(Screen.AccountPage) }
+                            .semantics { contentDescription = "Your account, @$me" },
+                        contentAlignment = Alignment.Center,
+                    ) { Text(me.take(1).uppercase(), color = Color.White, fontWeight = FontWeight.Bold, fontSize = 17.sp) }
+                } else {
+                    IconButton(Ic.PERSON, "Sign in") { app.go(Screen.AccountPage) }
                 }
                 IconButton(Ic.SETTINGS, "Settings") { app.go(Screen.Settings) }
             }
@@ -135,6 +152,8 @@ fun HomePage() {
         } else {
             item { PopularArtists() }
         }
+
+        item { ForYou() }
 
         item {
             Section("Top songs right now", "See all") { app.go(Screen.TopSongs) }
@@ -246,7 +265,13 @@ fun SearchPage() {
                 placeholder = { Text("Songs, artists, albums") },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                keyboardActions = KeyboardActions(onSearch = { focusManager.clearFocus(); query = text.trim() }),
+                keyboardActions = KeyboardActions(onSearch = {
+                    focusManager.clearFocus()
+                    // A pasted playlist link or share code goes to Import; a Pulse link opens.
+                    if (!app.openLink(text)) {
+                        if (Importer.detect(text) != null && text.contains("/") || ShareCode.isCode(text)) app.go(Screen.ImportPage(text.trim())) else query = text.trim()
+                    }
+                }),
                 shape = RoundedCornerShape(24.dp),
                 colors = TextFieldDefaults.textFieldColors(
                     backgroundColor = P.raised, focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent,
@@ -265,6 +290,7 @@ fun SearchPage() {
                     Message("Nothing found for “$query”.")
                 } else {
                     LazyColumn {
+                        item { PeopleRow(query) }
                         if (artists.isNotEmpty()) item { Section("Artists"); ArtistRow(artists) }
                         if (songs.isNotEmpty()) {
                             item { Section("Songs") }
@@ -295,6 +321,11 @@ fun ArtistScreen(s: Screen.ArtistPage) {
                     Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         Pill("Play", Ic.PLAY) { app.play(p.top) }
                         Pill("Orbit", Ic.ORBIT, filled = false) { app.go(Screen.OrbitPage(p.artist.id, p.artist.name, p.artist.picture)) }
+                        val following = Library.follows(p.artist.id)
+                        Pill(if (following) "Following" else "Follow", if (following) Ic.CHECK else Ic.PLUS, filled = false) {
+                            Library.toggleFollow(Artist(p.artist.id, p.artist.name, p.artist.picture))
+                            app.tell(if (following) "Unfollowed ${p.artist.name}" else "Following ${p.artist.name}")
+                        }
                     }
                     if (p.top.isNotEmpty()) Section("Popular")
                 }
@@ -385,7 +416,10 @@ fun PlaylistsPage() {
     LazyColumn(Modifier.fillMaxSize()) {
         item {
             Title("Playlists", Modifier.padding(start = 16.dp, top = 20.dp, bottom = 8.dp))
-            Box(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) { Pill("New playlist", Ic.PLUS) { naming = true } }
+            Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Pill("New playlist", Ic.PLUS) { naming = true }
+                Pill("Import", Ic.IMPORT, filled = false) { app.go(Screen.ImportPage()) }
+            }
         }
         if (Library.liked.isNotEmpty()) {
             item { PlaylistRow("Liked Songs", "${Library.liked.size} songs", null, liked = true) { app.go(Screen.Liked) } }
@@ -430,6 +464,7 @@ fun PlaylistScreen(s: Screen.PlaylistPage) {
     val p = Library.playlist(s.id)
     var renaming by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf(false) }
+    var sharing by remember { mutableStateOf(false) }
     if (p == null) {
         Column(Modifier.fillMaxSize()) {
             TopBar()
@@ -440,6 +475,7 @@ fun PlaylistScreen(s: Screen.PlaylistPage) {
     LaunchedEffect(s.id) { Library.visit(Place(Place.PLAYLIST, p.id, p.name, "Playlist", p.songs.firstOrNull()?.cover)) }
     Column(Modifier.fillMaxSize()) {
         TopBar(p.name) {
+            IconButton(Ic.SHARE, "Share") { sharing = true }
             TextButton(onClick = { renaming = true }) { Text("Rename", color = P.accentText) }
             TextButton(onClick = { deleting = true }) { Text("Delete", color = P.accentText) }
         }
@@ -455,6 +491,7 @@ fun PlaylistScreen(s: Screen.PlaylistPage) {
         }
     }
     if (renaming) NameDialog("Rename playlist", p.name, "Save", { renaming = false }) { renaming = false; Library.rename(p.id, it) }
+    if (sharing) ShareDialog(p) { sharing = false }
     if (deleting) {
         AlertDialog(
             onDismissRequest = { deleting = false },
@@ -532,6 +569,7 @@ fun AddToPlaylistDialog(song: Song) {
 
 @Composable
 fun SettingsPage() {
+    val app = LocalApp.current
     val uri = LocalUriHandler.current
     Column(Modifier.fillMaxSize()) {
         TopBar("Settings")
@@ -561,6 +599,14 @@ fun SettingsPage() {
                 }
                 Toggle("Bigger text", "Makes all text in Pulse larger.", Library.largeText) { Library.useLargeText(it) }
 
+                Section("You")
+                SettingsLink(
+                    if (Account.username != null) "Account: @${Account.username}" else "Pulse account",
+                    if (Account.username != null) "Your profile, bio and public playlists." else "Sign in or create one to share playlists. Optional.",
+                ) { app.go(Screen.AccountPage) }
+                SettingsLink("Import a playlist", "From YouTube, Spotify, SoundCloud, or the Pulse app on your PC.") { app.go(Screen.ImportPage()) }
+                SettingsLink("Pick artists you like", "Following ${Library.followed.size} artists. Your home page is built from them.") { app.go(Screen.PickArtists) }
+
                 Section("Playing")
                 Toggle("Autoplay", "When the queue ends, keep playing songs like the last one.", Library.autoplay) { Library.useAutoplay(it) }
 
@@ -577,6 +623,17 @@ fun SettingsPage() {
                 Spacer(Modifier.height(24.dp))
             }
         }
+    }
+}
+
+@Composable
+fun SettingsLink(title: String, detail: String, onClick: () -> Unit) {
+    Column(
+        Modifier.fillMaxWidth().clickable(role = Role.Button, onClick = onClick).semantics(mergeDescendants = true) {}
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+    ) {
+        Text(title, color = P.text, fontSize = 16.sp)
+        Text(detail, color = P.muted, fontSize = 13.sp)
     }
 }
 
