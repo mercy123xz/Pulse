@@ -137,6 +137,22 @@ jobs:
           TYPEFULLY_API_KEY: ${{ secrets.TYPEFULLY_API_KEY }}
         run: python .github/scripts/announce.py "${{ steps.publish.outputs.version }}" "${{ steps.publish.outputs.tag }}"
 
+      # A new version: ask winget to list it too (a pull request to microsoft/winget-pkgs
+      # from your account). Needs the WINGET_TOKEN secret; skipped without it. It only
+      # works once Pulse is in winget, and a failure here never stops the release.
+      - name: Update winget
+        if: steps.publish.outputs.published == 'true'
+        continue-on-error: true
+        shell: pwsh
+        env:
+          WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+        run: |
+          if (-not $env:WINGET_TOKEN) { Write-Host "No WINGET_TOKEN secret: not updating winget."; exit 0 }
+          $v = "${{ steps.publish.outputs.version }}"
+          $url = "https://github.com/mercy123xz/Pulse/releases/download/v$v/PulseSetup-$v.exe"
+          Invoke-WebRequest https://aka.ms/wingetcreate/latest -OutFile wingetcreate.exe
+          .\wingetcreate.exe update mercy123xz.Pulse --version $v --urls $url --submit --token $env:WINGET_TOKEN
+
       # Run by hand with "refresh": the release for the version in Cargo.toml gets this
       # build's installer instead (and its signature), without a new version number.
       - name: Replace the current version's installer
