@@ -31,9 +31,10 @@
   &nbsp;·&nbsp; <a href="#community">Community</a>
 </p>
 
-<!-- Add a screenshot: save it as assets/screenshot.png, then delete these comment markers.
-<p align="center"><img src="assets/screenshot.png" alt="Pulse playing music" width="900"></p>
--->
+<p align="center"><img src="assets/screenshot.png" alt="Pulse showing an album page, with its songs listed and one playing" width="900"></p>
+
+<p align="center"><img src="assets/intro.gif" alt="Pulse's intro: five bars bounce to a beat, then one sweeps across the screen" width="426"><br>
+<sub>The intro Pulse plays when it opens. See it search and play on the <a href="https://mercy123xz.github.io/Pulse/#features">website</a>, with sound.</sub></p>
 
 ## Why Pulse
 
