@@ -1,0 +1,26 @@
+# Sends Pulse's winget manifests to microsoft/winget-pkgs as a pull request, from your
+# GitHub account (wingetcreate forks the repo and opens the PR).
+# Needs the repository secret WINGET_TOKEN: a GitHub token with the public_repo scope.
+# Runs when packaging/winget/submit.txt changes (it names the version to send), or by hand.
+name: Submit to winget
+on:
+  push:
+    branches: [features]
+    paths: [packaging/winget/submit.txt]
+  workflow_dispatch:
+jobs:
+  submit:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Submit
+        shell: pwsh
+        env:
+          WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+        run: |
+          if (-not $env:WINGET_TOKEN) { Write-Host "::error::Add the WINGET_TOKEN secret first."; exit 1 }
+          $version = (Get-Content packaging/winget/submit.txt -Raw).Trim()
+          $dir = "packaging/winget/manifests/m/mercy123xz/Pulse/$version"
+          if (-not (Test-Path $dir)) { Write-Host "::error::No manifests for $version"; exit 1 }
+          Invoke-WebRequest https://aka.ms/wingetcreate/latest -OutFile wingetcreate.exe
+          .\wingetcreate.exe submit --token $env:WINGET_TOKEN --prtitle "New package: mercy123xz.Pulse version $version" $dir
