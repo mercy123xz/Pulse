@@ -128,13 +128,14 @@ jobs:
           "tag=$tag" >> $env:GITHUB_OUTPUT
           exit 0
 
-      # A new version is out: tell the Discord server (#announcements, @everyone).
-      - name: Announce on Discord
+      # A new version is out: tell the Discord server (#announcements, @everyone) and X.
+      - name: Announce the release
         if: steps.publish.outputs.published == 'true'
         shell: pwsh
         env:
           DISCORD_ANNOUNCE_WEBHOOK: ${{ secrets.DISCORD_ANNOUNCE_WEBHOOK }}
-        run: python .github/scripts/announce_discord.py "${{ steps.publish.outputs.version }}" "${{ steps.publish.outputs.tag }}"
+          TYPEFULLY_API_KEY: ${{ secrets.TYPEFULLY_API_KEY }}
+        run: python .github/scripts/announce.py "${{ steps.publish.outputs.version }}" "${{ steps.publish.outputs.tag }}"
 
       # Run by hand with "refresh": the release for the version in Cargo.toml gets this
       # build's installer instead (and its signature), without a new version number.

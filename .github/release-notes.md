@@ -2,6 +2,7 @@
 Works on any 64-bit Windows 10 or 11 PC.
 
 ## Pulse 1.2.1
+<!-- x: Imported playlists now play the real song (no more covers, karaoke or 30-second clips), featured artists stay put, and search puts the most popular version first. -->
 
 **Songs play the right version**
 - Imported playlists no longer pick covers, karaoke copies, instrumentals, remixes, live or sped-up versions, unless the song's title asks for one.

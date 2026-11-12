@@ -1,0 +1,16 @@
+# Checks the release-announcement secrets without posting anything (run by hand).
+name: Check announcement secrets
+on:
+  workflow_dispatch:
+  push:
+    branches: [features]
+    paths: [.github/workflows/announce-check.yml, .github/scripts/announce.py]
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 .github/scripts/announce.py --check
+        env:
+          DISCORD_ANNOUNCE_WEBHOOK: ${{ secrets.DISCORD_ANNOUNCE_WEBHOOK }}
+          TYPEFULLY_API_KEY: ${{ secrets.TYPEFULLY_API_KEY }}
