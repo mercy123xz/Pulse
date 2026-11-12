@@ -12,17 +12,42 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/mercy123xz/Pulse/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/mercy123xz/Pulse?label=release&color=7c3aed"></a>
+  <a href="https://github.com/mercy123xz/Pulse/releases"><img alt="Downloads" src="https://img.shields.io/github/downloads/mercy123xz/Pulse/total?color=7c3aed"></a>
+  <img alt="Windows 10 and 11" src="https://img.shields.io/badge/Windows-10%20%7C%2011-0078d4">
+  <img alt="Written in Rust" src="https://img.shields.io/badge/written%20in-Rust-b7410e">
+  <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-22c55e"></a>
+  <a href="https://discord.gg/9mXy7v9wZ6"><img alt="Discord" src="https://img.shields.io/badge/Discord-join-5865f2?logo=discord&logoColor=white"></a>
+  <a href="https://mastodon.social/@mercy123xz"><img alt="Mastodon" src="https://img.shields.io/badge/Mastodon-@mercy123xz-6364ff?logo=mastodon&logoColor=white"></a>
+</p>
+
+<p align="center">
   <a href="https://mercy123xz.github.io/Pulse/download/"><b>⬇ Download for Windows</b></a>
   &nbsp;·&nbsp; <a href="https://mercy123xz.github.io/Pulse/"><b>Website</b></a>
   &nbsp;·&nbsp; <a href="https://mercy123xz.github.io/Pulse/docs/">Docs</a>
   &nbsp;·&nbsp; <a href="#features">Features</a>
   &nbsp;·&nbsp; <a href="#keyboard-shortcuts">Shortcuts</a>
   &nbsp;·&nbsp; <a href="#building-from-source">Build from source</a>
+  &nbsp;·&nbsp; <a href="#community">Community</a>
 </p>
 
 <!-- Add a screenshot: save it as assets/screenshot.png, then delete these comment markers.
 <p align="center"><img src="assets/screenshot.png" alt="Pulse playing music" width="900"></p>
 -->
+
+## Why Pulse
+
+Most music apps for the PC are a web browser in disguise. Pulse isn't: it's a native app,
+written in Rust and drawn with DirectX 12, so it stays light enough to leave open next to a game.
+
+| While playing music | Pulse | Other popular music apps |
+| --- | --- | --- |
+| CPU | about 1% | up to 6% |
+| Memory | about 250 MB | 400 MB or more |
+| Account needed | no | usually |
+| Ads | none | often, on free plans |
+
+<sub>Rough estimates from the developer's PC while playing music; your numbers will depend on your PC.</sub>
 
 ## Features
 
@@ -194,6 +219,12 @@ On Linux you'll also need the ALSA development headers (`sudo apt install libaso
 
 Run the tests with `cargo test`, and the accounts server's with `node server/test.mjs`.
 
+## Community
+
+- **Discord:** [discord.gg/9mXy7v9wZ6](https://discord.gg/9mXy7v9wZ6) for help, feedback, and showing off your themes
+- **Mastodon:** [@mercy123xz@mastodon.social](https://mastodon.social/@mercy123xz) for news and releases
+- **Problems and ideas:** [open an issue](https://github.com/mercy123xz/Pulse/issues), or use *Ask about Pulse* on the [website](https://mercy123xz.github.io/Pulse/)
+
 ## Built with
 
 - [egui / eframe](https://github.com/emilk/egui): the user interface
@@ -221,3 +252,10 @@ counts for the video Pulse plays.
 
 Pulse is an independent project and isn't affiliated with or endorsed by Deezer, YouTube, Google,
 Spotify or SoundCloud.
+
+## License
+
+Pulse's code is under the [MIT License](LICENSE): use it, change it and share it, as long as the
+license notice comes along. The fonts and icons it uses keep their own licenses (listed above).
+The Android preview uses [NewPipe Extractor](https://github.com/TeamNewPipe/NewPipeExtractor),
+which is GPL-3.0, so the Android app as a whole is shared under the GPL-3.0.
