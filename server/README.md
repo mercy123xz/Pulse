@@ -119,3 +119,19 @@ DELETE FROM users WHERE username = 'name';
 `node server/test.mjs` runs every endpoint against a local SQLite database (Node 22.13+).
 `node server/serve.mjs` runs the server locally on port 8787; it doesn't send emails but prints
 them, and shows the last one at `/__mail`.
+
+## Song fixes
+
+`song_fixes` lists songs the catalog gets wrong. `GET /fixes?ids=dz:1,dz:2` returns the fixes for
+those songs (read-only; nothing in the app can change the list). Add one in Cloudflare (D1 →
+pulse-accounts → Console):
+
+```sql
+-- A song Deezer lists as a 30-second clip: its real length in seconds.
+INSERT OR REPLACE INTO song_fixes (id, duration, video, note) VALUES ('dz:3892384211', 227, NULL, 'Firework: Deezer lists a clip');
+-- A song that keeps playing the wrong video: the YouTube video id to play instead.
+INSERT OR REPLACE INTO song_fixes (id, duration, video, note) VALUES ('dz:123', NULL, 'dQw4w9WgXcQ', 'wrong video');
+```
+
+A song's id is on its page in Pulse (Copy link). The live match test (`Match test` in Actions)
+prints the rows for every clip-only song it finds.
