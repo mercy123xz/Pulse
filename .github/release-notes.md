@@ -1,6 +1,17 @@
 **Download `PulseSetup` below and run it** to install Pulse (no administrator password needed).
 Works on any 64-bit Windows 10 or 11 PC.
 
+## Pulse 1.2.2
+<!-- x: Choose explicit or clean versions of songs, a Get Pulse button on your Discord status, and a gold Founders theme as a thank-you to our first 100 members. -->
+
+**Fixes**
+- Songs no longer play the censored version by surprise. A new **Explicit songs** switch in Settings → Playback picks the uncensored version (on) or the clean one (off).
+- Settings now says what it does: Pulse checks for updates each time it opens.
+
+**New**
+- A **Get Pulse** button on your Discord status, so friends who see what you're listening to can get it too.
+- **Early supporters:** the first 100 Pulse accounts get the gold **Founders** theme, an ★ Early supporter badge on their profile, and their name in a thank-you list in Settings.
+
 ## Pulse 1.2.1
 <!-- x: Imported playlists now play the real song (no more covers, karaoke or 30-second clips), featured artists stay put, and search puts the most popular version first. -->
 
