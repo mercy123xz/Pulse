@@ -1,0 +1,15 @@
+# Checks the accounts server answers (run by hand). Prints counts only.
+name: Check accounts server
+on:
+  workflow_dispatch:
+  push:
+    branches: [features]
+    paths: [.github/workflows/server-check.yml]
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          base=https://pulse-accounts.y0hyotuube.workers.dev
+          echo "supporters: $(curl -fsS $base/supporters | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["supporters"]))')"
+          echo "song fix for Firework: $(curl -fsS "$base/fixes?ids=dz:3892384211")"
