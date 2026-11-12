@@ -98,9 +98,7 @@ pub fn ensure_tools(status: &dyn Fn(&str)) -> Result<Tools, String> {
     if !tools.deno.is_file() {
         let sums = crate::net::get_text(&format!("{DENO_RELEASE}/{}.sha256sum", DENO.name))?;
         let expected = first_sha256(&sums).ok_or("Deno's checksum file is unreadable")?;
-        let zip = crate::net::download(&format!("{DENO_RELEASE}/{}", DENO.name), |done, _| {
-            show(YTDLP_MB + done as f64 / 1e6)
-        })?;
+        let zip = crate::net::download(&format!("{DENO_RELEASE}/{}", DENO.name), |done, _| show(YTDLP_MB + done as f64 / 1e6))?;
         verify(&zip, &expected, "Deno")?;
         let exe = unzip_one(&zip, DENO.save_as)?;
         write_executable(&tools.deno, &exe)?;
@@ -202,11 +200,7 @@ fn is_sha256(s: &str) -> bool {
 
 fn verify(bytes: &[u8], expected: &str, what: &str) -> Result<(), String> {
     let got = format!("{:x}", Sha256::digest(bytes));
-    if got == expected {
-        Ok(())
-    } else {
-        Err(format!("The {what} download was damaged or tampered with, so Pulse didn't use it. Try again."))
-    }
+    if got == expected { Ok(()) } else { Err(format!("The {what} download was damaged or tampered with, so Pulse didn't use it. Try again.")) }
 }
 
 fn unzip_one(zip: &[u8], name: &str) -> Result<Vec<u8>, String> {
@@ -298,11 +292,7 @@ fn run(program: &Path, args: &[String], timeout: Duration) -> Result<String, Str
     };
     let out = out_t.join().unwrap_or_default();
     let err = err_t.join().unwrap_or_default();
-    if status.success() {
-        Ok(out)
-    } else {
-        Err(explain_error(&err))
-    }
+    if status.success() { Ok(out) } else { Err(explain_error(&err)) }
 }
 
 /// The installed yt-dlp and Deno versions, for Diagnostics.
@@ -394,15 +384,67 @@ pub fn core_title(title: &str) -> String {
     }
 }
 
-/// Scores how well a YouTube result matches the song. Higher is better.
+/// Words that mark a version people didn't ask for (unless the song's own title says so).
+pub const UNWANTED: [&str; 21] = [
+    "live",
+    "cover",
+    "remix",
+    "sped up",
+    "slowed",
+    "reverb",
+    "nightcore",
+    "8d",
+    "karaoke",
+    "instrumental",
+    "1 hour",
+    "loop",
+    "tribute",
+    "piano version",
+    "acapella",
+    "a cappella",
+    "lofi",
+    "bass boosted",
+    "type beat",
+    "parody",
+    "reaction",
+];
+
+/// True if `candidate` is a version (cover, instrumental, sped up…) that `wanted` doesn't ask for.
+pub fn unwanted_version(wanted: &str, candidate: &str) -> bool {
+    let (w, c) = (words(wanted), words(candidate));
+    UNWANTED.iter().any(|bad| {
+        let b = format!(" {bad} ");
+        c.contains(&b) && !w.contains(&b)
+    })
+}
+
+/// " word word ": lowercase whole words, so " live " doesn't match "alive".
+pub fn words(s: &str) -> String {
+    format!(
+        " {} ",
+        s.to_lowercase().chars().map(|c| if c.is_alphanumeric() { c } else { ' ' }).collect::<String>().split_whitespace().collect::<Vec<_>>().join(" ")
+    )
+}
+
+/// Scores how well a YouTube result matches the song. Higher is better; below 0 it
+/// isn't the song. What counts, strongest first: the right length (a music video or a
+/// 30-second clip is the wrong length), the song's own artist (an "Artist - Topic"
+/// channel is the official album audio, but only if it's *this* artist's), the title,
+/// and no unwanted version (cover, instrumental, live, sped up…) in the title or channel.
 pub fn score(track: &Track, e: &SearchEntry) -> i32 {
     let mut s = 0;
     let title = e.title.to_lowercase();
     let channel = e.channel.as_deref().or(e.uploader.as_deref()).unwrap_or("").to_lowercase();
     let want_title = norm(&core_title(&track.title));
-    let artist = norm(&track.artist.name);
+    // The main artist and anyone featured: the right channel may be any of them.
+    let artists: Vec<String> = std::iter::once(&track.artist).chain(track.featured.iter()).map(|a| norm(&a.name)).filter(|a| !a.is_empty()).collect();
+    let by_artist = |text: &str| {
+        let t = norm(text);
+        artists.iter().any(|a| t.contains(a.as_str()) || (t.len() >= 4 && a.contains(&t)))
+    };
+    let topic = channel.strip_suffix(" - topic");
 
-    // Length is the strongest signal: music videos and live versions run long.
+    // Length is the strongest signal: music videos and live versions run long, clips short.
     if let Some(d) = e.duration
         && track.duration > 0
     {
@@ -414,28 +456,43 @@ pub fn score(track: &Track, e: &SearchEntry) -> i32 {
             x if x <= 45.0 => -15,
             _ => -40,
         };
+        // Much shorter than the song: a preview, a short or a cut.
+        if d < track.duration as f64 * 0.7 {
+            s -= 30;
+        }
     }
-    // "Artist - Topic" channels carry the official album audio.
-    if channel.ends_with(" - topic") {
-        s += 30;
+    match topic {
+        // "Artist - Topic" carries the official album audio, if it's this artist's.
+        Some(name) if artists.is_empty() || by_artist(name) => s += 35,
+        // Another artist's album audio of the same title is almost always a cover.
+        Some(_) => s -= 80,
+        None => {}
     }
-    if !artist.is_empty() && (norm(&channel).contains(&artist) || norm(&title).contains(&artist)) {
-        s += 20;
+    if !artists.is_empty() {
+        if topic.is_none() && by_artist(&channel) {
+            s += 20;
+        } else if by_artist(&title) {
+            s += 12;
+        } else if topic.is_none() {
+            // Someone else's upload that doesn't even name the artist.
+            s -= 25;
+        }
     }
     if !want_title.is_empty() && norm(&title).contains(&want_title) {
         s += 25;
     }
-    if title.contains("audio") {
-        s += 5;
+    if title.contains("official audio") || (title.contains("audio") && !title.contains("video")) {
+        s += 8;
     }
-    // Versions people didn't ask for (unless the song title itself says so).
-    // Whole words only, so "live" doesn't match "alive".
-    let words = |s: &str| format!(" {} ", s.to_lowercase().chars().map(|c| if c.is_alphanumeric() { c } else { ' ' }).collect::<String>().split_whitespace().collect::<Vec<_>>().join(" "));
-    let (t_words, song) = (words(&e.title), words(&track.title));
-    for bad in ["live", "cover", "remix", "sped up", "slowed", "reverb", "nightcore", "8d", "karaoke", "instrumental", "1 hour", "loop"] {
+    // The music video: often intros, skits or a different edit. The song itself is better.
+    if ["official video", "music video", "official mv", "(video)", "[video]", "visualizer"].iter().any(|m| title.contains(m)) {
+        s -= 10;
+    }
+    let (t_words, c_words, song) = (words(&e.title), words(&channel), words(&track.title));
+    for bad in UNWANTED {
         let w = format!(" {bad} ");
-        if t_words.contains(&w) && !song.contains(&w) {
-            s -= 30;
+        if !song.contains(&w) && (t_words.contains(&w) || c_words.contains(&w)) {
+            s -= 150;
         }
     }
     if title.contains("lyrics") || title.contains("lyric video") {
@@ -447,12 +504,8 @@ pub fn score(track: &Track, e: &SearchEntry) -> i32 {
 /// All results that look like the song, best first. Empty if nothing fits.
 pub fn rank<'a>(track: &Track, entries: &'a [SearchEntry]) -> Vec<&'a SearchEntry> {
     let mut seen = std::collections::HashSet::new();
-    let mut scored: Vec<(i32, &SearchEntry)> = entries
-        .iter()
-        .filter(|e| !e.id.is_empty() && seen.insert(e.id.as_str()))
-        .map(|e| (score(track, e), e))
-        .filter(|(s, _)| *s >= 0)
-        .collect();
+    let mut scored: Vec<(i32, &SearchEntry)> =
+        entries.iter().filter(|e| !e.id.is_empty() && seen.insert(e.id.as_str())).map(|e| (score(track, e), e)).filter(|(s, _)| *s >= 0).collect();
     scored.sort_by_key(|(s, _)| std::cmp::Reverse(*s));
     scored.into_iter().map(|(_, e)| e).collect()
 }
@@ -480,30 +533,27 @@ fn queries(track: &Track) -> [String; 2] {
 }
 
 /// Searches YouTube and returns the ids of the videos that match `track`, best first.
+/// Three searches at once (as long as one): YouTube Music's songs (official album
+/// audio), and two ordinary searches for songs YouTube Music doesn't have.
 pub fn find_videos(tools: &Tools, track: &Track) -> Result<Vec<String>, String> {
-    // Both searches at once, so this takes as long as one.
     let [quoted, plain] = queries(track);
-    let (a, b) = std::thread::scope(|s| {
+    let music_url = format!("https://music.youtube.com/search?q={}#songs", crate::net::encode(&plain));
+    let (m, a, b) = std::thread::scope(|s| {
+        let m = s.spawn(|| search(tools, music_url.clone(), 6));
         let a = s.spawn(|| search(tools, format!("ytsearch8:{quoted}"), 8));
         let b = s.spawn(|| search(tools, format!("ytsearch8:{plain}"), 8));
-        (a.join().unwrap_or_else(|_| Err("search crashed".into())), b.join().unwrap_or_else(|_| Err("search crashed".into())))
+        let crashed = || Err::<Vec<SearchEntry>, String>("search crashed".into());
+        (m.join().unwrap_or_else(|_| crashed()), a.join().unwrap_or_else(|_| crashed()), b.join().unwrap_or_else(|_| crashed()))
     });
     let mut entries = Vec::new();
     let mut error = None;
-    for r in [a, b] {
+    for r in [m, a, b] {
         match r {
             Ok(mut e) => entries.append(&mut e),
             Err(e) => error = Some(e),
         }
     }
-    let mut ids: Vec<String> = rank(track, &entries).into_iter().map(|e| e.id.clone()).collect();
-    if ids.is_empty() {
-        // Some songs only show up on YouTube Music.
-        let url = format!("https://music.youtube.com/search?q={}#songs", crate::net::encode(&plain));
-        if let Ok(music) = search(tools, url, 8) {
-            ids = rank(track, &music).into_iter().map(|e| e.id.clone()).collect();
-        }
-    }
+    let ids: Vec<String> = rank(track, &entries).into_iter().map(|e| e.id.clone()).collect();
     match (ids.is_empty(), error) {
         (false, _) => Ok(ids),
         (true, Some(e)) if entries.is_empty() => Err(e),
@@ -668,16 +718,35 @@ mod tests {
     use crate::deezer::ArtistRef;
 
     fn song(artist: &str, title: &str, secs: u32) -> Track {
-        Track {
-            title: title.into(),
-            duration: secs,
-            artist: ArtistRef { name: artist.into(), ..Default::default() },
-            ..Default::default()
-        }
+        Track { title: title.into(), duration: secs, artist: ArtistRef { name: artist.into(), ..Default::default() }, ..Default::default() }
     }
 
     fn entry(id: &str, title: &str, secs: f64, channel: &str) -> SearchEntry {
         SearchEntry { id: id.into(), title: title.into(), duration: Some(secs), channel: Some(channel.into()), uploader: None, view_count: None }
+    }
+
+    #[test]
+    fn skips_covers_instrumentals_and_clips() {
+        let t = song("Black Eyed Peas", "Meet Me Halfway", 284);
+        let results = vec![
+            // Another artist's album audio of the same song: a cover.
+            entry("cover", "Meet Me Halfway", 283.0, "Pop Hits Orchestra - Topic"),
+            entry("real", "Meet Me Halfway", 284.0, "Black Eyed Peas - Topic"),
+            entry("mv", "Black Eyed Peas - Meet Me Halfway (Official Music Video)", 290.0, "BlackEyedPeasVEVO"),
+        ];
+        let ids: Vec<&str> = rank(&t, &results).iter().map(|e| e.id.as_str()).collect();
+        assert_eq!(ids.first(), Some(&"real"));
+        assert!(!ids.contains(&"cover"));
+
+        let t = song("Nelly", "Ride Wit Me", 291);
+        let results = vec![
+            entry("inst", "Nelly - Ride Wit Me (Instrumental)", 291.0, "Nelly - Topic"),
+            entry("inst2", "Ride Wit Me", 291.0, "Instrumental Hip Hop Beats"),
+            entry("clip", "Nelly - Ride Wit Me #shorts", 30.0, "Nelly"),
+            entry("real", "Ride Wit Me", 291.0, "Nelly - Topic"),
+        ];
+        let ids: Vec<&str> = rank(&t, &results).iter().map(|e| e.id.as_str()).collect();
+        assert_eq!(ids, vec!["real"]);
     }
 
     #[test]
@@ -827,5 +896,121 @@ mod tests {
         println!("{}", d.lines().next().unwrap_or(""));
         // Second call finds them already installed.
         ensure_tools(&|_| {}).expect("tools again");
+    }
+
+    /// Matches a real playlist against Deezer and YouTube and prints what Pulse would pick,
+    /// flagging anything that looks wrong. Needs the network, so it only runs when asked:
+    /// `PULSE_LIVE_SONGS=tests/data/friend-playlist.txt PULSE_LIVE_SPOTIFY=<link>
+    /// PULSE_YTDLP=yt-dlp PULSE_DENO=deno cargo test live_match_report -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn live_match_report() {
+        let mut songs: Vec<(String, String, u32)> = vec![];
+        if let Ok(url) = std::env::var("PULSE_LIVE_SPOTIFY") {
+            let read = crate::import::spotify_for_test(&url).expect("Spotify link");
+            println!("Spotify link: {} songs read", read.len());
+            for (a, t, d) in read.iter().take(5) {
+                println!("  {a} | {t} | {d}s");
+            }
+            songs.extend(read);
+        }
+        if let Ok(path) = std::env::var("PULSE_LIVE_SONGS") {
+            for line in std::fs::read_to_string(path).expect("songs file").lines().filter(|l| !l.starts_with('#') && l.contains('|')) {
+                let p: Vec<&str> = line.split('|').map(str::trim).collect();
+                let (m, s) = p[2].split_once(':').unwrap_or(("0", "0"));
+                songs.push((p[0].into(), p[1].into(), m.parse::<u32>().unwrap_or(0) * 60 + s.parse::<u32>().unwrap_or(0)));
+            }
+        }
+        // The same song twice (the link and the list) is only checked once.
+        let mut seen = std::collections::HashSet::new();
+        songs.retain(|(a, t, _)| seen.insert(format!("{}|{}", norm(a), norm(t))));
+        let tools = std::env::var("PULSE_YTDLP").ok().map(|y| Tools {
+            ytdlp: y.into(),
+            deno: std::env::var("PULSE_DENO").unwrap_or("deno".into()).into(),
+            dir: std::env::temp_dir(),
+        });
+        let (mut ok, mut flagged, mut missing) = (0, 0, 0);
+        for (n, (artists, title, secs)) in songs.iter().enumerate() {
+            std::thread::sleep(std::time::Duration::from_millis(250));
+            let found = crate::deezer::find_track(artists, title, *secs);
+            let mut notes: Vec<String> = vec![];
+            let track = match found {
+                Ok(Some(t)) => t,
+                Ok(None) => {
+                    missing += 1;
+                    println!("{:>3}. MISSING  {artists} – {title} ({secs}s): not found on Deezer", n + 1);
+                    continue;
+                }
+                Err(e) => {
+                    missing += 1;
+                    println!("{:>3}. ERROR    {artists} – {title}: {e}", n + 1);
+                    continue;
+                }
+            };
+            if track.duration.abs_diff(*secs) > 5 {
+                notes.push(format!("length {}s vs {secs}s", track.duration));
+            }
+            if crate::youtube::unwanted_version(title, &track.title) {
+                notes.push("unwanted version".into());
+            }
+            // Featured artists the source credits: in the title, or (filled in by the app) the credits.
+            let (_, also) = crate::deezer::split_artists(artists);
+            let credits = crate::deezer::featured_artists(track.deezer_number().unwrap_or(0)).unwrap_or_default();
+            let credited = norm(&track.title) + &norm(&track.artist.name) + &credits.iter().map(|a| norm(&a.name)).collect::<String>();
+            let lost: Vec<&String> = also.iter().filter(|a| !credited.contains(&norm(a))).collect();
+            if !lost.is_empty() {
+                notes.push(format!("featured not credited: {lost:?}"));
+            }
+            let mut video = String::new();
+            if let Some(tools) = &tools {
+                let mut full = track.clone();
+                full.featured = credits.clone();
+                let [quoted, plain] = queries(&full);
+                let music = format!("https://music.youtube.com/search?q={}#songs", crate::net::encode(&plain));
+                let mut entries = vec![];
+                for target in [music, format!("ytsearch8:{quoted}"), format!("ytsearch8:{plain}")] {
+                    entries.extend(search(tools, target, 8).unwrap_or_default());
+                }
+                match rank(&full, &entries).first() {
+                    Some(e) => {
+                        let d = e.duration.unwrap_or(0.0);
+                        video = format!("  ▶ {} | {} | {}s | score {}", e.title, e.channel.as_deref().unwrap_or("?"), d as u32, score(&full, e));
+                        if (d - track.duration as f64).abs() > 8.0 {
+                            notes.push(format!("video length {}s", d as u32));
+                        }
+                    }
+                    None => notes.push(format!("no YouTube match among {} results", entries.len())),
+                }
+            }
+            let tag = if notes.is_empty() {
+                ok += 1;
+                "ok      "
+            } else {
+                flagged += 1;
+                "CHECK   "
+            };
+            let feat =
+                if credits.is_empty() { String::new() } else { format!(" (with {})", credits.iter().map(|a| a.name.as_str()).collect::<Vec<_>>().join(", ")) };
+            println!(
+                "{:>3}. {tag}{artists} – {title} ({secs}s) → dz:{} \"{}\" by {}{feat}, {}s, rank {}  {}",
+                n + 1,
+                track.deezer_number().unwrap_or(0),
+                track.title,
+                track.artist.name,
+                track.duration,
+                track.rank,
+                notes.join("; ")
+            );
+            if !video.is_empty() {
+                println!("{video}");
+            }
+        }
+        println!("\nSEARCH 'Firework Katy Perry':");
+        if let Ok(r) = crate::deezer::search("Firework Katy Perry") {
+            for t in r.tracks.iter().take(5) {
+                println!("  {} – {} ({}s, rank {})", t.all_artists(), t.title, t.duration, t.rank);
+            }
+        }
+        println!("\nSUMMARY: {ok} ok, {flagged} to check, {missing} not found, of {} songs", songs.len());
     }
 }

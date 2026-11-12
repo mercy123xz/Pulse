@@ -118,7 +118,9 @@ pub fn run(url: &str, progress: &Arc<Mutex<Progress>>, cancel: &AtomicBool) -> R
     let mut note = None;
     let (name, items) = match source {
         Source::YouTube => youtube(url, &|s| set(s, 0, 0))?,
-        Source::Spotify if spotify_track_ids(url).len() > 1 => spotify_songs(&spotify_track_ids(url), &|done, total| set("Reading the Spotify songs…", done, total), cancel)?,
+        Source::Spotify if spotify_track_ids(url).len() > 1 => {
+            spotify_songs(&spotify_track_ids(url), &|done, total| set("Reading the Spotify songs…", done, total), cancel)?
+        }
         Source::Spotify => {
             let (name, items) = spotify(url)?;
             if items.len() >= 100
@@ -205,12 +207,14 @@ fn shared(code: &str, set: &dyn Fn(&str, usize, usize), cancel: &AtomicBool) -> 
 /// A song that isn't on Deezer: kept with what the other service said about it.
 /// Pulse still plays it from YouTube.
 fn unmatched(item: &Item, source: Source, n: usize) -> Track {
+    let (main, also) = crate::deezer::split_artists(&item.artist);
     let key = item.video.clone().unwrap_or_else(|| format!("{}-{}-{n}", crate::youtube::norm(&item.artist), crate::youtube::norm(&item.title)));
     Track {
         id: format!("imp:{}:{key}", source.name().to_lowercase()),
         title: item.title.clone(),
         duration: item.duration,
-        artist: ArtistRef { id: String::new(), name: if item.artist.is_empty() { "Unknown artist".into() } else { item.artist.clone() }, picture: None },
+        artist: ArtistRef { id: String::new(), name: if main.is_empty() { "Unknown artist".into() } else { main }, picture: None },
+        featured: also.into_iter().map(|name| ArtistRef { name, ..Default::default() }).collect(),
         album: None::<AlbumRef>,
         cover_small: item.art.clone(),
         cover_big: item.art.clone(),
@@ -229,13 +233,7 @@ fn youtube(url: &str, status: &dyn Fn(&str)) -> Result<(String, Vec<Item>), Stri
         .map(|e| {
             let channel = e.channel.clone().or(e.uploader.clone()).unwrap_or_default();
             let (artist, title) = split_video_title(&e.title, &channel);
-            Item {
-                title,
-                artist,
-                duration: e.duration.unwrap_or(0.0) as u32,
-                art: Some(youtube_thumb(&e.id)),
-                video: Some(e.id),
-            }
+            Item { title, artist, duration: e.duration.unwrap_or(0.0) as u32, art: Some(youtube_thumb(&e.id)), video: Some(e.id) }
         })
         .collect();
     Ok((title, items))
@@ -336,6 +334,12 @@ struct SpImage {
     url: String,
 }
 
+/// The songs a Spotify link lists as (artists, title, seconds), for the live matching test.
+#[cfg(test)]
+pub(crate) fn spotify_for_test(url: &str) -> Result<Vec<(String, String, u32)>, String> {
+    Ok(spotify(url)?.1.into_iter().map(|i| (i.artist, i.title, i.duration)).collect())
+}
+
 fn spotify(url: &str) -> Result<(String, Vec<Item>), String> {
     let (kind, id) = spotify_id(url).ok_or("That doesn't look like a Spotify playlist or album link.")?;
     let html = crate::net::get_page(&format!("https://open.spotify.com/embed/{kind}/{id}"))?;
@@ -402,8 +406,7 @@ fn spotify_playlist_size(id: &str) -> Option<usize> {
 }
 
 pub fn playlist_size_from_page(html: &str) -> Option<usize> {
-    let desc = between(html, "<meta property=\"og:description\" content=\"", "\"")
-        .or_else(|| between(html, "<meta name=\"description\" content=\"", "\""))?;
+    let desc = between(html, "<meta property=\"og:description\" content=\"", "\"").or_else(|| between(html, "<meta name=\"description\" content=\"", "\""))?;
     desc.split('·').find_map(|part| {
         let mut w = part.split_whitespace();
         let n = w.next()?.replace(',', "");
@@ -412,7 +415,8 @@ pub fn playlist_size_from_page(html: &str) -> Option<usize> {
 }
 
 pub fn parse_spotify_embed(html: &str) -> Result<(String, Vec<Item>), String> {
-    let json = between(html, "<script id=\"__NEXT_DATA__\" type=\"application/json\">", "</script>").ok_or("Spotify's page has changed; Pulse couldn't read it.")?;
+    let json =
+        between(html, "<script id=\"__NEXT_DATA__\" type=\"application/json\">", "</script>").ok_or("Spotify's page has changed; Pulse couldn't read it.")?;
     let v: serde_json::Value = serde_json::from_str(json).map_err(|_| "Spotify's page has changed; Pulse couldn't read it.")?;
     let entity = v.pointer("/props/pageProps/state/data/entity").cloned().ok_or("This Spotify playlist is private or doesn't exist.")?;
     let e: SpEntity = serde_json::from_value(entity).map_err(|_| "Spotify's page has changed; Pulse couldn't read it.")?;
@@ -423,8 +427,8 @@ pub fn parse_spotify_embed(html: &str) -> Result<(String, Vec<Item>), String> {
         .into_iter()
         .map(|t| Item {
             title: t.title,
-            // "Artist A, Artist B": the first artist is enough to match.
-            artist: t.subtitle.split(',').next().unwrap_or("").replace('\u{a0}', " ").trim().to_string(),
+            // "Artist A, Artist B": all of them, so featured artists are kept.
+            artist: t.subtitle.replace('\u{a0}', " ").trim().to_string(),
             duration: (t.duration / 1000) as u32,
             // The embed page has no per-song pictures (only the playlist's own cover).
             art: None,
@@ -435,7 +439,7 @@ pub fn parse_spotify_embed(html: &str) -> Result<(String, Vec<Item>), String> {
     if items.is_empty()
         && let Some(title) = e.title
     {
-        let artist = e.subtitle.filter(|s| !s.is_empty()).or_else(|| e.artists.first().map(|a| a.name.clone())).unwrap_or_default();
+        let artist = e.subtitle.filter(|s| !s.is_empty()).unwrap_or_else(|| e.artists.iter().map(|a| a.name.as_str()).collect::<Vec<_>>().join(", "));
         items.push(Item { title, artist, duration: (e.duration.unwrap_or(0) / 1000) as u32, art: cover, video: None });
     }
     Ok((name, items))
@@ -588,7 +592,8 @@ mod tests {
         let lines = "https://open.spotify.com/track/190jyVPHYjAqEaOGmMzdyk\nhttps://open.spotify.com/track/0VjIjW4GlUZAMYd2vXMi3b?si=x\n";
         assert_eq!(spotify_track_ids(lines), ["190jyVPHYjAqEaOGmMzdyk", "0VjIjW4GlUZAMYd2vXMi3b"]);
         // Run together by a one-line box, plus the app's "spotify:track:" form and a repeat.
-        let joined = "https://open.spotify.com/track/190jyVPHYjAqEaOGmMzdykspotify:track:0VjIjW4GlUZAMYd2vXMi3b https://open.spotify.com/track/190jyVPHYjAqEaOGmMzdyk";
+        let joined =
+            "https://open.spotify.com/track/190jyVPHYjAqEaOGmMzdykspotify:track:0VjIjW4GlUZAMYd2vXMi3b https://open.spotify.com/track/190jyVPHYjAqEaOGmMzdyk";
         assert_eq!(spotify_track_ids(joined), ["190jyVPHYjAqEaOGmMzdyk", "0VjIjW4GlUZAMYd2vXMi3b"]);
         assert!(spotify_track_ids("https://open.spotify.com/playlist/37i9dQZF1DX5Ejj0EkURtP").is_empty());
         let page = r#"<meta property="og:description" content="Playlist · Spotify · 1,150 items · 2.1M saves">"#;
@@ -602,7 +607,7 @@ mod tests {
         let html = r#"<script id="__NEXT_DATA__" type="application/json">{"props":{"pageProps":{"state":{"data":{"entity":{"type":"track","name":"Beauty And A Beat","title":"Beauty And A Beat","artists":[{"name":"Justin Bieber"},{"name":"Nicki Minaj"}],"duration":227986}}}}}}</script>"#;
         let (_, items) = parse_spotify_embed(html).unwrap();
         assert_eq!(items.len(), 1);
-        assert_eq!((items[0].title.as_str(), items[0].artist.as_str(), items[0].duration), ("Beauty And A Beat", "Justin Bieber", 227));
+        assert_eq!((items[0].title.as_str(), items[0].artist.as_str(), items[0].duration), ("Beauty And A Beat", "Justin Bieber, Nicki Minaj", 227));
     }
 
     #[test]
@@ -613,7 +618,7 @@ mod tests {
         assert_eq!(items.len(), 2);
         // The playlist's cover isn't used as a song's cover.
         assert_eq!(items[0], Item { title: "Loser".into(), artist: "Tame Impala".into(), duration: 223, art: None, video: None });
-        assert_eq!(items[1].artist, "A");
+        assert_eq!(items[1].artist, "A, B");
         assert!(parse_spotify_embed("<html></html>").is_err());
     }
 

@@ -634,36 +634,138 @@ pub fn chart_tracks(genre: u32) -> Result<Vec<Track>, String> {
     get::<List<DzTrack>>(&format!("/chart/{genre}/tracks"), &[("limit", "100")]).map(tracks)
 }
 
-/// Finds the Deezer song that is `title` by `artist` (for imported playlists).
-/// `duration` (seconds, 0 if unknown) helps pick the right version.
-pub fn find_track(artist: &str, title: &str, duration: u32) -> Result<Option<Track>, String> {
-    use crate::youtube::{core_title, norm};
-    let want_title = norm(&core_title(title));
-    let want_artist = norm(artist);
-    let pick = |list: Vec<DzTrack>| -> Option<Track> {
-        list.into_iter()
-            .map(|t| track(t, None))
-            .filter(|t| {
-                let got_title = norm(&core_title(&t.title));
-                let title_ok = !want_title.is_empty() && (got_title == want_title || got_title.contains(&want_title) || want_title.contains(&got_title));
-                let artist_ok = want_artist.is_empty() || {
-                    let a = norm(&t.artist.name);
-                    !a.is_empty() && (want_artist.contains(&a) || a.contains(&want_artist))
-                };
-                let length_ok = duration == 0 || t.duration == 0 || t.duration.abs_diff(duration) <= 8;
-                title_ok && artist_ok && length_ok
-            })
-            .min_by_key(|t| if duration == 0 { 0 } else { t.duration.abs_diff(duration) })
-    };
-    // Deezer's precise search first, then a plain one.
-    let precise = format!("artist:\"{}\" track:\"{}\"", artist.replace('"', ""), core_title(title).replace('"', ""));
-    let first: List<DzTrack> = get("/search/track", &[("q", &precise), ("limit", "10")])?;
-    if let Some(t) = pick(first.data) {
-        return Ok(Some(t));
+/// "Nelly, City Spud" / "Nelly feat. City Spud" → ("Nelly", ["City Spud"]). Names
+/// joined by "&" stay together: that is often one act ("Simon & Garfunkel").
+pub fn split_artists(artists: &str) -> (String, Vec<String>) {
+    let lower = artists.to_lowercase();
+    let mut cuts = vec![];
+    for m in [",", " feat. ", " feat ", " ft. ", " featuring ", " with "] {
+        let mut from = 0;
+        while let Some(i) = lower[from..].find(m) {
+            cuts.push((from + i, m.len()));
+            from += i + m.len();
+        }
     }
-    let plain = format!("{artist} {}", core_title(title));
-    let second: List<DzTrack> = get("/search/track", &[("q", &plain), ("limit", "10")])?;
-    Ok(pick(second.data))
+    cuts.sort();
+    let mut parts = vec![];
+    let mut at = 0;
+    for (i, len) in cuts {
+        if i >= at {
+            parts.push(artists[at..i].trim().to_string());
+            at = i + len;
+        }
+    }
+    parts.push(artists[at..].trim().to_string());
+    parts.retain(|p| !p.is_empty());
+    let main = if parts.is_empty() { String::new() } else { parts.remove(0) };
+    (main, parts)
+}
+
+/// The artists a title credits: "Ride Wit Me (feat. City Spud)" → ["City Spud"].
+pub fn featured_in_title(title: &str) -> Vec<String> {
+    let lower = title.to_lowercase();
+    let Some(i) = ["(feat", "[feat", "(ft.", "(with ", " feat.", " ft. "].iter().filter_map(|m| lower.find(m)).min() else {
+        return vec![];
+    };
+    let rest = title[i..].trim_start_matches(['(', '[', ' ']);
+    let rest = rest.split_once([' ', '.']).map_or("", |(_, r)| r);
+    let rest = rest.split([')', ']']).next().unwrap_or("");
+    rest.split([',', '&']).map(|n| n.trim().to_string()).filter(|n| !n.is_empty()).collect()
+}
+
+/// Which of the candidates is the song, best first. Wrong title, artist or a version the
+/// source didn't ask for (cover, instrumental, karaoke, sped up…) are left out, as are
+/// lengths far from the source's (a 30-second clip, an extended mix). Then the closest
+/// length wins, and among (nearly) equal lengths the most played one: the album version
+/// over a karaoke label's copy or a re-release nobody plays.
+fn best_match(candidates: Vec<Track>, artist: &str, title: &str, duration: u32) -> Option<Track> {
+    use crate::youtube::{core_title, norm, unwanted_version};
+    let (main, mut also) = split_artists(artist);
+    also.extend(featured_in_title(title));
+    let want_title = norm(&core_title(title));
+    let want_artist = norm(&main);
+    let also: Vec<String> = also.iter().map(|a| norm(a)).filter(|a| !a.is_empty()).collect();
+    candidates
+        .into_iter()
+        .filter(|t| {
+            let got_title = norm(&core_title(&t.title));
+            let title_ok = !want_title.is_empty() && (got_title == want_title || got_title.contains(&want_title) || want_title.contains(&got_title));
+            let artist_ok = want_artist.is_empty() || {
+                let a = norm(&t.artist.name);
+                !a.is_empty() && (want_artist.contains(&a) || a.contains(&want_artist))
+            };
+            let length_ok = duration == 0 || t.duration == 0 || (t.duration.abs_diff(duration) <= 8.max(duration / 25) && t.duration * 10 >= duration * 6);
+            title_ok && artist_ok && length_ok && !unwanted_version(title, &t.title)
+        })
+        .min_by_key(|t| {
+            // Credits the same featured artists (in its title or credits).
+            let credited = norm(&t.title) + &t.featured.iter().map(|f| norm(&f.name)).collect::<String>();
+            let missing = also.iter().filter(|a| !credited.contains(a.as_str())).count();
+            let off = if duration == 0 || t.duration == 0 { 0 } else { t.duration.abs_diff(duration) / 3 };
+            (off, missing, std::cmp::Reverse(t.rank))
+        })
+}
+
+/// Finds the Deezer song that is `title` by `artist` (for imported playlists).
+/// `artist` may list several ("Nelly, City Spud"); `duration` (seconds, 0 if unknown)
+/// helps pick the right version. Featured artists are kept.
+pub fn find_track(artist: &str, title: &str, duration: u32) -> Result<Option<Track>, String> {
+    use crate::youtube::core_title;
+    let (main, _) = split_artists(artist);
+    // Deezer's precise search first, then a plain one.
+    let precise = format!("artist:\"{}\" track:\"{}\"", main.replace('"', ""), core_title(title).replace('"', ""));
+    let first: List<DzTrack> = get("/search/track", &[("q", &precise), ("limit", "25")])?;
+    let mut found = best_match(tracks(first), artist, title, duration);
+    if found.is_none() {
+        let plain = format!("{main} {}", core_title(title));
+        let second: List<DzTrack> = get("/search/track", &[("q", &plain), ("limit", "25")])?;
+        found = best_match(tracks(second), artist, title, duration);
+    }
+    // Featured artists: searches don't list them; the app fills them in from the song's
+    // own page once it's in the library (see `App::ensure_featured`).
+    Ok(found)
+}
+
+/// Search results' songs, cleaned up: one entry per song (Deezer lists the same song from
+/// the album, the single, compilations and deluxe editions), the most played version of
+/// each, no 30-second clips when the full song is there, no covers/karaoke/instrumentals
+/// unless the search asks for them, and the songs that match what was typed, most
+/// popular first.
+pub fn rank_songs(q: &str, list: Vec<Track>) -> Vec<Track> {
+    use crate::youtube::{core_title, norm, unwanted_version, words};
+    let list: Vec<Track> = list.into_iter().filter(|t| !unwanted_version(q, &t.title)).collect();
+    // One per (song, artist): keep the most played full-length version, at the place the
+    // first one was.
+    let mut out: Vec<Track> = vec![];
+    for t in list {
+        let key = |x: &Track| (norm(&core_title(&x.title)), x.artist.id.clone());
+        match out.iter_mut().find(|o| key(o) == key(&t)) {
+            Some(o) => {
+                let full = |x: &Track| x.duration == 0 || x.duration >= 60;
+                if (full(&t), t.rank) > (full(o), o.rank) {
+                    *o = t;
+                }
+            }
+            None => out.push(t),
+        }
+    }
+    // How well a song matches what was typed: 2 every word typed is in its title or
+    // artist and the whole title was typed, 1 every word, 0 otherwise.
+    let typed = words(q);
+    let typed: Vec<&str> = typed.split_whitespace().collect();
+    let tier = |t: &Track| {
+        let text = words(&format!("{} {}", t.title, t.all_artists()));
+        let all = !typed.is_empty() && typed.iter().all(|w| text.contains(&format!(" {w} ")));
+        let title = norm(&core_title(&t.title));
+        let whole = !title.is_empty() && norm(q).contains(&title);
+        u8::from(all) + u8::from(all && whole)
+    };
+    // Stable: Deezer's own order among equals.
+    out.sort_by_key(|t| {
+        let tr = tier(t);
+        (std::cmp::Reverse(tr), std::cmp::Reverse(if tr == 2 { t.rank } else { 0 }))
+    });
+    out
 }
 
 pub fn search(q: &str) -> Result<SearchResults, String> {
@@ -710,7 +812,7 @@ fn search_once(q: &str) -> Result<SearchResults, String> {
         (a.name.clone(), related, songs)
     });
     Ok(SearchResults {
-        tracks: tracks(t?),
+        tracks: rank_songs(q, tracks(t?)),
         artists: ranked,
         around,
         users,
@@ -1201,5 +1303,66 @@ mod artist_ranking_tests {
         assert_eq!(name_match("Beyoncé", "beyonce"), 3);
         assert_eq!(name_match("Adele", "tyler"), 0);
         assert_eq!(name_match("Adele", ""), 0);
+    }
+}
+
+#[cfg(test)]
+mod matching_tests {
+    use super::*;
+
+    fn t(id: u64, title: &str, artist: &str, artist_id: &str, duration: u32, rank: u64) -> Track {
+        Track {
+            id: format!("dz:{id}"),
+            title: title.into(),
+            duration,
+            rank,
+            artist: ArtistRef { id: artist_id.into(), name: artist.into(), picture: None },
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn splits_artist_lists() {
+        assert_eq!(split_artists("Nelly, City Spud"), ("Nelly".into(), vec!["City Spud".into()]));
+        assert_eq!(split_artists("Nelly feat. City Spud"), ("Nelly".into(), vec!["City Spud".into()]));
+        assert_eq!(split_artists("Simon & Garfunkel"), ("Simon & Garfunkel".into(), vec![]));
+        assert_eq!(featured_in_title("Ride Wit Me (feat. City Spud)"), vec!["City Spud".to_string()]);
+        assert!(featured_in_title("Firework").is_empty());
+    }
+
+    #[test]
+    fn import_picks_the_real_song() {
+        let list = vec![
+            t(1, "Ride Wit Me (Instrumental)", "Nelly", "1", 291, 300_000),
+            t(2, "Ride Wit Me", "Nelly", "1", 291, 700_000),
+            t(3, "Ride Wit Me (feat. City Spud)", "Nelly", "1", 291, 650_000),
+            t(4, "Ride Wit Me", "Karaoke Hits", "9", 290, 1_000),
+        ];
+        // The featured version wins over the bare title; never the instrumental.
+        assert_eq!(best_match(list, "Nelly, City Spud", "Ride Wit Me", 291).unwrap().id, "dz:3");
+        // A 30-second clip isn't the song.
+        let list = vec![t(5, "Firework", "Katy Perry", "2", 30, 900_000), t(6, "Firework", "Katy Perry", "2", 227, 800_000)];
+        assert_eq!(best_match(list, "Katy Perry", "Firework", 228).unwrap().id, "dz:6");
+        // Same length: the most played version.
+        let list = vec![t(7, "Meet Me Halfway", "Black Eyed Peas", "3", 284, 10_000), t(8, "Meet Me Halfway", "Black Eyed Peas", "3", 284, 800_000)];
+        assert_eq!(best_match(list, "Black Eyed Peas", "Meet Me Halfway", 284).unwrap().id, "dz:8");
+        // Asked for the instrumental: it's allowed.
+        let list = vec![t(1, "Ride Wit Me (Instrumental)", "Nelly", "1", 291, 300_000)];
+        assert!(best_match(list, "Nelly", "Ride Wit Me (Instrumental)", 291).is_some());
+    }
+
+    #[test]
+    fn search_folds_versions_and_puts_the_popular_one_first() {
+        let list = vec![
+            t(1, "Firework", "Katy Perry", "2", 30, 100),
+            t(2, "Firework (Karaoke Version)", "Sing Along", "8", 227, 50),
+            t(3, "Firework", "Katy Perry", "2", 227, 900_000),
+            t(4, "Firework", "Some Cover Band", "9", 225, 2_000),
+            t(5, "Fireworks", "Other", "7", 200, 5_000),
+        ];
+        let out = rank_songs("firework katy perry", list);
+        let ids: Vec<&str> = out.iter().map(|t| t.id.as_str()).collect();
+        assert_eq!(ids[0], "dz:3");
+        assert!(!ids.contains(&"dz:1") && !ids.contains(&"dz:2"));
     }
 }

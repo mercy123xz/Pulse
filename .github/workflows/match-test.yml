@@ -1,0 +1,41 @@
+# Checks song matching against the real Deezer and YouTube (run by hand from Actions).
+name: Match test
+on:
+  push:
+    branches: [features]
+    paths: [tests/data/**, .github/workflows/match-test.yml]
+  workflow_dispatch:
+    inputs:
+      spotify:
+        description: Spotify playlist link (optional)
+        required: false
+        default: ""
+jobs:
+  match:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: System libraries
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libasound2-dev libudev-dev libxkbcommon-dev libgtk-3-dev libssl-dev
+      - name: yt-dlp and Deno
+        run: |
+          python3 -m pip install --user -U yt-dlp
+          curl -fsSL https://deno.land/install.sh | sh -s -- -y
+          echo "$HOME/.deno/bin" >> "$GITHUB_PATH"
+      - name: Match the playlist
+        env:
+          PULSE_LIVE_SONGS: tests/data/friend-playlist.txt
+          PULSE_LIVE_SPOTIFY: ${{ inputs.spotify || 'https://open.spotify.com/playlist/1uDsRDwDMPGalCgzUhN76y' }}
+          PULSE_YTDLP: yt-dlp
+          PULSE_DENO: deno
+        run: |
+          [ -n "$PULSE_LIVE_SPOTIFY" ] || unset PULSE_LIVE_SPOTIFY
+          cargo test --release live_match_report -- --ignored --nocapture 2>&1 | tee match-report.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: match-report
+          path: match-report.txt
