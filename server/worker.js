@@ -106,6 +106,7 @@ async function route(c, method, path) {
   if (method === "GET" && path === "/search") return searchUsers(c);
   if (method === "POST" && path === "/report") return report(c);
   if (method === "GET" && path === "/fixes") return songFixes(c);
+  if (method === "GET" && path === "/supporters") return supporters(c);
   fail(404, "Not found.");
 }
 
@@ -173,7 +174,7 @@ async function emailFree(c, email, exceptId = 0) {
 
 // A user by username, or by email if it has an @ in it.
 const findUser = (c, who) =>
-  c.env.DB.prepare(`SELECT id, username, email, pass_hash, pass_salt, bio, created FROM users WHERE ${who.includes("@") ? "email" : "username"} = ?`).bind(who).first();
+  c.env.DB.prepare(`SELECT id, username, email, pass_hash, pass_salt, bio, created, supporter FROM users WHERE ${who.includes("@") ? "email" : "username"} = ?`).bind(who).first();
 
 const emailjsReady = (env) => !!(env.EMAILJS_SERVICE_ID && env.EMAILJS_TEMPLATE_ID && env.EMAILJS_PUBLIC_KEY && env.EMAILJS_PRIVATE_KEY);
 const mailReady = (env) => typeof env.MAIL_HOOK === "function" || emailjsReady(env) || !!(env.MAIL_FROM && (env.BREVO_API_KEY || env.RESEND_API_KEY));
@@ -245,7 +246,7 @@ async function auth(c) {
   const token = h.startsWith("Bearer ") ? h.slice(7).trim() : "";
   if (!/^[0-9a-f]{64}$/.test(token)) fail(401, "Please sign in again.");
   const row = await c.env.DB.prepare(
-    "SELECT u.id, u.username, u.email, u.bio, u.created, s.token_hash FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ? AND s.expires > ?",
+    "SELECT u.id, u.username, u.email, u.bio, u.created, u.supporter, s.token_hash FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ? AND s.expires > ?",
   )
     .bind(await sha256(token), c.now)
     .first();
@@ -290,7 +291,8 @@ function cleanTracks(list) {
   return out;
 }
 
-const publicUser = (u) => ({ username: u.username, bio: u.bio || "", created: u.created });
+// `supporter`: an early supporter of Pulse (set by hand in Cloudflare, see README).
+const publicUser = (u) => ({ username: u.username, bio: u.bio || "", created: u.created, supporter: !!u.supporter });
 // Only ever sent to the account's owner.
 const ownUser = (u) => ({ ...publicUser(u), email: u.email || "" });
 
@@ -528,7 +530,7 @@ async function getPlaylist(c, id) {
 }
 
 async function getUser(c, name) {
-  const u = await c.env.DB.prepare("SELECT id, username, bio, created FROM users WHERE username = ?").bind(name.toLowerCase()).first();
+  const u = await c.env.DB.prepare("SELECT id, username, bio, created, supporter FROM users WHERE username = ?").bind(name.toLowerCase()).first();
   if (!u) fail(404, "There's no one called that.");
   const lists = await c.env.DB.prepare("SELECT id, name, count, cover, updated FROM playlists WHERE user_id = ? AND hidden = 0 ORDER BY updated DESC").bind(u.id).all();
   return c.reply(200, { user: publicUser(u), playlists: lists.results || [] });
@@ -541,6 +543,12 @@ async function searchUsers(c) {
     .bind(q, q + "￿")
     .all();
   return c.reply(200, { users: rows.results || [] });
+}
+
+// Early supporters, oldest account first: thanked by name in the app.
+async function supporters(c) {
+  const rows = await c.env.DB.prepare("SELECT username FROM users WHERE supporter = 1 ORDER BY created LIMIT 500").all();
+  return c.reply(200, { supporters: (rows.results || []).map((r) => r.username) });
 }
 
 // Song fixes: real lengths for songs the catalog lists as a 30-second clip, and the video

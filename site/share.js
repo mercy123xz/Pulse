@@ -116,6 +116,7 @@ var PulseShare = (function () {
       var info = el("div");
       info.appendChild(el("p", "kind", "Profile"));
       info.appendChild(el("h1", null, "@" + u.username));
+      if (u.supporter) info.appendChild(el("p", "badge", "★ Early supporter"));
       if (u.bio) info.appendChild(el("p", null, u.bio));
       var joined = new Date(u.created * 1000).toLocaleDateString(undefined, { month: "short", year: "numeric" });
       info.appendChild(el("p", null, p.playlists.length + (p.playlists.length === 1 ? " public playlist" : " public playlists") + " · Joined " + joined));

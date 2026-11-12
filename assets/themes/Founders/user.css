@@ -1,0 +1,11 @@
+/* Founders: warm gold details and slightly rounder corners. */
+:root {
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 18px;
+}
+
+.play-button {
+  background: var(--spice-button-active);
+  color: var(--spice-main);
+}

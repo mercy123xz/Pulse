@@ -252,6 +252,7 @@ pub fn settings_page(app: &mut App, ui: &mut Ui) {
 
     // ------------------------------------------------------------ Updates
     updates_section(app, ui, &ctx);
+    supporters_section(ui);
 
     // ------------------------------------------------------------ Troubleshooting
     section(ui, tr("Troubleshooting"));
@@ -284,7 +285,7 @@ fn updates_section(app: &mut App, ui: &mut Ui, ctx: &egui::Context) {
         ui,
         tr("Check for updates"),
         tr(
-            "Once a day, Pulse asks GitHub whether there's a newer version. Nothing is installed until you choose Update now, and only if it's signed by Pulse.",
+            "Each time it opens, Pulse asks GitHub whether there's a newer version. Nothing is installed until you choose Update now, and only if it's signed by Pulse.",
         ),
         |ui| {
             switch(ui, &mut app.saved.settings.check_updates, tr("Check for updates"));
@@ -312,6 +313,38 @@ fn updates_section(app: &mut App, ui: &mut Ui, ctx: &egui::Context) {
                     app.updater.check(ctx);
                 }
             });
+        }
+    });
+}
+
+/// "Early supporters": the people Pulse thanks by name. Read once per session, in the
+/// background; nothing shows until there's a list.
+fn supporters_section(ui: &mut Ui) {
+    use std::sync::{Mutex, OnceLock};
+    static LIST: OnceLock<Mutex<Option<Vec<String>>>> = OnceLock::new();
+    let list = LIST.get_or_init(|| {
+        let ctx = ui.ctx().clone();
+        std::thread::spawn(move || {
+            if let Ok(names) = crate::account::supporters() {
+                *LIST.get().unwrap().lock().unwrap() = Some(names);
+                ctx.request_repaint();
+            }
+        });
+        Mutex::new(None)
+    });
+    let Some(names) = list.lock().unwrap().clone().filter(|n| !n.is_empty()) else { return };
+    section(ui, tr("Early supporters"));
+    ui.label(RichText::new(tr("The people who believed in Pulse from the start. Thank you!")).color(pal().text_muted));
+    ui.add_space(8.0);
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
+        for n in names {
+            egui::Frame::new().fill(pal().surface).stroke(Stroke::new(1.0, pal().border)).corner_radius(12).inner_margin(egui::Margin::symmetric(10, 4)).show(
+                ui,
+                |ui| {
+                    ui.label(RichText::new(format!("{} @{n}", icon::STAR)).font(med(12.5)).color(pal().text));
+                },
+            );
         }
     });
 }
@@ -421,7 +454,8 @@ fn themes_section(app: &mut App, ui: &mut Ui) {
     let mut pick = None;
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing = vec2(12.0, 12.0);
-        for t in &app.themes {
+        let supporter = crate::account::session().is_some_and(|s| s.supporter);
+        for t in app.themes.iter().filter(|t| crate::themes::offered(t, supporter, &current)) {
             let selected = t.name == current;
             let (rect, resp) = ui.allocate_exact_size(vec2(176.0, 136.0), Sense::click());
             resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::RadioButton, true, selected, &t.name));
@@ -436,7 +470,13 @@ fn themes_section(app: &mut App, ui: &mut Ui) {
                 Stroke::new(1.0, pal().border)
             };
             ui.painter().rect_stroke(Rect::from_min_size(rect.min, vec2(176.0, 100.0)), r_md(), border, egui::StrokeKind::Outside);
-            let name = if t.builtin { t.name.clone() } else { format!("{}  ·  {}", t.name, tr("custom")) };
+            let name = if !t.builtin {
+                format!("{}  ·  {}", t.name, tr("custom"))
+            } else if t.name == crate::themes::SUPPORTERS_THEME {
+                format!("{}  ·  {}", t.name, tr("early supporters"))
+            } else {
+                t.name.clone()
+            };
             paint_line(ui, pos2(rect.left() + 2.0, rect.top() + 108.0), &name, med(13.0), pal().text, 172.0);
             let n = t.schemes.len();
             let sub = if n == 1 { "1 scheme".to_string() } else { format!("{n} schemes") };

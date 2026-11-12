@@ -306,7 +306,8 @@ pub fn profile_page(app: &mut App, ui: &mut Ui) {
     } else {
         String::new()
     };
-    let stats = format!("{n_pl} {} · {} {}{since}", tr(if n_pl == 1 { "playlist" } else { "playlists" }), app.saved.liked.len(), tr("liked songs"));
+    let badge = if crate::account::session().is_some_and(|s| s.supporter) { format!(" · {} {}", icon::STAR, tr("Early supporter")) } else { String::new() };
+    let stats = format!("{n_pl} {} · {} {}{since}{badge}", tr(if n_pl == 1 { "playlist" } else { "playlists" }), app.saved.liked.len(), tr("liked songs"));
     paint_line(ui, pos2(tx, pic.bottom() - 20.0), &stats, regular(13.5), ON_DARK_MUTED, tw);
     let name_click = ui.interact(name_rect, egui::Id::new("profile_name"), Sense::click()).on_hover_cursor(egui::CursorIcon::Text);
     if edit.clicked() || name_click.clicked() {

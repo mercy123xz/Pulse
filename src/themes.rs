@@ -7,7 +7,8 @@
 //!   (.sidebar, .header, .hero, .player-bar, .card, .track-row, .play-button).
 //! - `theme.toml`: the theme's name and layout choices.
 //!
-//! Pulse ships Default, Blossom, Dreary Mono and Lunar inside the .exe. A folder
+//! Pulse ships Default, Blossom, Dreary Mono, Lunar and Aurora inside the .exe, plus
+//! Founders for early supporters. A folder
 //! with the same name overrides a built-in theme. Anything missing falls back to
 //! Pulse's defaults, so a half-finished theme still works.
 
@@ -19,7 +20,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 /// Themes built into Pulse: (folder name, color.ini, user.css, theme.toml).
-const BUNDLED: [(&str, &str, &str, &str); 5] = [
+const BUNDLED: [(&str, &str, &str, &str); 6] = [
     (
         "Default",
         include_str!("../assets/themes/Default/color.ini"),
@@ -50,7 +51,22 @@ const BUNDLED: [(&str, &str, &str, &str); 5] = [
         include_str!("../assets/themes/Aurora/user.css"),
         include_str!("../assets/themes/Aurora/theme.toml"),
     ),
+    (
+        SUPPORTERS_THEME,
+        include_str!("../assets/themes/Founders/color.ini"),
+        include_str!("../assets/themes/Founders/user.css"),
+        include_str!("../assets/themes/Founders/theme.toml"),
+    ),
 ];
+
+/// The built-in theme only Pulse's early supporters see (a thank-you; see `account`).
+pub const SUPPORTERS_THEME: &str = "Founders";
+
+/// Whether this theme shows in the picker: the supporters' theme only for supporters
+/// (and for anyone already using it).
+pub fn offered(t: &Theme, supporter: bool, current: &str) -> bool {
+    !(t.builtin && t.name == SUPPORTERS_THEME) || supporter || t.name == current
+}
 
 /// One color scheme of a theme.
 #[derive(Debug, Clone)]
@@ -723,6 +739,10 @@ mod tests {
         assert!(get("Lunar").layout.inset);
         assert!(get("Aurora").layout.backdrop && get("Default").layout.backdrop);
         assert!(!get("Dreary Mono").layout.backdrop);
+        let founders = get(SUPPORTERS_THEME);
+        assert!(founders.layout.inset && founders.builtin);
+        assert!(!offered(founders, false, "Default") && offered(founders, true, "Default") && offered(founders, false, "Founders"));
+        assert!(offered(get("Lunar"), false, "Default"));
         assert_eq!(get("Blossom").layout.now_playing_art, NowPlayingArt::SidebarLarge);
         assert_eq!(get("Dreary Mono").layout.player, PlayerStyle::Centered);
         let mono = get("Dreary Mono").active(0, false);

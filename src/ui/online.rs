@@ -424,6 +424,9 @@ pub fn user_page(app: &mut App, ui: &mut Ui) {
         if !p.user.bio.is_empty() {
             sub = format!("{} · {sub}", p.user.bio);
         }
+        if p.user.supporter {
+            sub = format!("{} {} · {sub}", icon::STAR, tr("Early supporter"));
+        }
         let title = format!("@{}", p.user.username);
         hero(
             ui,

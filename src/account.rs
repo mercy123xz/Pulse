@@ -35,6 +35,9 @@ pub struct Session {
     /// Where a code goes if you forget your password ("" if none was added yet).
     #[serde(default)]
     pub email: String,
+    /// One of Pulse's early supporters: a badge, the Founders theme and a thank-you.
+    #[serde(default)]
+    pub supporter: bool,
 }
 
 /// A public profile.
@@ -44,6 +47,8 @@ pub struct User {
     pub username: String,
     pub bio: String,
     pub created: u64,
+    /// One of Pulse's early supporters (shown as a badge).
+    pub supporter: bool,
 }
 
 /// A public playlist, as listed on a profile.
@@ -211,7 +216,8 @@ fn signed_in_as(v: &Value) -> Result<Session, String> {
     let token = v.get("token").and_then(Value::as_str).ok_or("No sign-in key came back.")?.to_string();
     let username = v.pointer("/user/username").and_then(Value::as_str).unwrap_or_default().to_string();
     let email = v.pointer("/user/email").and_then(Value::as_str).unwrap_or_default().to_string();
-    let s = Session { token, username, email };
+    let supporter = v.pointer("/user/supporter").and_then(Value::as_bool).unwrap_or(false);
+    let s = Session { token, username, email, supporter };
     set_session(Some(s.clone()));
     Ok(s)
 }
@@ -238,8 +244,15 @@ pub fn refresh() -> Result<Session, String> {
     let v = call("GET", "/me", None, true)?;
     let mut s = session().ok_or("Please sign in first.")?;
     s.email = v.pointer("/user/email").and_then(Value::as_str).unwrap_or_default().to_string();
+    s.supporter = v.pointer("/user/supporter").and_then(Value::as_bool).unwrap_or(false);
     set_session(Some(s.clone()));
     Ok(s)
+}
+
+/// Pulse's early supporters (usernames, earliest first), thanked by name in Settings.
+pub fn supporters() -> Result<Vec<String>, String> {
+    let v = call("GET", "/supporters", None, false)?;
+    parse(v.get("supporters").cloned().unwrap_or(Value::Null))
 }
 
 /// Adds or changes the email that password-reset codes go to.

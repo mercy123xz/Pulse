@@ -1,0 +1,8 @@
+name = "Founders"
+author = "Pulse"
+description = "A thank-you for Pulse's early supporters: gold on midnight plum, with a soft glow behind the music."
+
+[layout]
+hero = "fullbleed"
+inset = true
+backdrop = true
