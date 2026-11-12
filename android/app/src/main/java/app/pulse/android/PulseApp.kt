@@ -8,6 +8,7 @@ import java.util.concurrent.TimeUnit
 class PulseApp : Application() {
     override fun onCreate() {
         super.onCreate()
+        Reports.install(this)
         NewPipe.init(PulseDownloader(Net.client))
         Library.load(this)
         Account.load(this)

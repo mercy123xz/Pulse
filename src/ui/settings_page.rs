@@ -260,6 +260,11 @@ pub fn settings_page(app: &mut App, ui: &mut Ui) {
             app.navigate(crate::app::Route::Diagnostics, &ctx);
         }
     });
+    row(ui, tr("Report a problem"), tr("Tell the Pulse team what went wrong. Only the developer can read it."), |ui| {
+        if ui.button(tr("Report")).clicked() {
+            app.report = Some((String::new(), true));
+        }
+    });
 
     ui.add_space(30.0);
 

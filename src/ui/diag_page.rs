@@ -18,7 +18,7 @@ pub fn diagnostics_page(app: &mut App, ui: &mut Ui) {
     let ctx = ui.ctx().clone();
     let offline = app.saved.settings.offline_dir();
     app.diag.poll(&ctx, offline.clone());
-    page_title(ui, "Diagnostics", Some("For when something isn't working. Nothing here leaves your PC unless you copy it."));
+    page_title(ui, "Diagnostics", Some("For when something isn't working. Nothing here leaves your PC unless you copy it or send a report."));
     ui.set_max_width(ui.available_width().min(860.0));
     ui.add_space(6.0);
 
@@ -30,6 +30,9 @@ pub fn diagnostics_page(app: &mut App, ui: &mut Ui) {
         if ui.add(copy).clicked() {
             ctx.copy_text(crate::diag::report(&app.diag, &app.saved.settings));
             app.toast(tr("Report copied"), &ctx);
+        }
+        if ghost_button(ui, icon::CHAT_CIRCLE_TEXT, "Report a problem").clicked() {
+            app.report = Some((String::new(), true));
         }
         ui.add_enabled_ui(!app.diag.testing(), |ui| {
             if ghost_button(ui, icon::PULSE, "Run self-test").clicked() {

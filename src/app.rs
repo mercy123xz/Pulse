@@ -783,6 +783,10 @@ pub struct App {
     swept_at: f64,
     /// A crash report from last time that you haven't seen: (file, text).
     pub crash_notice: Option<(std::path::PathBuf, String)>,
+    /// "Report a problem" is open: what you've written, and whether to add the diagnostics.
+    pub report: Option<(String, bool)>,
+    /// A report being sent: the answer arrives here.
+    pub report_sending: Option<std::sync::mpsc::Receiver<Result<(), String>>>,
     /// The day (days since 1970) the daily backup was last checked.
     backup_day: u64,
     /// Backups listed in Settings (read when the page opens), and one waiting to be
@@ -953,6 +957,8 @@ impl App {
             backdrop: Default::default(),
             swept_at: 0.0,
             crash_notice: crate::crash::unseen(),
+            report: None,
+            report_sending: None,
             backup_day: 0,
             backups: None,
             backups_rx: None,

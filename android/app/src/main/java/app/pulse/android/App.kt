@@ -72,6 +72,8 @@ class App {
     var queueOpen by mutableStateOf(false)
     /** A short note at the bottom ("Added to Liked Songs"). */
     var note by mutableStateOf<String?>(null)
+    /** "Report a problem" is open. */
+    var reporting by mutableStateOf(false)
     /** Choosing a playlist to add this song to. */
     var addingToPlaylist by mutableStateOf<Song?>(null)
     val player = PlayerState()

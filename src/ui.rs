@@ -2395,7 +2395,7 @@ fn crash_dialog(app: &mut App, ctx: &egui::Context) {
         ui.set_width(440.0);
         ui.label(RichText::new(tr("Pulse closed unexpectedly last time")).font(heavy(19.0)));
         ui.add_space(8.0);
-        ui.add(egui::Label::new(RichText::new(tr("Sorry about that. A report of what went wrong was saved on your PC. It isn't sent anywhere: if you'd like it fixed, copy it into an issue on GitHub.")).color(pal().text_muted)).wrap());
+        ui.add(egui::Label::new(RichText::new(tr("Sorry about that. A report of what went wrong was saved on your PC. Send it to the Pulse team so it can be fixed: only this report is sent, with your Windows user name blanked out.")).color(pal().text_muted)).wrap());
         ui.add_space(10.0);
         egui::ScrollArea::vertical().max_height(160.0).show(ui, |ui| {
             ui.add(egui::Label::new(RichText::new(&report).font(egui::FontId::monospace(11.5)).color(pal().text_muted)).wrap());
@@ -2406,12 +2406,14 @@ fn crash_dialog(app: &mut App, ctx: &egui::Context) {
                 ctx.copy_text(report.clone());
                 app.toast(tr("Report copied"), ctx);
             }
-            if ghost_button(ui, icon::GITHUB_LOGO, "Report on GitHub").clicked() {
-                ctx.copy_text(report.clone());
-                ctx.open_url(egui::OpenUrl::new_tab("https://github.com/mercy123xz/Pulse/issues/new"));
-            }
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if ui.add(egui::Button::new(RichText::new(tr("Close")).color(Color32::WHITE)).fill(pal().accent).corner_radius(16)).clicked() {
+                let sending = app.report_sending.is_some();
+                let send = egui::Button::new(RichText::new(tr(if sending { "Sending…" } else { "Send report" })).color(Color32::WHITE)).fill(pal().accent).corner_radius(16);
+                if ui.add_enabled(!sending, send).clicked() {
+                    app.report_sending = Some(crate::report::send(crate::report::Kind::Crash, "", &report));
+                    close = true;
+                }
+                if ui.add(egui::Button::new(RichText::new(tr("Not now"))).corner_radius(16)).clicked() {
                     close = true;
                 }
             });
@@ -2423,6 +2425,61 @@ fn crash_dialog(app: &mut App, ctx: &egui::Context) {
     if close {
         crate::crash::mark_seen(&file);
         app.crash_notice = None;
+    }
+}
+
+/// "Report a problem": what happened, in your words, and (if you like) the diagnostics.
+fn report_dialog(app: &mut App, ctx: &egui::Context) {
+    // A report finished sending (from here or from the crash notice).
+    if let Some(rx) = &app.report_sending
+        && let Ok(result) = rx.try_recv()
+    {
+        app.report_sending = None;
+        match result {
+            Ok(()) => app.toast(tr("Report sent. Thank you!"), ctx),
+            Err(e) => app.toast(&format!("{} {e}", tr("Couldn't send the report:")), ctx),
+        }
+    }
+    if app.report_sending.is_some() {
+        ctx.request_repaint_after(std::time::Duration::from_millis(250));
+    }
+    let Some((mut text, mut include)) = app.report.take() else {
+        return;
+    };
+    let (mut open, mut send) = (true, false);
+    egui::Modal::new(egui::Id::new("report_problem")).frame(dialog_frame()).show(ctx, |ui| {
+        ui.set_width(460.0);
+        ui.label(RichText::new(tr("Report a problem")).font(heavy(19.0)));
+        ui.add_space(8.0);
+        ui.add(egui::Label::new(RichText::new(tr("What happened, and what were you doing just before? It goes to the Pulse team (only the developer can read it).")).color(pal().text_muted)).wrap());
+        ui.add_space(10.0);
+        ui.add(egui::TextEdit::multiline(&mut text).desired_rows(5).desired_width(f32::INFINITY).hint_text(tr("For example: the song stops after a few seconds when I skip quickly")).char_limit(3000));
+        ui.add_space(8.0);
+        ui.checkbox(&mut include, tr("Include technical details (versions, graphics card, recent problems)"));
+        ui.add_space(4.0);
+        ui.label(RichText::new(tr("Your Windows user name and email addresses are blanked out before it's sent.")).font(regular(12.0)).color(pal().text_faint));
+        ui.add_space(14.0);
+        ui.horizontal(|ui| {
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                let ok = text.trim().chars().count() >= 5;
+                if ui.add_enabled(ok, egui::Button::new(RichText::new(tr("Send")).color(Color32::WHITE)).fill(pal().accent).corner_radius(16)).clicked() {
+                    send = true;
+                }
+                if ui.add(egui::Button::new(RichText::new(tr("Cancel"))).corner_radius(16)).clicked() {
+                    open = false;
+                }
+            });
+        });
+        if ui.input(|i| i.key_pressed(Key::Escape)) {
+            open = false;
+        }
+    });
+    if send {
+        let details = if include { crate::diag::report(&app.diag, &app.saved.settings) } else { String::new() };
+        app.report_sending = Some(crate::report::send(crate::report::Kind::Problem, &text, &details));
+        app.toast(tr("Sending your report…"), ctx);
+    } else if open {
+        app.report = Some((text, include));
     }
 }
 
@@ -2472,6 +2529,7 @@ fn restore_dialog(app: &mut App, ctx: &egui::Context) {
 
 fn dialogs(app: &mut App, ctx: &egui::Context) {
     crash_dialog(app, ctx);
+    report_dialog(app, ctx);
     restore_dialog(app, ctx);
     credits_dialog(app, ctx);
     import_dialog(app, ctx);

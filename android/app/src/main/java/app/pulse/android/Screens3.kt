@@ -638,3 +638,86 @@ fun PeopleRow(query: String) {
 
 @Composable
 fun BusyDot() = CircularProgressIndicator(color = P.accent, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
+
+// ---------------------------------------------------------------------- reports
+
+/** "Report a problem": a message, and (if you like) details about the phone and recent errors. */
+@Composable
+fun ReportDialog(close: () -> Unit) {
+    val app = LocalApp.current
+    var text by remember { mutableStateOf("") }
+    var include by remember { mutableStateOf(true) }
+    val job = rememberJob()
+    val scope = rememberCoroutineScope()
+    androidx.compose.material.AlertDialog(
+        onDismissRequest = { if (!job.busy) close() },
+        title = { Text("Report a problem", color = P.text) },
+        text = {
+            Column {
+                Text("What happened, and what were you doing just before? Only the developer can read it.", color = P.muted, fontSize = 14.sp)
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = text, onValueChange = { text = it.take(3000) }, minLines = 4,
+                    placeholder = { Text("For example: lyrics don't show for some songs") },
+                    colors = TextFieldDefaults.outlinedTextFieldColors(textColor = P.text, focusedBorderColor = P.accent, cursorColor = P.accent, placeholderColor = P.faint, unfocusedBorderColor = P.divider),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Row(
+                    Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(role = Role.Checkbox) { include = !include }.semantics(mergeDescendants = true) {},
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    androidx.compose.material.Checkbox(checked = include, onCheckedChange = null, colors = androidx.compose.material.CheckboxDefaults.colors(checkedColor = P.accent))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Include the phone model and Pulse version", color = P.text, fontSize = 14.sp)
+                }
+                JobStatus(job)
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = !job.busy && text.trim().length >= 5, onClick = {
+                job.busy = true
+                job.error = null
+                scope.launch {
+                    val r = withContext(Dispatchers.IO) { runCatching { Reports.send(false, text, if (include) Reports.about() else "") } }
+                    job.busy = false
+                    r.onSuccess { app.tell("Report sent. Thank you!"); close() }.onFailure { job.error = it.message }
+                }
+            }) { Text("Send", color = P.accentText) }
+        },
+        dismissButton = { TextButton(enabled = !job.busy, onClick = close) { Text("Cancel", color = P.muted) } },
+        backgroundColor = P.surface,
+    )
+}
+
+/** Shown when Pulse opens after a crash: send the report, or not. */
+@Composable
+fun CrashDialog(file: java.io.File, report: String, close: () -> Unit) {
+    val app = LocalApp.current
+    val job = rememberJob()
+    val scope = rememberCoroutineScope()
+    androidx.compose.material.AlertDialog(
+        onDismissRequest = { if (!job.busy) { Reports.dismiss(file); close() } },
+        title = { Text("Pulse closed unexpectedly", color = P.text) },
+        text = {
+            Column {
+                Text("Sorry about that. A report of what went wrong was saved on this phone. Send it so it can be fixed? Only the report is sent.", color = P.muted, fontSize = 14.sp)
+                Spacer(Modifier.height(8.dp))
+                Text(report.lines().take(6).joinToString("\n"), color = P.faint, fontSize = 11.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, maxLines = 6, overflow = TextOverflow.Ellipsis)
+                JobStatus(job)
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = !job.busy, onClick = {
+                job.busy = true
+                job.error = null
+                scope.launch {
+                    val r = withContext(Dispatchers.IO) { runCatching { Reports.send(true, "", report) } }
+                    job.busy = false
+                    r.onSuccess { Reports.dismiss(file); app.tell("Report sent. Thank you!"); close() }.onFailure { job.error = it.message }
+                }
+            }) { Text("Send report", color = P.accentText) }
+        },
+        dismissButton = { TextButton(enabled = !job.busy, onClick = { Reports.dismiss(file); close() }) { Text("Not now", color = P.muted) } },
+        backgroundColor = P.surface,
+    )
+}

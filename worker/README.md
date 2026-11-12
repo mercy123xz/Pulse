@@ -1,4 +1,16 @@
-# Website questions → GitHub issues
+# Questions and problem reports → GitHub issues
+
+Two kinds of messages come through this Worker:
+
+- **From the website's Ask box:** questions become public issues on the Pulse repo (so the
+  answers help everyone); problem reports go to the private `pulse-reports` repo.
+- **From the apps** (`POST /report`): crash reports and *Report a problem* from the Windows
+  and Android apps, only when the person presses Send. They go to the private
+  `pulse-reports` repo, labelled `crash` or `problem` and `windows` or `android`. User
+  folder names and email addresses are blanked out (by the app, and again here).
+
+For the reports repo, add one more secret: `REPORTS_TOKEN`, a fine-grained token with
+*Only select repositories* → pulse-reports, *Issues: Read and write*.
 
 The "Ask about Pulse" box on the website answers from its FAQ. When it can't, visitors
 can send a question or problem report without a GitHub account. It goes to this

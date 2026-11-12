@@ -605,6 +605,7 @@ fun SettingsPage() {
                     if (Account.username != null) "Your profile, bio and public playlists." else "Sign in or create one to share playlists. Optional.",
                 ) { app.go(Screen.AccountPage) }
                 SettingsLink("Import a playlist", "From YouTube, Spotify, SoundCloud, or the Pulse app on your PC.") { app.go(Screen.ImportPage()) }
+                SettingsLink("Report a problem", "Tell the Pulse team what went wrong. Only the developer can read it.") { app.reporting = true }
                 SettingsLink("Pick artists you like", "Following ${Library.followed.size} artists. Your home page is built from them.") { app.go(Screen.PickArtists) }
 
                 Section("Playing")
