@@ -8,7 +8,7 @@
 //! - `theme.toml`: the theme's name and layout choices.
 //!
 //! Pulse ships Default, Blossom, Dreary Mono, Lunar and Aurora inside the .exe, plus
-//! Founders for early supporters. A folder
+//! Founders for early supporters and a secret one. A folder
 //! with the same name overrides a built-in theme. Anything missing falls back to
 //! Pulse's defaults, so a half-finished theme still works.
 
@@ -20,7 +20,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 /// Themes built into Pulse: (folder name, color.ini, user.css, theme.toml).
-const BUNDLED: [(&str, &str, &str, &str); 6] = [
+const BUNDLED: [(&str, &str, &str, &str); 7] = [
     (
         "Default",
         include_str!("../assets/themes/Default/color.ini"),
@@ -57,15 +57,31 @@ const BUNDLED: [(&str, &str, &str, &str); 6] = [
         include_str!("../assets/themes/Founders/user.css"),
         include_str!("../assets/themes/Founders/theme.toml"),
     ),
+    (
+        SECRET_THEME,
+        include_str!("../assets/themes/Tung Tung/color.ini"),
+        include_str!("../assets/themes/Tung Tung/user.css"),
+        include_str!("../assets/themes/Tung Tung/theme.toml"),
+    ),
 ];
+
+/// The secret built-in theme: it shows up once someone searches for it (see
+/// `App::navigate`).
+pub const SECRET_THEME: &str = "Tung Tung";
+
+/// Does this search find the secret theme? ("tung tung tung sahur", any spacing.)
+pub fn finds_secret(query: &str) -> bool {
+    crate::youtube::norm(query).contains("tungtungtung")
+}
 
 /// The built-in theme only Pulse's early supporters see (a thank-you; see `account`).
 pub const SUPPORTERS_THEME: &str = "Founders";
 
-/// Whether this theme shows in the picker: the supporters' theme only for supporters
-/// (and for anyone already using it).
-pub fn offered(t: &Theme, supporter: bool, current: &str) -> bool {
-    !(t.builtin && t.name == SUPPORTERS_THEME) || supporter || t.name == current
+/// Whether this theme shows in the picker: the supporters' theme only for supporters,
+/// the secret one once found (and either for anyone already using it).
+pub fn offered(t: &Theme, supporter: bool, found_secret: bool, current: &str) -> bool {
+    let locked = t.builtin && ((t.name == SUPPORTERS_THEME && !supporter) || (t.name == SECRET_THEME && !found_secret));
+    !locked || t.name == current
 }
 
 /// One color scheme of a theme.
@@ -741,8 +757,11 @@ mod tests {
         assert!(!get("Dreary Mono").layout.backdrop);
         let founders = get(SUPPORTERS_THEME);
         assert!(founders.layout.inset && founders.builtin);
-        assert!(!offered(founders, false, "Default") && offered(founders, true, "Default") && offered(founders, false, "Founders"));
-        assert!(offered(get("Lunar"), false, "Default"));
+        assert!(!offered(founders, false, true, "Default") && offered(founders, true, false, "Default") && offered(founders, false, false, "Founders"));
+        let tung = get(SECRET_THEME);
+        assert!(!offered(tung, true, false, "Default") && offered(tung, false, true, "Default"));
+        assert!(finds_secret("Tung Tung Tung Sahur") && finds_secret("tungtungtung") && !finds_secret("tung"));
+        assert!(offered(get("Lunar"), false, false, "Default"));
         assert_eq!(get("Blossom").layout.now_playing_art, NowPlayingArt::SidebarLarge);
         assert_eq!(get("Dreary Mono").layout.player, PlayerStyle::Centered);
         let mono = get("Dreary Mono").active(0, false);

@@ -169,6 +169,8 @@ pub struct Settings {
     pub theme: String,
     /// Empty = the theme's first scheme.
     pub scheme: String,
+    /// The secret theme was found (by searching for it).
+    pub found_secret_theme: bool,
 }
 
 impl Default for Settings {
@@ -207,6 +209,7 @@ impl Default for Settings {
             hardware_acceleration: true,
             theme: "Default".into(),
             scheme: String::new(),
+            found_secret_theme: false,
         }
     }
 }

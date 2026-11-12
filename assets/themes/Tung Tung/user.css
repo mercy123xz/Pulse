@@ -1,0 +1,11 @@
+/* Tung Tung: chunky, carved-wood corners. */
+:root {
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+}
+
+.play-button {
+  background: var(--spice-button-active);
+  color: var(--spice-main);
+}

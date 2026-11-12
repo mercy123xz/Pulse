@@ -1,0 +1,9 @@
+name = "Tung Tung"
+author = "Pulse"
+description = "Tung tung tung... Sahur! A secret theme carved from wood, for whoever goes looking."
+
+[layout]
+player = "centered"
+hero = "fullbleed"
+inset = true
+backdrop = true

@@ -1205,6 +1205,18 @@ impl App {
         if route == self.route {
             return;
         }
+        // The secret theme: search for it, and there it is.
+        if let Route::Search(q) = &route
+            && crate::themes::finds_secret(q)
+            && !self.saved.settings.found_secret_theme
+        {
+            self.saved.settings.found_secret_theme = true;
+            self.saved.settings.theme = crate::themes::SECRET_THEME.into();
+            self.saved.settings.scheme.clear();
+            self.apply_theme(ctx);
+            self.save_now = true;
+            self.toast(crate::i18n::tr("Tung tung tung… Sahur! You found a secret theme. It's in Settings → Themes now."), ctx);
+        }
         let old = std::mem::replace(&mut self.route, route);
         // Leaving search for something you found there: remember the search.
         if let (Route::Search(q), false) = (&old, matches!(self.route, Route::Search(_))) {

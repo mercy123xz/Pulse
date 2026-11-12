@@ -455,7 +455,8 @@ fn themes_section(app: &mut App, ui: &mut Ui) {
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing = vec2(12.0, 12.0);
         let supporter = crate::account::session().is_some_and(|s| s.supporter);
-        for t in app.themes.iter().filter(|t| crate::themes::offered(t, supporter, &current)) {
+        let found = app.saved.settings.found_secret_theme;
+        for t in app.themes.iter().filter(|t| crate::themes::offered(t, supporter, found, &current)) {
             let selected = t.name == current;
             let (rect, resp) = ui.allocate_exact_size(vec2(176.0, 136.0), Sense::click());
             resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::RadioButton, true, selected, &t.name));
@@ -474,6 +475,8 @@ fn themes_section(app: &mut App, ui: &mut Ui) {
                 format!("{}  ·  {}", t.name, tr("custom"))
             } else if t.name == crate::themes::SUPPORTERS_THEME {
                 format!("{}  ·  {}", t.name, tr("early supporters"))
+            } else if t.name == crate::themes::SECRET_THEME {
+                format!("{}  ·  {}", t.name, tr("secret"))
             } else {
                 t.name.clone()
             };
