@@ -370,8 +370,24 @@ struct SearchResult {
 
 /// Lowercases and keeps only letters and digits, so "Tengo Algo Para Ti!" and
 /// "tengo algo para ti" compare equal.
+/// Accents are dropped and "$" read as "s", so "JAŸ-Z" = "JAY-Z" and "Ke$ha" = "Kesha".
 pub fn norm(s: &str) -> String {
-    s.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect()
+    s.chars()
+        .flat_map(char::to_lowercase)
+        .map(|c| match c {
+            '$' => 's',
+            'à'..='å' => 'a',
+            'ç' => 'c',
+            'è'..='ë' => 'e',
+            'ì'..='ï' => 'i',
+            'ñ' => 'n',
+            'ò'..='ö' | 'ø' => 'o',
+            'ù'..='ü' => 'u',
+            'ý' | 'ÿ' => 'y',
+            c => c,
+        })
+        .filter(|c| c.is_alphanumeric())
+        .collect()
 }
 
 /// The song title without "(feat. …)" / "(with …)" and similar extras.
@@ -385,7 +401,7 @@ pub fn core_title(title: &str) -> String {
 }
 
 /// Words that mark a version people didn't ask for (unless the song's own title says so).
-pub const UNWANTED: [&str; 21] = [
+pub const UNWANTED: [&str; 26] = [
     "live",
     "cover",
     "remix",
@@ -407,6 +423,11 @@ pub const UNWANTED: [&str; 21] = [
     "type beat",
     "parody",
     "reaction",
+    "mix",
+    "rework",
+    "extended",
+    "made famous",
+    "originally performed",
 ];
 
 /// True if `candidate` is a version (cover, instrumental, sped up…) that `wanted` doesn't ask for.
@@ -445,8 +466,9 @@ pub fn score(track: &Track, e: &SearchEntry) -> i32 {
     let topic = channel.strip_suffix(" - topic");
 
     // Length is the strongest signal: music videos and live versions run long, clips short.
+    // Deezer lists some songs as a 30-second clip; that isn't the song's real length.
     if let Some(d) = e.duration
-        && track.duration > 0
+        && track.duration >= 60
     {
         let diff = (d - track.duration as f64).abs();
         s += match diff {
@@ -939,6 +961,9 @@ mod tests {
                 Ok(None) => {
                     missing += 1;
                     println!("{:>3}. MISSING  {artists} – {title} ({secs}s): not found on Deezer", n + 1);
+                    for c in crate::deezer::candidates_for_test(artists, title).iter().take(6) {
+                        println!("       had: {} – {} ({}s, rank {})", c.artist.name, c.title, c.duration, c.rank);
+                    }
                     continue;
                 }
                 Err(e) => {

@@ -673,6 +673,38 @@ pub fn featured_in_title(title: &str) -> Vec<String> {
     rest.split([',', '&']).map(|n| n.trim().to_string()).filter(|n| !n.is_empty()).collect()
 }
 
+/// The title without "(feat. …)", "(Remastered)", " - Radio Edit" and the like.
+fn base_title(title: &str) -> String {
+    let t = crate::youtube::core_title(title);
+    let cut = [" (", " [", " - "].iter().filter_map(|m| t.find(m)).min().unwrap_or(t.len());
+    crate::youtube::norm(&t[..cut])
+}
+
+/// Same song title: "Firework" is "Firework (2010 Remaster)" but not "Fireworks".
+pub fn same_title(a: &str, b: &str) -> bool {
+    use crate::youtube::{core_title, norm};
+    let (x, y) = (norm(&core_title(a)), norm(&core_title(b)));
+    !x.is_empty() && (x == y || base_title(a) == base_title(b))
+}
+
+/// The song's artist: "The Black Eyed Peas" is "Black Eyed Peas", "Macklemore & Ryan
+/// Lewis" is "Macklemore", but "Made famous by Katy Perry" isn't "Katy Perry".
+fn same_artist(wanted: &[String], got: &str) -> bool {
+    use crate::youtube::norm;
+    let bare = |s: String| s.strip_prefix("the").map(str::to_string).unwrap_or(s);
+    let whole = bare(norm(got));
+    let parts: Vec<String> = got.split(['&', ',', '/']).chain(got.split(" and ")).map(|p| bare(norm(p))).collect();
+    wanted.iter().map(|w| bare(w.clone())).any(|w| !w.is_empty() && (w == whole || parts.contains(&w)))
+}
+
+/// Karaoke labels and cover acts ("Made famous by …", "Rihanna Cover Band").
+pub fn cover_act(artist: &str) -> bool {
+    let a = crate::youtube::norm(artist);
+    ["madefamous", "coverband", "karaoke", "tribute", "inthestyleof", "originallyperformed", "coverversion", "singalong", "pianoplayers", "lullaby"]
+        .iter()
+        .any(|m| a.contains(m))
+}
+
 /// Which of the candidates is the song, best first. Wrong title, artist or a version the
 /// source didn't ask for (cover, instrumental, karaoke, sped up…) are left out, as are
 /// lengths far from the source's (a 30-second clip, an extended mix). Then the closest
@@ -681,28 +713,26 @@ pub fn featured_in_title(title: &str) -> Vec<String> {
 fn best_match(candidates: Vec<Track>, artist: &str, title: &str, duration: u32) -> Option<Track> {
     use crate::youtube::{core_title, norm, unwanted_version};
     let (main, mut also) = split_artists(artist);
+    let others = also.clone();
     also.extend(featured_in_title(title));
-    let want_title = norm(&core_title(title));
     let want_artist = norm(&main);
     let also: Vec<String> = also.iter().map(|a| norm(a)).filter(|a| !a.is_empty()).collect();
     candidates
         .into_iter()
         .filter(|t| {
-            let got_title = norm(&core_title(&t.title));
-            let title_ok = !want_title.is_empty() && (got_title == want_title || got_title.contains(&want_title) || want_title.contains(&got_title));
-            let artist_ok = want_artist.is_empty() || {
-                let a = norm(&t.artist.name);
-                !a.is_empty() && (want_artist.contains(&a) || a.contains(&want_artist))
-            };
+            let title_ok = same_title(title, &t.title);
+            let names: Vec<String> = std::iter::once(&main).chain(others.iter()).map(|a| norm(a)).collect();
+            let artist_ok = want_artist.is_empty() || same_artist(&names, &t.artist.name);
             let length_ok = duration == 0 || t.duration == 0 || (t.duration.abs_diff(duration) <= 8.max(duration / 25) && t.duration * 10 >= duration * 6);
-            title_ok && artist_ok && length_ok && !unwanted_version(title, &t.title)
+            title_ok && artist_ok && length_ok && !unwanted_version(title, &t.title) && !cover_act(&t.artist.name)
         })
         .min_by_key(|t| {
             // Credits the same featured artists (in its title or credits).
             let credited = norm(&t.title) + &t.featured.iter().map(|f| norm(&f.name)).collect::<String>();
             let missing = also.iter().filter(|a| !credited.contains(a.as_str())).count();
             let off = if duration == 0 || t.duration == 0 { 0 } else { t.duration.abs_diff(duration) / 3 };
-            (off, missing, std::cmp::Reverse(t.rank))
+            let inexact = norm(&core_title(&t.title)) != norm(&core_title(title));
+            (inexact, off, missing, std::cmp::Reverse(t.rank))
         })
 }
 
@@ -726,6 +756,17 @@ pub fn find_track(artist: &str, title: &str, duration: u32) -> Result<Option<Tra
     Ok(found)
 }
 
+/// What Deezer offers for a song (both searches), for the live matching test.
+#[cfg(test)]
+pub(crate) fn candidates_for_test(artist: &str, title: &str) -> Vec<Track> {
+    let (main, _) = split_artists(artist);
+    let core = crate::youtube::core_title(title);
+    let precise = format!("artist:\"{}\" track:\"{}\"", main.replace('"', ""), core.replace('"', ""));
+    let mut all = get::<List<DzTrack>>("/search/track", &[("q", &precise), ("limit", "25")]).map(tracks).unwrap_or_default();
+    all.extend(get::<List<DzTrack>>("/search/track", &[("q", &format!("{main} {core}")), ("limit", "25")]).map(tracks).unwrap_or_default());
+    all
+}
+
 /// Search results' songs, cleaned up: one entry per song (Deezer lists the same song from
 /// the album, the single, compilations and deluxe editions), the most played version of
 /// each, no 30-second clips when the full song is there, no covers/karaoke/instrumentals
@@ -733,7 +774,8 @@ pub fn find_track(artist: &str, title: &str, duration: u32) -> Result<Option<Tra
 /// popular first.
 pub fn rank_songs(q: &str, list: Vec<Track>) -> Vec<Track> {
     use crate::youtube::{core_title, norm, unwanted_version, words};
-    let list: Vec<Track> = list.into_iter().filter(|t| !unwanted_version(q, &t.title)).collect();
+    let asks_cover = cover_act(q);
+    let list: Vec<Track> = list.into_iter().filter(|t| !unwanted_version(q, &t.title) && (asks_cover || !cover_act(&t.artist.name))).collect();
     // One per (song, artist): keep the most played full-length version, at the place the
     // first one was.
     let mut out: Vec<Track> = vec![];
@@ -1349,6 +1391,22 @@ mod matching_tests {
         // Asked for the instrumental: it's allowed.
         let list = vec![t(1, "Ride Wit Me (Instrumental)", "Nelly", "1", 291, 300_000)];
         assert!(best_match(list, "Nelly", "Ride Wit Me (Instrumental)", 291).is_some());
+    }
+
+    #[test]
+    fn rejects_karaoke_labels_and_lookalike_titles() {
+        // What Deezer really offered for these (the friend's playlist).
+        let list = vec![t(1, "Fireworks", "Made famous by Katy Perry", "5", 229, 65_960), t(2, "Firework", "Katy Perry", "2", 30, 240_754)];
+        assert!(best_match(list, "Katy Perry", "Firework", 227).is_none());
+        let list = vec![t(3, "We Found Love (feat. Calvin Harris)", "Rihanna Cover Band", "6", 214, 226_265)];
+        assert!(best_match(list, "Rihanna, Calvin Harris", "We Found Love", 215).is_none());
+        // Spelled differently, still the same artist.
+        let list = vec![t(4, "TiK ToK", "Ke$ha", "7", 199, 900_000)];
+        assert!(best_match(list, "Kesha", "TiK ToK", 199).is_some());
+        let list = vec![t(5, "Run This Town", "JAŸ-Z", "8", 268, 786_242)];
+        assert!(best_match(list, "JAY-Z, Rihanna, Kanye West", "Run This Town", 267).is_some());
+        let list = vec![t(6, "Pump It", "The Black Eyed Peas", "9", 215, 921_100)];
+        assert!(best_match(list, "Black Eyed Peas", "Pump It", 213).is_some());
     }
 
     #[test]
