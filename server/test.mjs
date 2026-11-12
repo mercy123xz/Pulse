@@ -140,11 +140,19 @@ ip = "10.1.1.1";
 r = await call("POST", "/signup", { username: "earlybird", password: "correct horse", email: "early@example.com" });
 const early = r.data.token;
 await call("POST", "/signup", { username: "latecomer", password: "correct horse", email: "late@example.com" });
+// Fewer than 100 accounts so far: new ones are early supporters on their own.
+r = await call("GET", "/users/latecomer"); ok(r.data.user.supporter === true, "the first 100 accounts are supporters");
+env.DB.raw.exec("UPDATE users SET supporter = 0 WHERE username = 'latecomer'");
 env.DB.raw.exec("UPDATE users SET supporter = 1 WHERE username = 'earlybird'");
 r = await call("GET", "/supporters"); ok(r.status === 200 && r.data.supporters.includes("earlybird") && !r.data.supporters.includes("latecomer"), "supporters listed");
 r = await call("GET", "/users/earlybird"); ok(r.data.user.supporter === true, "badge on the profile");
 r = await call("GET", "/users/latecomer"); ok(r.data.user.supporter === false, "no badge for others");
 r = await call("GET", "/me", undefined, { token: early }); ok(r.data.user.supporter === true, "the app is told you're a supporter");
+// Past 100 accounts: no more automatic supporters.
+for (let i = 0; i < 100; i++) env.DB.raw.exec(`INSERT INTO users (username, email, pass_hash, pass_salt, bio, created) VALUES ('filler${i}', NULL, 'x', 'x', '', 1)`);
+ip = "10.9.9.9";
+r = await call("POST", "/signup", { username: "number101", password: "correct horse", email: "n101@example.com" });
+ok(r.status === 201 && r.data.user.supporter === false, "account 101+ isn't automatically a supporter");
 // song fixes
 env.DB.raw.exec("INSERT INTO song_fixes (id, duration, video, note) VALUES ('dz:1', 227, NULL, 'clip'), ('dz:2', NULL, 'abcDEF12345', 'wrong video'), ('dz:3', NULL, NULL, 'empty')");
 r = await call("GET", "/fixes?ids=dz:1,dz:2,dz:3,dz:4,bad id,dz:1");

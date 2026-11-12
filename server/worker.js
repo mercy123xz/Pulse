@@ -320,8 +320,14 @@ async function signup(c) {
     .run();
   await note(c, "signup", c.ip);
   const id = res.meta?.last_row_id;
+  // The first EARLY_SUPPORTERS accounts are Pulse's early supporters (badge, Founders theme,
+  // name in the app). More can be added by hand later (see README).
+  const early = await c.env.DB.prepare("UPDATE users SET supporter = 1 WHERE id = ? AND (SELECT COUNT(*) FROM users) <= ?")
+    .bind(id, EARLY_SUPPORTERS)
+    .run();
+  const supporter = (early.meta?.changes || 0) > 0;
   const token = await newSession(c, id);
-  return c.reply(201, { token, user: { username, bio: "", created: c.now, email: email || "" } });
+  return c.reply(201, { token, user: { username, bio: "", created: c.now, email: email || "", supporter } });
 }
 
 async function login(c) {
@@ -544,6 +550,9 @@ async function searchUsers(c) {
     .all();
   return c.reply(200, { users: rows.results || [] });
 }
+
+// How many of the first accounts become early supporters on their own.
+const EARLY_SUPPORTERS = 100;
 
 // Early supporters, oldest account first: thanked by name in the app.
 async function supporters(c) {
