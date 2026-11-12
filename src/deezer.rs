@@ -790,12 +790,13 @@ pub fn find_track(artist: &str, title: &str, duration: u32) -> Result<Option<Tra
     Ok(found)
 }
 
-/// Leaves out songs named after an artist who doesn't sing them ("Katy Perry Firework" by
+/// Leaves out songs named after an artist (one the search names) who doesn't sing them ("Katy Perry Firework" by
 /// Electronaut, "Firework (Salute to Katy Perry)"): tributes and covers. A real
 /// "(feat. …)" credit stays.
-fn without_tributes(list: Vec<Track>, artists: &[ArtistInfo]) -> Vec<Track> {
+fn without_tributes(q: &str, list: Vec<Track>, artists: &[ArtistInfo]) -> Vec<Track> {
     use crate::youtube::{core_title, norm};
-    let names: Vec<String> = artists.iter().take(3).map(|a| norm(&a.name)).filter(|n| n.len() >= 4).collect();
+    let typed = norm(q);
+    let names: Vec<String> = artists.iter().map(|a| norm(&a.name)).filter(|n| n.len() >= 4 && typed.contains(n.as_str())).collect();
     list.into_iter()
         .filter(|t| {
             let title = norm(&core_title(&t.title));
@@ -903,7 +904,7 @@ fn search_once(q: &str) -> Result<SearchResults, String> {
         (a.name.clone(), related, songs)
     });
     Ok(SearchResults {
-        tracks: without_tributes(rank_songs(q, tracks(t?)), &ranked),
+        tracks: without_tributes(q, rank_songs(q, tracks(t?)), &ranked),
         artists: ranked,
         around,
         users,
@@ -1474,7 +1475,7 @@ mod matching_tests {
             t(2, "Firework", "Katy Perry", "2", 227, 2),
             t(3, "Low (feat. Katy Perry)", "Flo Rida", "3", 200, 3),
         ];
-        let ids: Vec<String> = without_tributes(list, &artists).into_iter().map(|t| t.id).collect();
+        let ids: Vec<String> = without_tributes("firework katy perry", list, &artists).into_iter().map(|t| t.id).collect();
         assert_eq!(ids, vec!["dz:2", "dz:3"]);
     }
 
