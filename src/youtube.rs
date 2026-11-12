@@ -520,6 +520,20 @@ pub fn score(track: &Track, e: &SearchEntry) -> i32 {
     if title.contains("lyrics") || title.contains("lyric video") {
         s -= 2;
     }
+    // A song with swearing: the uncensored or the clean version, as Settings asks.
+    if track.explicit {
+        let clean = ["clean", "censored", "radio edit", "radio version", "clean version"]
+            .iter()
+            .any(|w| t_words.contains(&format!(" {w} ")) && !song.contains(&format!(" {w} ")));
+        let dirty = ["explicit", "uncensored", "dirty"].iter().any(|w| t_words.contains(&format!(" {w} ")));
+        s += match (crate::deezer::prefer_explicit(), clean, dirty) {
+            (true, true, _) => -30,
+            (true, false, true) => 5,
+            (false, true, _) => 20,
+            (false, false, true) => -15,
+            _ => 0,
+        };
+    }
     s
 }
 
@@ -749,6 +763,19 @@ mod tests {
 
     fn entry(id: &str, title: &str, secs: f64, channel: &str) -> SearchEntry {
         SearchEntry { id: id.into(), title: title.into(), duration: Some(secs), channel: Some(channel.into()), uploader: None, view_count: None }
+    }
+
+    #[test]
+    fn explicit_or_clean_as_asked() {
+        let mut t = song("Nelly", "Ride Wit Me", 291);
+        t.explicit = true;
+        let results = vec![entry("clean", "Nelly - Ride Wit Me (Clean)", 291.0, "Nelly"), entry("dirty", "Nelly - Ride Wit Me (Explicit)", 291.0, "Nelly")];
+        let _turn = crate::deezer::EXPLICIT_TEST.lock().unwrap_or_else(|e| e.into_inner());
+        crate::deezer::set_prefer_explicit(true);
+        assert_eq!(rank(&t, &results)[0].id, "dirty");
+        crate::deezer::set_prefer_explicit(false);
+        assert_eq!(rank(&t, &results)[0].id, "clean");
+        crate::deezer::set_prefer_explicit(true);
     }
 
     #[test]

@@ -90,6 +90,9 @@ pub fn settings_page(app: &mut App, ui: &mut Ui) {
         });
         ui.add_space(8.0);
     }
+    row(ui, tr("Explicit songs"), tr("Play the uncensored version of a song when there is one. Off: Pulse picks the clean version instead."), |ui| {
+        switch(ui, &mut s.explicit, tr("Explicit songs"));
+    });
     row(ui, tr("Gapless playback"), tr("Start the next song with no silence in between."), |ui| {
         switch(ui, &mut s.gapless, tr("Gapless playback"));
     });

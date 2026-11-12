@@ -636,6 +636,21 @@ pub fn chart_tracks(genre: u32) -> Result<Vec<Track>, String> {
     get::<List<DzTrack>>(&format!("/chart/{genre}/tracks"), &[("limit", "100")]).map(tracks)
 }
 
+static PREFER_EXPLICIT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+/// Whether the uncensored version of a song is wanted (Settings → Explicit songs).
+pub fn prefer_explicit() -> bool {
+    PREFER_EXPLICIT.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+pub fn set_prefer_explicit(on: bool) {
+    PREFER_EXPLICIT.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Tests that change the explicit setting take turns.
+#[cfg(test)]
+pub(crate) static EXPLICIT_TEST: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// "Nelly, City Spud" / "Nelly feat. City Spud" → ("Nelly", ["City Spud"]). Names
 /// joined by "&" stay together: that is often one act ("Simon & Garfunkel").
 pub fn split_artists(artists: &str) -> (String, Vec<String>) {
@@ -768,7 +783,9 @@ fn best_match(candidates: Vec<Track>, artist: &str, title: &str, duration: u32) 
             let missing = also.iter().filter(|a| !credited.contains(a.as_str())).count();
             let off = if duration == 0 || t.duration == 0 { 0 } else { t.duration.abs_diff(duration) / 3 };
             let inexact = norm(&core_title(&t.title)) != norm(&core_title(title));
-            (inexact, off, missing, std::cmp::Reverse(t.rank))
+            // The explicit or the clean version, as Settings asks (same length, same title).
+            let wrong_version = t.explicit != prefer_explicit();
+            (inexact, off, wrong_version, missing, std::cmp::Reverse(t.rank))
         })
 }
 
@@ -851,7 +868,9 @@ pub fn rank_songs(q: &str, list: Vec<Track>) -> Vec<Track> {
         match out.iter_mut().find(|o| key(o) == key(&t)) {
             Some(o) => {
                 let full = |x: &Track| x.duration >= 60;
-                if (full(&t), t.rank) > (full(o), o.rank) {
+                // The explicit or the clean version, as Settings asks.
+                let wanted = |x: &Track| x.explicit == prefer_explicit();
+                if (full(&t), wanted(&t), t.rank) > (full(o), wanted(o), o.rank) {
                     *o = t;
                 }
             }
@@ -1456,6 +1475,17 @@ mod matching_tests {
         ];
         // The featured version wins over the bare title; never the instrumental.
         assert_eq!(best_match(list, "Nelly, City Spud", "Ride Wit Me", 291).unwrap().id, "dz:3");
+        // Explicit wanted (the default): the uncensored version, even if less played.
+        let list = vec![
+            Track { explicit: false, ..t(9, "Ride Wit Me", "Nelly", "1", 291, 900_000) },
+            Track { explicit: true, ..t(10, "Ride Wit Me", "Nelly", "1", 291, 600_000) },
+        ];
+        let _turn = EXPLICIT_TEST.lock().unwrap_or_else(|e| e.into_inner());
+        set_prefer_explicit(true);
+        assert_eq!(best_match(list.clone(), "Nelly", "Ride Wit Me", 291).unwrap().id, "dz:10");
+        set_prefer_explicit(false);
+        assert_eq!(best_match(list, "Nelly", "Ride Wit Me", 291).unwrap().id, "dz:9");
+        set_prefer_explicit(true);
         // A 30-second clip isn't the song.
         let list = vec![t(5, "Firework", "Katy Perry", "2", 30, 900_000), t(6, "Firework", "Katy Perry", "2", 227, 800_000)];
         assert_eq!(best_match(list, "Katy Perry", "Firework", 228).unwrap().id, "dz:6");

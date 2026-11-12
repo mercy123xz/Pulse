@@ -171,6 +171,8 @@ pub struct Settings {
     pub scheme: String,
     /// The secret theme was found (by searching for it).
     pub found_secret_theme: bool,
+    /// Play the uncensored version of a song when there's one (off: the clean one).
+    pub explicit: bool,
 }
 
 impl Default for Settings {
@@ -210,6 +212,7 @@ impl Default for Settings {
             theme: "Default".into(),
             scheme: String::new(),
             found_secret_theme: false,
+            explicit: true,
         }
     }
 }

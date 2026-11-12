@@ -892,6 +892,7 @@ impl App {
         let (saved, load_note) = crate::backup::load(cc.storage.and_then(|s| s.get_string(STORAGE_KEY)), main_file.as_deref());
         let themes = crate::themes::list();
         crate::i18n::set_language(saved.settings.language);
+        crate::deezer::set_prefer_explicit(saved.settings.explicit);
         crate::perf::apply(saved.settings.perf_mode, &saved.settings.perf_keep);
         crate::theme::set_reduce_motion(saved.settings.reduce_motion || !crate::perf::on(crate::perf::Extra::Animations));
         let (tx, rx) = channel();
@@ -2071,6 +2072,7 @@ impl App {
     pub fn apply_settings(&mut self, before: &crate::settings::Settings, ctx: &egui::Context) {
         let s = self.saved.settings.clone();
         crate::i18n::set_language(s.language);
+        crate::deezer::set_prefer_explicit(s.explicit);
         self.apply_perf(ctx);
         if s.perf_mode != before.perf_mode {
             let msg = match s.perf_mode {
