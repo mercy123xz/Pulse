@@ -101,7 +101,7 @@ h2 em { font-style: normal; color: var(--accent-soft); }
 .eyebrow i b { width: 2.5px; border-radius: 2px; background: var(--accent-soft); height: 50%; }
 .eyebrow i b:nth-child(2) { height: 100%; } .eyebrow i b:nth-child(3) { height: 70%; } .eyebrow i b:nth-child(4) { height: 35%; }
 h1 { font-size: clamp(3.2rem, 8.2vw, 7.4rem); line-height: .92; letter-spacing: -.055em; margin: 0 0 1.6rem; font-weight: 700; }
-h1 .h-line { display: block; overflow: hidden; padding-bottom: .06em; margin-bottom: -.06em; }
+h1 .h-line { display: block; overflow: hidden; padding: .04em 0 .2em; margin: -.04em 0 -.2em; }
 h1 .h-line > span { display: inline-block; }
 h1 .h-line:last-child > span { color: transparent; background: linear-gradient(95deg, #ddd6fe, var(--accent-soft) 45%, #8b5cf6); -webkit-background-clip: text; background-clip: text; }
 .hero .lede-x { font-size: clamp(1.08rem, 1.5vw, 1.28rem); max-width: 31rem; color: var(--muted); }
@@ -125,11 +125,11 @@ h1 .h-line:last-child > span { color: transparent; background: linear-gradient(9
 .stage canvas.grabbing { cursor: grabbing; }
 .stage canvas.ready { opacity: 1; }
 .stage canvas.ready ~ img { opacity: 0; }
-.stage-hint { position: absolute; left: 0; right: 0; bottom: 4%; margin: 0; text-align: center; font-size: .75rem; letter-spacing: .12em; text-transform: uppercase; color: var(--faint); opacity: 0; transition: opacity 1s ease .8s; pointer-events: none; }
+.stage-hint { position: absolute; z-index: 2; left: 0; right: 0; bottom: 7%; margin: 0; text-align: center; font-size: .75rem; letter-spacing: .12em; text-transform: uppercase; color: var(--faint); opacity: 0; transition: opacity 1s ease .8s; pointer-events: none; }
 .stage canvas.ready ~ .stage-hint { opacity: 1; }
 @media (min-width: 1000px) {
   .hero-grid { min-height: 34rem; align-items: center; }
-  .stage { position: absolute; z-index: 1; top: 0; bottom: 0; right: max(-8vw, calc((100vw - var(--wrap)) / -2 - 6vw)); width: min(66vw, 940px); height: min(66vw, 940px); margin: auto 0; aspect-ratio: auto; }
+  .stage { position: absolute; z-index: 1; top: 0; bottom: 0; right: max(-6vw, calc((100vw - var(--wrap)) / -2 - 4vw)); width: min(52vw, 760px, 86svh); height: min(52vw, 760px, 86svh); margin: auto 0; aspect-ratio: auto; }
 }
 @media (prefers-reduced-motion: reduce) { .stage img, .stage canvas, .stage-hint { transition: none; } }
 
@@ -155,30 +155,53 @@ section { position: relative; padding: clamp(5rem, 11vw, 9rem) 0; }
 .points strong { color: var(--text); font-weight: 600; }
 .shot { border-radius: var(--radius); border: 1px solid var(--border); overflow: hidden; background: var(--surface); }
 
-/* ---------- 01 Listen: the player demo ---------- */
-.pd { position: relative; margin: 0; padding: 1.4rem; border-radius: 26px; background: linear-gradient(180deg, color-mix(in srgb, var(--surface) 92%, transparent), var(--bg-2)); border: 1px solid var(--border);
-  box-shadow: 0 50px 120px -40px rgba(0, 0, 0, .8), inset 0 1px 0 rgba(255, 255, 255, .04); max-width: 520px; margin-inline: auto; width: 100%; }
-.pd-tag { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin: 0 0 1.1rem; color: var(--faint); font-size: .74rem; letter-spacing: .12em; text-transform: uppercase; }
+/* ---------- 01 Listen: the player demo, drawn like the real app ---------- */
+@media (min-width: 980px) { .split.wide { grid-template-columns: minmax(0, 4fr) minmax(0, 7fr); } }
+.pd { margin: 0; width: 100%; }
+.pd-tag { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin: 0 0 .8rem; color: var(--faint); font-size: .74rem; letter-spacing: .12em; text-transform: uppercase; }
 .pd-tag span:last-child { letter-spacing: 0; text-transform: none; font-size: .8rem; }
-.pd-top { display: grid; grid-template-columns: 112px 1fr; gap: 1.2rem; align-items: center; }
-/* Cover art made for the demo: no real album art. */
-.pd-art { position: relative; aspect-ratio: 1; border-radius: 16px; overflow: hidden; background: radial-gradient(120% 90% at 20% 10%, #c4b5fd, #7c3aed 45%, #2e1065 100%); box-shadow: 0 20px 40px -14px rgba(124, 58, 237, .6); }
-.pd-art i { position: absolute; bottom: 18%; width: 9%; border-radius: 4px; background: rgba(255, 255, 255, .92); transform-origin: bottom; transition: transform .25s var(--ease); }
+@media (max-width: 520px) { .pd-tag span:last-child { display: none; } }
+.pd-app { --bg: #0b0b0e; --side: #0f0f13; --player: #0f0f13; --card: #16161b; --hl: #1d1d24; --hl2: #24242d; --bd: #2c2c36; --tx: #ededf1; --sub: #9696a4; --faint: #80808e; --btn: #7c3aed; --act: #a78bfa; --r: 10px; --g1: #a78bfa; --g2: #4c1d95; }
+.d-app.pd-app { height: 470px; }
+html[data-theme="light"] .pd-app { --bg: #fafafc; --side: #f3f3f7; --player: #f3f3f7; --card: #ffffff; --hl: #e8e8ee; --hl2: #dedee6; --bd: #d4d4de; --tx: #14141a; --sub: #4e4e5c; --faint: #646472; --act: #6d28d9; }
+.pd-app .d-glow { opacity: .45; }
+.pd.playing .pd-app .d-glow { opacity: .7; }
+.pd-app .d-body { grid-template-columns: 176px minmax(0, 1fr); }
+.pd-app .d-nav { cursor: default; }
+.pd-app .d-search span { flex: 1; color: var(--faint); white-space: nowrap; }
+.pd-app .d-avatar { margin-left: auto; }
+.pd-app .d-acts .d-like { width: 38px; height: 38px; }
+/* Cover art made for the demo (no real album art): Pulse's bars on violet. */
+.pd-art { position: relative; display: inline-block; flex: none; overflow: hidden; width: 34px; height: 34px; border-radius: calc(var(--r) * .4); background: radial-gradient(120% 90% at 20% 10%, #c4b5fd, #7c3aed 45%, #2e1065 100%); }
+.pd-art.pd-cover { width: 118px; height: 118px; border-radius: calc(var(--r) * .8); box-shadow: 0 18px 40px rgba(76, 29, 149, .45); }
+.pd-art.now { width: 48px; height: 48px; border-radius: calc(var(--r) * .5); }
+.pd-art i { position: absolute; bottom: 20%; width: 9%; border-radius: 4px; background: rgba(255, 255, 255, .92); transform-origin: bottom; transition: transform .2s var(--ease); }
 .pd-art i:nth-child(1) { left: 18%; height: 22%; } .pd-art i:nth-child(2) { left: 32%; height: 42%; } .pd-art i:nth-child(3) { left: 46%; height: 60%; } .pd-art i:nth-child(4) { left: 60%; height: 36%; } .pd-art i:nth-child(5) { left: 74%; height: 16%; }
-.pd-title { margin: 0; font: 650 1.6rem/1.1 var(--display); letter-spacing: -.03em; }
-.pd-artist { margin: .25rem 0 0; color: var(--muted); }
-.pd-wave { display: block; width: 100%; height: 86px; margin: 1.4rem 0 .4rem; cursor: pointer; touch-action: none; }
-.pd-time { display: flex; justify-content: space-between; color: var(--faint); font-size: .78rem; font-variant-numeric: tabular-nums; }
-.pd-ctrls { display: flex; align-items: center; justify-content: center; gap: 1.4rem; margin-top: .8rem; }
-.pd-btn { display: grid; place-items: center; width: 46px; height: 46px; border-radius: 50%; border: 0; background: none; color: var(--muted); cursor: pointer; transition: color .2s, background-color .2s, transform .3s var(--ease); }
-.pd-btn:hover { color: var(--text); background: var(--surface-2); }
-.pd-btn.on { color: var(--accent-soft); }
-.pd-play { width: 64px; height: 64px; background: var(--text); color: var(--bg); }
-.pd-play:hover { background: var(--text); color: var(--bg); transform: scale(1.06); }
-.pd-play .i-pause, .pd.playing .pd-play .i-play { display: none; }
-.pd.playing .pd-play .i-pause { display: block; }
-.pd.loading .pd-play { opacity: .6; }
+.pd .i-pause, .pd.playing .i-play { display: none; }
+.pd.playing .i-pause { display: block; }
+.pd.loading .pd-toggle { opacity: .6; }
+.pd #pd-row .d-eq { display: none; }
+.pd.playing #pd-row .d-eq { display: inline-flex; }
+.pd.playing .pd-num { display: none; }
+.pd.playing #pd-row .d-t b { color: var(--act); }
+.pd-seek { position: relative; cursor: pointer; touch-action: none; transition: height .15s; }
+.pd-seek:hover, .pd-seek:focus-visible { height: 6px; }
+.pd-seek:focus-visible { outline: 2px solid var(--act); outline-offset: 4px; }
+.pd-app .d-bar i { transition: none; }
+#pd-loop[aria-pressed="true"] { color: var(--act); }
+.pd-app .d-ctrls button:disabled { opacity: .35; }
+.pd-vol { width: 96px; accent-color: var(--act); }
 .pd-status { margin: .9rem 0 0; text-align: center; color: var(--faint); font-size: .8rem; min-height: 1.2em; }
+@media (max-width: 700px) {
+  .d-app.pd-app { height: 430px; }
+  .pd-app .d-body { grid-template-columns: minmax(0, 1fr); }
+  .pd-app .d-side, .pd-app .d-vol, .pd-app .d-now .d-t, .pd-app .d-now .d-like, .pd-app .d-al, .pd-app .d-th span:nth-child(3), .pd-app .d-search kbd { display: none; }
+  .pd-app .d-player { grid-template-columns: auto minmax(0, 1fr); padding: 0 12px; }
+  .pd-app .d-th, .pd-app .d-rowplay { grid-template-columns: 26px minmax(0, 1fr) 44px; }
+  .pd-app .d-search { width: auto; flex: 1; }
+  .pd-app .d-hero { gap: 14px; }
+  .pd-art.pd-cover { width: 92px; height: 92px; }
+}
 
 /* ---------- 02 Performance: big numbers ---------- */
 .perf-grid { display: grid; gap: 3rem; }
@@ -218,12 +241,21 @@ section { position: relative; padding: clamp(5rem, 11vw, 9rem) 0; }
 @media (max-width: 700px) { .panels .shot { overflow-x: auto; mask-image: none; -webkit-mask-image: none; } .panels .shot img { width: 760px; max-width: none; } }
 
 /* ---------- 05 Made for you: Orbits ---------- */
-.orbit { --turn: 0deg; position: relative; aspect-ratio: 1; width: min(100%, 500px); margin-inline: auto; }
+.orbit { position: relative; aspect-ratio: 1; width: min(100%, 500px); margin-inline: auto; }
 .orbit svg { width: 100%; height: 100%; overflow: visible; }
 .orbit .ring { fill: none; stroke: var(--border); stroke-width: 1; }
-.orbit .spin { transform-origin: 250px 250px; transform: rotate(var(--turn)); }
-.orbit .spin.b { transform: rotate(calc(var(--turn) * -0.6)); }
-.orbit .spin.c { transform: rotate(calc(var(--turn) * 0.35)); }
+.orbit .spin { transform-origin: 250px 250px; transform-box: view-box; }
+/* Like real orbits: everything goes the same way, and the closer in, the faster. */
+@media (prefers-reduced-motion: no-preference) {
+  .orbit .spin { animation: orbit 26s linear infinite paused; }
+  .orbit .spin.b { animation-duration: 48s; animation-delay: -12s; }
+  .orbit .spin.c { animation-duration: 82s; animation-delay: -30s; }
+  .orbit.on .spin { animation-play-state: running; }
+  .orbit .core { animation: core-glow 4s ease-in-out infinite alternate paused; transform-origin: 250px 250px; transform-box: view-box; }
+  .orbit.on .core { animation-play-state: running; }
+  @keyframes orbit { to { transform: rotate(360deg); } }
+  @keyframes core-glow { to { filter: drop-shadow(0 0 22px rgba(167, 139, 250, .55)); } }
+}
 .orbit .dot { fill: var(--surface-2); stroke: var(--border); }
 .orbit .dot.hot { fill: var(--accent-soft); stroke: none; filter: drop-shadow(0 0 12px rgba(167, 139, 250, .8)); }
 .orbit-label { position: absolute; left: 0; right: 0; bottom: 0; text-align: center; color: var(--faint); font-size: .8rem; letter-spacing: .1em; text-transform: uppercase; }
@@ -630,35 +662,58 @@ html[data-intro="intro"] .hero-grid > * { opacity: 0; transform: translateY(18px
   </section>
 
   <section id="listen" aria-labelledby="listen-title">
-    <div class="wrap split">
+    <div class="wrap split wide">
       <div>
         <p class="label" data-reveal><b>01</b>Listen</p>
         <h2 id="listen-title" data-reveal>Press play. Hear the <em>whole</em> song.</h2>
         <p class="lede-x" data-reveal>Search any artist and every song plays from start to finish: no previews, no ads between tracks. When your queue runs out, Autoplay keeps going with music like it.</p>
-        <p class="note" data-reveal>The player on this page is a small demo built into the website, so you can hear what it's like. It plays the beat from Pulse's launch video. The real Pulse is a Windows app.</p>
+        <p class="note" data-reveal>The player here is a copy of Pulse's look, built into this website so you can try it. It really plays: the beat from Pulse's launch video, in your browser. The real Pulse is a Windows app.</p>
       </div>
       <figure class="pd" id="pd" aria-label="Website demo of a music player" data-reveal>
-        <figcaption class="pd-tag"><span>Website demo</span><span>Not the app itself</span></figcaption>
-        <div class="pd-top">
-          <div class="pd-art" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
-          <div>
-            <p class="pd-title">back2back</p>
-            <p class="pd-artist">prod. jissa · from the Pulse launch video</p>
+        <figcaption class="pd-tag"><span>Website demo · a copy of Pulse's look</span><span>Plays in your browser</span></figcaption>
+        <div class="d-app pd-app is-glow" role="group" aria-label="Demo player">
+          <div class="d-body">
+            <nav class="d-side" aria-label="Demo pages">
+              <div class="d-brand"><span class="d-logo"><i></i><i></i><i></i><i></i></span><b>Pulse</b></div>
+              <p class="d-label">Browse</p>
+              <span class="d-nav"><svg class="" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="currentColor" stroke="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 10.4 12 3.5l8.5 6.9V21h-6v-6h-5v6h-6z"/></svg><span>Home</span></span>
+              <span class="d-nav"><svg class="" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16M7 16v-5m5 5V6m5 10v-8"/></svg><span>Charts</span></span>
+              <p class="d-label">Library</p>
+              <span class="d-nav"><span class="d-likedart"><svg class="" viewBox="0 0 24 24" width="12" height="12" aria-hidden="true" fill="currentColor" stroke="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20s-7.5-4.6-7.5-10.2A4.3 4.3 0 0 1 12 7.2a4.3 4.3 0 0 1 7.5 2.6C19.5 15.4 12 20 12 20Z"/></svg></span><span>Liked Songs</span><em id="pd-likes">0</em></span>
+              <span class="d-nav"><svg class="" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 7.5V12l3 2M20.5 12a8.5 8.5 0 1 1-17 0 8.5 8.5 0 0 1 17 0"/></svg><span>Recently Played</span></span>
+              <span class="d-nav on"><svg class="" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h12M4 11h12M4 16h7m4 0 5 3v-6z"/></svg><span>Queue</span></span>
+            </nav>
+            <div class="d-main">
+              <div class="d-glow" aria-hidden="true"></div>
+              <div class="d-top" aria-hidden="true">
+                <span class="d-ib"><svg class="" viewBox="0 0 24 24" width="17" height="17" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></span><span class="d-ib"><svg class="" viewBox="0 0 24 24" width="17" height="17" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg></span>
+                <span class="d-search"><svg class="" viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m20 20-4.4-4.4M17.2 10.6a6.6 6.6 0 1 1-13.2 0 6.6 6.6 0 0 1 13.2 0"/></svg><span>Search songs, ...</span><kbd>Ctrl K</kbd></span>
+                <span class="d-avatar"><svg class="" viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8m-7.5 8a7.5 7.5 0 0 1 15 0"/></svg></span>
+              </div>
+              <div class="d-view">
+                <div class="d-hero"><span class="pd-art pd-cover" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span><div><small>SINGLE</small><h3>back2back</h3><p class="d-sub"><b>prod. jissa</b> · from the Pulse launch video</p></div></div>
+                <div class="d-acts"><button type="button" class="d-bigplay pd-toggle" aria-label="Play"><svg class="i-play" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="currentColor" stroke="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 5.2v13.6L19 12z"/></svg><svg class="i-pause" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="currentColor" stroke="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7.5 5h3.2v14H7.5zm5.8 0h3.2v14h-3.2z"/></svg></button><button type="button" class="d-like pd-like" aria-pressed="false" aria-label="Like back2back"><svg class="" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20s-7.5-4.6-7.5-10.2A4.3 4.3 0 0 1 12 7.2a4.3 4.3 0 0 1 7.5 2.6C19.5 15.4 12 20 12 20Z"/></svg></button></div>
+                <div class="d-table">
+                  <div class="d-th" aria-hidden="true"><span>#</span><span>Title</span><span>Album</span><span><svg class="" viewBox="0 0 24 24" width="13" height="13" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 7.5V12l3 2M20.5 12a8.5 8.5 0 1 1-17 0 8.5 8.5 0 0 1 17 0"/></svg></span></div>
+                  <div class="d-row" id="pd-row"><button type="button" class="d-rowplay pd-toggle" aria-label="Play back2back"><span class="d-n"><span class="pd-num">1</span><span class="d-eq"><i></i><i></i><i></i></span></span><span class="d-tt"><span class="pd-art" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span><span class="d-t"><b>back2back</b><small>prod. jissa</small></span></span><span class="d-al">Pulse launch video</span><span class="d-len" id="pd-len">0:17</span></button><button type="button" class="d-like pd-like" aria-pressed="false" aria-label="Like back2back"><svg class="" viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20s-7.5-4.6-7.5-10.2A4.3 4.3 0 0 1 12 7.2a4.3 4.3 0 0 1 7.5 2.6C19.5 15.4 12 20 12 20Z"/></svg></button></div>
+                </div>
+              </div>
+            </div>
           </div>
-        </div>
-        <canvas class="pd-wave" id="pd-wave" role="slider" tabindex="0" aria-label="Position in the track" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-valuetext="0:00"></canvas>
-        <div class="pd-time"><span id="pd-cur">0:00</span><span id="pd-dur">0:00</span></div>
-        <div class="pd-ctrls">
-          <button class="pd-btn" id="pd-restart" type="button" aria-label="Back to the start">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M19 5.2 9 12l10 6.8zM4.8 5H7v14H4.8z"/></svg>
-          </button>
-          <button class="pd-btn pd-play" id="pd-play" type="button" aria-label="Play">
-            <svg class="i-play" width="24" height="24" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 4.6v14.8a1 1 0 0 0 1.5.86l11.6-7.4a1 1 0 0 0 0-1.72L9.5 3.74A1 1 0 0 0 8 4.6z"/></svg>
-            <svg class="i-pause" width="24" height="24" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6.5 4H10v16H6.5zM14 4h3.5v16H14z"/></svg>
-          </button>
-          <button class="pd-btn" id="pd-loop" type="button" aria-label="Repeat" aria-pressed="true">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m17 2 4 4-4 4M3 11v-1a4 4 0 0 1 4-4h14M7 22l-4-4 4-4M21 13v1a4 4 0 0 1-4 4H3"/></svg>
-          </button>
+          <div class="d-player">
+            <div class="d-now"><span class="pd-art now" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span><span class="d-t"><b>back2back</b><small>prod. jissa</small></span><button type="button" class="d-like pd-like" aria-pressed="false" aria-label="Like back2back"><svg class="" viewBox="0 0 24 24" width="17" height="17" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20s-7.5-4.6-7.5-10.2A4.3 4.3 0 0 1 12 7.2a4.3 4.3 0 0 1 7.5 2.6C19.5 15.4 12 20 12 20Z"/></svg></button></div>
+            <div class="d-mid">
+              <div class="d-ctrls">
+                <button type="button" aria-label="Shuffle" disabled><svg class="" viewBox="0 0 24 24" width="17" height="17" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 7.5h3c4.5 0 6.5 9 11 9h3M3.5 16.5h3c1.6 0 2.8-1.2 3.8-2.8m3.4-5.4c1-1.6 2.2-2.8 3.8-2.8h3m-2.2-2.2 2.2 2.2-2.2 2.2m0 6.6 2.2 2.2-2.2 2.2"/></svg></button>
+                <button type="button" id="pd-restart" aria-label="Back to the start"><svg class="" viewBox="0 0 24 24" width="17" height="17" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 5.5v13L8 12zM6 5v14"/></svg></button>
+                <button type="button" class="d-pp pd-toggle" id="pd-play" aria-label="Play"><svg class="i-play" viewBox="0 0 24 24" width="17" height="17" aria-hidden="true" fill="currentColor" stroke="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 5.2v13.6L19 12z"/></svg><svg class="i-pause" viewBox="0 0 24 24" width="17" height="17" aria-hidden="true" fill="currentColor" stroke="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7.5 5h3.2v14H7.5zm5.8 0h3.2v14h-3.2z"/></svg></button>
+                <button type="button" aria-label="Next" disabled><svg class="" viewBox="0 0 24 24" width="17" height="17" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 5.5v13L16 12zM18 5v14"/></svg></button>
+                <button type="button" id="pd-loop" aria-label="Repeat" aria-pressed="true"><svg class="" viewBox="0 0 24 24" width="17" height="17" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 11V9.5a3 3 0 0 1 3-3h12l-2.5-2.5m2.5 9V14.5a3 3 0 0 1-3 3h-12l2.5 2.5"/></svg></button>
+              </div>
+              <div class="d-prog"><span id="pd-cur">0:00</span><span class="d-bar pd-seek" id="pd-seek" role="slider" tabindex="0" aria-label="Position in the track" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-valuetext="0:00"><i id="pd-fill" style="width:0%"></i></span><span id="pd-dur">0:17</span></div>
+            </div>
+            <div class="d-vol"><svg class="" viewBox="0 0 24 24" width="17" height="17" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9.5v5h3.5L12 18.5v-13L7.5 9.5zm11.5-1.8a5 5 0 0 1 0 8.6"/></svg><input class="pd-vol" id="pd-vol" type="range" min="0" max="100" value="80" aria-label="Volume"></div>
+          </div>
         </div>
         <p class="pd-status" id="pd-status" aria-live="polite">Press play to load the track (1.8 MB).</p>
       </figure>
@@ -779,8 +834,8 @@ html[data-intro="intro"] .hero-grid > * { opacity: 0; transform: translateY(18px
           <circle class="ring" cx="250" cy="250" r="95"/><circle class="ring" cx="250" cy="250" r="160"/><circle class="ring" cx="250" cy="250" r="225"/>
           <g class="spin"><circle class="dot hot" cx="250" cy="155" r="9"/><circle class="dot" cx="345" cy="250" r="6"/><circle class="dot" cx="183" cy="317" r="7"/></g>
           <g class="spin b"><circle class="dot" cx="410" cy="250" r="10"/><circle class="dot hot" cx="137" cy="137" r="7"/><circle class="dot" cx="250" cy="410" r="8"/><circle class="dot" cx="113" cy="330" r="5"/></g>
-          <g class="spin c"><circle class="dot" cx="250" cy="25" r="7"/><circle class="dot" cx="455" cy="340" r="9"/><circle class="dot hot" cx="60" cy="370" r="6"/><circle class="dot" cx="88" cy="140" r="5"/><circle class="dot" cx="410" cy="95" r="6"/></g>
-          <rect x="205" y="205" width="90" height="90" rx="24" fill="url(#core)"/>
+          <g class="spin c"><circle class="dot" cx="250" cy="25" r="7"/><circle class="dot" cx="455" cy="340" r="9"/><circle class="dot hot" cx="60" cy="370" r="6"/><circle class="dot" cx="91" cy="91" r="5"/><circle class="dot" cx="410" cy="95" r="6"/></g>
+          <rect class="core" x="205" y="205" width="90" height="90" rx="24" fill="url(#core)"/>
           <g fill="#fff"><rect x="222" y="241" width="7" height="18" rx="3.5"/><rect x="234" y="230" width="7" height="40" rx="3.5"/><rect x="246.5" y="222" width="7" height="56" rx="3.5"/><rect x="259" y="235" width="7" height="30" rx="3.5"/><rect x="271" y="244" width="7" height="12" rx="3.5"/></g>
         </svg>
         <span class="orbit-label">Your most-played artists, at the center of it</span>

@@ -42,7 +42,7 @@
   }
 
   // ------------------------------------------------------------------ scroll-linked bits
-  // The big screenshot leans back until it's in view; the Orbits turn as you scroll.
+  // The big screenshot leans back until it's in view.
   var show = $("#showcase"), orbit = $("#orbit"), vs = $(".vs");
   var ticking = false;
   var onScroll = function () {
@@ -52,15 +52,15 @@
       var r = show.getBoundingClientRect();
       show.style.setProperty("--p", clamp((vh - r.top) / (vh * 0.75), 0, 1).toFixed(3));
     }
-    if (orbit) {
-      var o = orbit.getBoundingClientRect();
-      orbit.style.setProperty("--turn", ((vh - o.top) * 0.08).toFixed(2) + "deg");
-    }
   };
   if (!still) {
     addEventListener("scroll", function () { if (!ticking) { ticking = true; requestAnimationFrame(onScroll); } }, { passive: true });
     addEventListener("resize", onScroll);
     onScroll();
+  }
+  // The Orbits go round only while they're on screen.
+  if (orbit && "IntersectionObserver" in window) {
+    new IntersectionObserver(function (es) { orbit.classList.toggle("on", es[0].isIntersecting); }).observe(orbit);
   }
   if (vs && "IntersectionObserver" in window) {
     var vo = new IntersectionObserver(function (es) { if (es[0].isIntersecting) { vs.classList.add("seen"); vo.disconnect(); } }, { threshold: 0.35 });
@@ -118,7 +118,8 @@
   ];
   var gains = [0, 0, 0, 0, 0, 0];
   var SRC = "media/pulse-launch.mp4";
-  var ctx = null, buffer = null, filters = [], pre = null, analyser = null, node = null;
+  var ctx = null, buffer = null, filters = [], pre = null, analyser = null, node = null, volume = null, wantVolume = 0.8;
+  var setVolume = function (v) { wantVolume = v; if (volume) volume.gain.setTargetAtTime(v * v, ctx.currentTime, 0.02); };
   var playing = false, loading = false, startedAt = 0, offset = 0, loop = true;
   var listeners = [];
   var emit = function () { listeners.forEach(function (f) { f(); }); };
@@ -161,9 +162,11 @@
         analyser.fftSize = 256;
         analyser.smoothingTimeConstant = 0.78;
         filters.reduce(function (a, f) { a.connect(f); return f; }, pre).connect(analyser);
-        analyser.connect(ctx.destination);
+        volume = ctx.createGain();
+        volume.gain.value = wantVolume * wantVolume;
+        analyser.connect(volume);
+        volume.connect(ctx.destination);
         applyGains();
-        peaks = peaksOf(b, 96);
         loading = false;
         emit();
       })
@@ -194,127 +197,95 @@
   var launch = document.getElementById("launch");
   if (launch) launch.addEventListener("play", function () { if (!launch.muted && playing) pause(); });
 
-  // A waveform from the real track: the loudest point in each slice.
-  var peaks = null;
-  function peaksOf(b, n) {
-    var d = b.getChannelData(0), size = Math.floor(d.length / n), out = [], max = 0;
-    for (var i = 0; i < n; i++) {
-      var m = 0;
-      for (var j = i * size, e = j + size; j < e; j += 16) { var v = Math.abs(d[j]); if (v > m) m = v; }
-      out.push(m);
-      if (m > max) max = m;
-    }
-    return out.map(function (v) { return Math.pow(v / (max || 1), 0.8); });
-  }
-
   // ------------------------------------------------------------------ the player demo
+  // Drawn like Pulse's own window (an album page and the player bar), and it really plays.
   var pd = $("#pd");
   if (pd) {
-    var canvas = $("#pd-wave"), g = canvas.getContext("2d");
-    var cur = $("#pd-cur"), dur = $("#pd-dur"), status = $("#pd-status"), playBtn = $("#pd-play"), loopBtn = $("#pd-loop");
-    var bars = [].slice.call(pd.querySelectorAll(".pd-art i"));
-    // Before the track loads: a quiet, even shape (nothing here is a real waveform yet).
-    var idle = [];
-    for (var k = 0; k < 96; k++) idle.push(0.25 + 0.12 * Math.sin(k * 0.45) * Math.sin(k * 0.13));
-    var bins = null, live = new Array(96).fill(0);
-    var styles = function () {
-      var cs = getComputedStyle(document.documentElement);
-      return { on: cs.getPropertyValue("--accent-soft").trim() || "#a78bfa", off: cs.getPropertyValue("--border").trim() || "#2c2c36", text: cs.getPropertyValue("--text").trim() };
+    var cur = $("#pd-cur"), dur = $("#pd-dur"), len = $("#pd-len"), status = $("#pd-status"), loopBtn = $("#pd-loop");
+    var bar = $("#pd-seek"), fill = $("#pd-fill"), vol = $("#pd-vol"), likesNum = $("#pd-likes");
+    var toggles = [].slice.call(pd.querySelectorAll(".pd-toggle")), likes = [].slice.call(pd.querySelectorAll(".pd-like"));
+    var covers = [].slice.call(pd.querySelectorAll(".pd-art"));
+    var bins = null, frame = 0, liked = false;
+    var paint = function () {
+      var p = position(), d = duration();
+      cur.textContent = fmt(p);
+      fill.style.width = (d ? (p / d) * 100 : 0).toFixed(2) + "%";
+      bar.setAttribute("aria-valuenow", String(d ? Math.round((p / d) * 100) : 0));
+      bar.setAttribute("aria-valuetext", fmt(p) + " of " + fmt(d || 17));
     };
-    var colors = styles();
-    new MutationObserver(function () { colors = styles(); draw(); }).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
-    var size = function () {
-      var r = canvas.getBoundingClientRect(), dpr = Math.min(devicePixelRatio || 1, 2);
-      canvas.width = Math.round(r.width * dpr);
-      canvas.height = Math.round(r.height * dpr);
-      g.setTransform(dpr, 0, 0, dpr, 0, 0);
-      draw();
-    };
-    var draw = function () {
-      var w = canvas.clientWidth, h = canvas.clientHeight;
-      if (!w) return;
-      g.clearRect(0, 0, w, h);
-      var shape = peaks || idle, n = shape.length, gap = 2, bw = (w - gap * (n - 1)) / n;
-      var done = duration() ? position() / duration() : 0;
-      if (analyser && playing) {
+    var tickLoop = function () {
+      paint();
+      // The cover's bars move with the music.
+      if (analyser && !still) {
         bins = bins || new Uint8Array(analyser.frequencyBinCount);
         analyser.getByteFrequencyData(bins);
+        covers.forEach(function (c) {
+          [].forEach.call(c.children, function (b, i) { b.style.transform = "scaleY(" + (0.7 + (bins[2 + i * 6] / 255) * 0.6).toFixed(3) + ")"; });
+        });
       }
-      for (var i = 0; i < n; i++) {
-        var target = playing && bins ? bins[Math.floor((i / n) * bins.length * 0.7)] / 255 : 0;
-        live[i] += (target - live[i]) * 0.35;
-        var v = shape[i] * 0.8 + live[i] * 0.35;
-        var bh = Math.max(3, Math.min(h, v * h));
-        g.fillStyle = i / n < done ? colors.on : colors.off;
-        g.globalAlpha = i / n < done ? 1 : 0.9;
-        var x = i * (bw + gap), y = (h - bh) / 2;
-        if (g.roundRect) { g.beginPath(); g.roundRect(x, y, bw, bh, Math.min(bw / 2, 2)); g.fill(); } else g.fillRect(x, y, bw, bh);
-      }
-      g.globalAlpha = 1;
-    };
-    var frame = 0;
-    var loopDraw = function () {
-      draw();
-      cur.textContent = fmt(position());
-      var pct = duration() ? Math.round((position() / duration()) * 100) : 0;
-      canvas.setAttribute("aria-valuenow", String(pct));
-      canvas.setAttribute("aria-valuetext", fmt(position()) + " of " + fmt(duration()));
-      // The cover's bars move with the music.
-      if (!still && bins) {
-        bars.forEach(function (b, i) { b.style.transform = "scaleY(" + (0.75 + (bins[2 + i * 6] / 255) * 0.55).toFixed(3) + ")"; });
-      }
-      frame = playing ? requestAnimationFrame(loopDraw) : 0;
+      frame = playing ? requestAnimationFrame(tickLoop) : 0;
     };
     listeners.push(function () {
       pd.classList.toggle("playing", playing);
       pd.classList.toggle("loading", loading);
-      playBtn.setAttribute("aria-label", playing ? "Pause" : "Play");
-      dur.textContent = fmt(duration());
-      cur.textContent = fmt(position());
+      $("#pd-row").classList.toggle("now", playing);
+      toggles.forEach(function (t) { t.setAttribute("aria-label", (playing ? "Pause" : "Play") + (t.classList.contains("d-rowplay") ? " back2back" : "")); });
+      if (buffer) { dur.textContent = fmt(duration()); len.textContent = fmt(duration()); }
       status.textContent = loading ? "Loading the track…" : playing ? "Playing in your browser." : buffer ? "Paused." : "Press play to load the track (1.8 MB).";
-      if (!playing) bars.forEach(function (b) { b.style.transform = ""; });
-      if (playing && !frame) frame = requestAnimationFrame(loopDraw);
-      draw();
+      if (!playing) covers.forEach(function (c) { [].forEach.call(c.children, function (b) { b.style.transform = ""; }); });
+      if (playing && !frame) frame = requestAnimationFrame(tickLoop);
+      paint();
     });
-    playBtn.addEventListener("click", function () {
-      toggle().catch(function () { status.textContent = "This browser couldn't play the track."; });
+    toggles.forEach(function (t) {
+      t.addEventListener("click", function () { toggle().catch(function () { status.textContent = "This browser couldn't play the track."; }); });
     });
     $("#pd-restart").addEventListener("click", function () { seek(0); });
     loopBtn.addEventListener("click", function () {
       loop = !loop;
       loopBtn.setAttribute("aria-pressed", String(loop));
-      loopBtn.classList.toggle("on", loop);
       if (playing) play(position());
     });
-    loopBtn.classList.toggle("on", loop);
-    // Click or drag on the waveform to jump; arrow keys move 5 seconds.
-    var scrub = function (e) {
-      var r = canvas.getBoundingClientRect();
-      var t = clamp((e.clientX - r.left) / r.width, 0, 1);
+    likes.forEach(function (b) {
+      b.addEventListener("click", function () {
+        liked = !liked;
+        likes.forEach(function (o) {
+          o.classList.toggle("on", liked);
+          o.setAttribute("aria-pressed", String(liked));
+          var path = o.querySelector("svg");
+          path.setAttribute("fill", liked ? "currentColor" : "none");
+          path.setAttribute("stroke", liked ? "none" : "currentColor");
+        });
+        likesNum.textContent = liked ? "1" : "0";
+      });
+    });
+    vol.addEventListener("input", function () { setVolume(vol.value / 100); });
+    // Click or drag on the progress bar to jump; arrow keys move 2 seconds.
+    var at = function (e) { var r = bar.getBoundingClientRect(); return clamp((e.clientX - r.left) / r.width, 0, 1); };
+    var dragging = false;
+    bar.addEventListener("pointerdown", function (e) {
+      dragging = true;
+      bar.setPointerCapture(e.pointerId);
+      var t = at(e);
       if (!buffer) { play().then(function () { seek(t * duration()); }).catch(function () {}); return; }
       seek(t * duration());
-    };
-    var down = false;
-    canvas.addEventListener("pointerdown", function (e) { down = true; canvas.setPointerCapture(e.pointerId); scrub(e); });
-    canvas.addEventListener("pointermove", function (e) { if (down && buffer) { offset = clamp(((e.clientX - canvas.getBoundingClientRect().left) / canvas.clientWidth) * duration(), 0, duration()); if (!playing) emit(); } });
-    canvas.addEventListener("pointerup", function (e) { if (down) { down = false; if (buffer && playing) seek(offset); } });
-    canvas.addEventListener("keydown", function (e) {
+    });
+    bar.addEventListener("pointermove", function (e) { if (dragging && buffer) seek(at(e) * duration()); });
+    bar.addEventListener("pointerup", function () { dragging = false; });
+    bar.addEventListener("keydown", function (e) {
       if (!buffer) return;
-      var d = e.key === "ArrowRight" ? 5 : e.key === "ArrowLeft" ? -5 : 0;
+      var d = e.key === "ArrowRight" ? 2 : e.key === "ArrowLeft" ? -2 : 0;
       if (e.key === "Home") { e.preventDefault(); seek(0); }
       if (d) { e.preventDefault(); seek(position() + d); }
-      if (e.key === " " || e.key === "Enter") { e.preventDefault(); toggle(); }
     });
-    new ResizeObserver(size).observe(canvas);
-    // Stop when it scrolls far away (it's a demo, not background music).
+    // Stop when it scrolls far away (it's a demo, not background music), unless the
+    // equalizer is the thing on screen.
     if ("IntersectionObserver" in window) {
-      var near = new IntersectionObserver(function (es) {
-        if (!es[0].isIntersecting && playing && !document.getElementById("eq").matches(":hover")) {
-          var eqBox = document.getElementById("eq").getBoundingClientRect();
-          if (eqBox.bottom < 0 || eqBox.top > innerHeight) pause();
-        }
-      }, { rootMargin: "60% 0px" });
-      near.observe(pd);
+      var eqBox = document.getElementById("eq");
+      new IntersectionObserver(function (es) {
+        if (es[0].isIntersecting || !playing) return;
+        var r = eqBox ? eqBox.getBoundingClientRect() : { bottom: -1, top: 0 };
+        if (r.bottom < 0 || r.top > innerHeight) pause();
+      }, { rootMargin: "60% 0px" }).observe(pd);
     }
   }
 
