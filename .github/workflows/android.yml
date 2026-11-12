@@ -50,26 +50,38 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
         run: gradle assembleRelease --stacktrace --no-daemon
 
+      # Each build gets its own file name (version and build number), so a phone never
+      # opens an older download by mistake.
       - name: Name it
         run: |
-          cp android/app/build/outputs/apk/release/app-release.apk Pulse-android-preview.apk
-          ls -l Pulse-android-preview.apk
+          version=$(grep -oP 'versionName = "\K[^"]+' android/app/build.gradle.kts)
+          name="Pulse-android-${version}-build${GITHUB_RUN_NUMBER}.apk"
+          cp android/app/build/outputs/apk/release/app-release.apk "$name"
+          echo "APK=$name" >> "$GITHUB_ENV"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          ls -l "$name"
 
       - uses: actions/upload-artifact@v4
         with:
           name: Pulse-android-preview
-          path: Pulse-android-preview.apk
+          path: ${{ env.APK }}
 
       - name: Put it on the preview release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          notes="Preview builds of Pulse for Android, made from the ${GITHUB_REF_NAME} branch. Build ${GITHUB_RUN_NUMBER}, commit ${GITHUB_SHA::7}.
+          notes="Preview builds of Pulse for Android, made from the ${GITHUB_REF_NAME} branch. Version ${VERSION}, build ${GITHUB_RUN_NUMBER}, commit ${GITHUB_SHA::7}.
 
-          To install: open this page on your phone, download Pulse-android-preview.apk, open it, and allow installing from your browser when Android asks. A newer preview installs over an older one."
+          To install: open this page on your phone, download ${APK} (the only APK here: older builds are removed), open it, and allow installing from your browser when Android asks. A newer preview installs over an older one.
+
+          Already downloaded an older one? Delete it from your Downloads first, so you don't open it by mistake. In Pulse, Settings shows the version at the bottom."
           if gh release view android-preview >/dev/null 2>&1; then
             gh release edit android-preview --notes "$notes"
           else
             gh release create android-preview --prerelease --target "$GITHUB_SHA" --title "Pulse for Android (preview)" --notes "$notes"
           fi
-          gh release upload android-preview Pulse-android-preview.apk --clobber
+          gh release upload android-preview "$APK" --clobber
+          # Only the newest build stays.
+          gh release view android-preview --json assets -q '.assets[].name' | grep '\.apk$' | grep -vxF "$APK" | while read -r old; do
+            gh release delete-asset android-preview "$old" -y
+          done
