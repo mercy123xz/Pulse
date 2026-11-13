@@ -1,0 +1,11 @@
+name: Diagnose
+on:
+  push:
+    branches: [features]
+    paths: [.github/scripts/diag.sh]
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash .github/scripts/diag.sh
