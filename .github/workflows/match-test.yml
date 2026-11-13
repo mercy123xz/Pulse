@@ -3,7 +3,7 @@ name: Match test
 on:
   push:
     branches: [features]
-    paths: [tests/data/**, src/deezer.rs, src/youtube.rs, src/import.rs, .github/workflows/match-test.yml]
+    paths: [tests/data/**, src/deezer.rs, src/youtube.rs, src/import.rs, src/genius.rs, src/lyrics.rs, .github/workflows/match-test.yml]
   workflow_dispatch:
     inputs:
       spotify:
@@ -25,6 +25,8 @@ jobs:
           python3 -m pip install --user -U yt-dlp
           curl -fsSL https://deno.land/install.sh | sh -s -- -y
           echo "$HOME/.deno/bin" >> "$GITHUB_PATH"
+      - name: Lyrics from Genius
+        run: cargo test --release live_genius_lyrics -- --ignored --nocapture
       - name: Explicit versions and shared artist names
         env:
           PULSE_YTDLP: yt-dlp

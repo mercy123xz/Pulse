@@ -15,6 +15,7 @@ mod discord;
 mod downloads;
 mod dsp;
 mod fixes;
+mod genius;
 mod i18n;
 mod import;
 mod itunes;

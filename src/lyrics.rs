@@ -19,6 +19,9 @@ pub struct Lyrics {
     pub synced: Vec<(f32, String)>,
     pub plain: Option<String>,
     pub instrumental: bool,
+    /// The Genius page, when the lyrics came from Genius (LRCLIB otherwise).
+    #[serde(default)]
+    pub genius: Option<String>,
 }
 
 impl Lyrics {
@@ -55,6 +58,9 @@ struct Record {
 struct Saved {
     /// When it was looked up (seconds since 1970).
     at: u64,
+    /// 2 once Genius was asked too; older "not found" answers are asked again.
+    #[serde(default)]
+    v: u32,
     lyrics: Option<Lyrics>,
 }
 
@@ -82,13 +88,13 @@ pub fn get(t: &Track) -> Result<Option<Lyrics>, String> {
     let path = file_for(t);
     if let Ok(text) = std::fs::read_to_string(&path)
         && let Ok(saved) = serde_json::from_str::<Saved>(&text)
-        && (saved.lyrics.is_some() || now().saturating_sub(saved.at) < RETRY_MISSING_AFTER)
+        && (saved.lyrics.is_some() || (saved.v >= 2 && now().saturating_sub(saved.at) < RETRY_MISSING_AFTER))
     {
         return Ok(saved.lyrics);
     }
     let found = fetch(t)?;
     let _ = std::fs::create_dir_all(dir());
-    if let Ok(json) = serde_json::to_string(&Saved { at: now(), lyrics: found.clone() }) {
+    if let Ok(json) = serde_json::to_string(&Saved { at: now(), v: 2, lyrics: found.clone() }) {
         let _ = std::fs::write(&path, json);
     }
     Ok(found)
@@ -125,7 +131,11 @@ fn fetch(t: &Track) -> Result<Option<Lyrics>, String> {
             let d = |r: &Record| (r.duration - t.duration as f32).abs() - if r.synced_lyrics.is_some() { 3.0 } else { 0.0 };
             d(a).total_cmp(&d(b))
         });
-    Ok(best.map(from_record))
+    if let Some(r) = best {
+        return Ok(Some(from_record(r)));
+    }
+    // 3. Genius, for songs LRCLIB doesn't have (plain text only).
+    Ok(crate::genius::lyrics(&artist, &t.title).map(|(text, url)| Lyrics { plain: Some(text), genius: Some(url), ..Default::default() }))
 }
 
 /// One LRCLIB request; `Ok(None)` when it has nothing.
@@ -142,7 +152,7 @@ fn request<T: for<'de> Deserialize<'de>>(path: &str, query: &[(&str, &str)]) -> 
 }
 
 fn from_record(r: Record) -> Lyrics {
-    Lyrics { synced: r.synced_lyrics.as_deref().map(parse_lrc).unwrap_or_default(), plain: r.plain_lyrics.filter(|p| !p.trim().is_empty()), instrumental: r.instrumental }
+    Lyrics { synced: r.synced_lyrics.as_deref().map(parse_lrc).unwrap_or_default(), plain: r.plain_lyrics.filter(|p| !p.trim().is_empty()), instrumental: r.instrumental, genius: None }
 }
 
 /// Reads LRC text: "[01:02.50]Line" (a line can have several times: "[00:10][01:10]Chorus").
