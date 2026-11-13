@@ -8,6 +8,7 @@ secrets, and skips whichever is missing:
 
 The text comes from this version's part of .github/release-notes.md. The X post is the
 `<!-- x: … -->` line in that part (hidden on GitHub), so write one with every release.
+`<!-- x: skip -->` announces the release on Discord only.
 
 `python announce.py --check` only checks the Typefully key (it makes a draft and deletes
 it): nothing is posted anywhere.
@@ -99,6 +100,9 @@ def x(version: str, body: str) -> None:
     key = os.environ.get("TYPEFULLY_API_KEY", "").strip()
     if not key:
         print("No TYPEFULLY_API_KEY secret: not posting on X.")
+        return
+    if x_summary(body).lower() == "skip":
+        print("This release is Discord only: not posting on X.")
         return
     text = tweet_text(version, body)
     call(

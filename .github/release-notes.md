@@ -1,6 +1,16 @@
 **Download `PulseSetup` below and run it** to install Pulse (no administrator password needed).
 Works on any 64-bit Windows 10 or 11 PC.
 
+## Pulse 1.2.5
+<!-- x: skip -->
+
+**Fixes**
+- Songs with swearing now play the uncensored version when **Explicit songs** is on. Some songs used to play the clean version because it looked identical on YouTube; Pulse now checks YouTube Music's explicit label.
+- Artist pages no longer mix in other artists with the same name. Deezer files some artists (like "Che") together with dozens of namesakes; their releases now sit in a separate **Other artists named …** section you can open.
+
+**Better imports**
+- Songs that aren't on Deezer now get their real length, explicit label and every credited artist from TIDAL, so they play the right version too.
+
 ## Pulse 1.2.4
 <!-- x: Songs start faster, profile pictures everyone can see, and one tidy profile page. P.S. not every theme shows up in Settings 👀 -->
 
