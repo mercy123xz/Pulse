@@ -497,7 +497,7 @@ pub fn account_settings(app: &mut App, ui: &mut Ui, row: Row) {
                     });
                 }
                 if ui.button(tr("Your profile")).clicked() {
-                    app.navigate(Route::User(s.username.clone()), &ctx);
+                    app.navigate(Route::Profile, &ctx);
                 }
             });
             let email = if s.email.is_empty() { tr("None yet. Add one so you can reset your password.").to_string() } else { s.email.clone() };

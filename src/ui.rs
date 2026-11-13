@@ -2511,6 +2511,41 @@ fn report_dialog(app: &mut App, ctx: &egui::Context) {
     }
 }
 
+static OWN_PUBLIC: std::sync::Mutex<Option<(String, Option<crate::account::Profile>, std::time::Instant)>> = std::sync::Mutex::new(None);
+
+/// Your public profile (for the profile page), read in the background and kept for a
+/// minute. None until it's here.
+pub fn own_public_profile(username: &str, ctx: &egui::Context) -> Option<crate::account::Profile> {
+    let mut g = OWN_PUBLIC.lock().unwrap();
+    let fresh = g.as_ref().is_some_and(|(u, _, at)| u == username && at.elapsed() < std::time::Duration::from_secs(60));
+    if !fresh {
+        let keep = g.as_ref().filter(|(u, ..)| u == username).and_then(|(_, p, _)| p.clone());
+        *g = Some((username.to_string(), keep, std::time::Instant::now()));
+        let (name, ctx) = (username.to_string(), ctx.clone());
+        std::thread::spawn(move || {
+            if let Ok(p) = crate::account::profile(&name) {
+                if let Some((u, slot, _)) = OWN_PUBLIC.lock().unwrap().as_mut()
+                    && *u == name
+                {
+                    *slot = Some(p);
+                }
+                ctx.request_repaint();
+            }
+        });
+    }
+    g.as_ref().and_then(|(_, p, _)| p.clone())
+}
+
+/// Read your public profile again next time (after you change it).
+pub fn forget_own_public_profile() {
+    if let Some((_, _, at)) = OWN_PUBLIC.lock().unwrap().as_mut() {
+        // Old enough to be read again (if the clock allows going that far back).
+        if let Some(old) = std::time::Instant::now().checked_sub(std::time::Duration::from_secs(120)) {
+            *at = old;
+        }
+    }
+}
+
 /// One of the Tung Tung theme's pictures, loaded once (`repeat`: tiles when stretched).
 fn tung_texture(ctx: &egui::Context, name: &'static str, bytes: &'static [u8], repeat: bool) -> egui::TextureHandle {
     let id = egui::Id::new(("tung_texture", name));

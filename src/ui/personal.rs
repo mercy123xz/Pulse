@@ -315,9 +315,21 @@ pub fn profile_page(app: &mut App, ui: &mut Ui) {
     }
     ui.add_space(18.0);
 
+    let account = crate::account::session();
     ui.horizontal(|ui| {
         if ghost_button(ui, icon::PENCIL_SIMPLE, "Edit profile").clicked() {
             app.profile_editing = Some(ProfileForm::from(&p));
+        }
+        // Signed in: your public profile is this page too.
+        if let Some(s) = &account {
+            if ghost_button(ui, icon::LINK, "Copy link").clicked() {
+                ctx.copy_text(crate::account::profile_link(&s.username));
+                app.toast(tr("Link copied"), &ctx);
+            }
+            if ghost_button(ui, icon::GLOBE, "Open on the website").clicked() {
+                ctx.open_url(egui::OpenUrl::new_tab(format!("{}&me=1", crate::account::profile_link(&s.username))));
+            }
+            ui.label(RichText::new(format!("@{}", s.username)).font(med(13.0)).color(pal().text_muted));
         }
     });
     if !p.bio.is_empty() {
@@ -367,6 +379,16 @@ pub fn profile_page(app: &mut App, ui: &mut Ui) {
         if let Some(i) = open {
             app.navigate(Route::Local(i), &ctx);
         }
+    }
+
+    // Signed in: the playlists you made public, as others see them.
+    if let Some(s) = &account
+        && let Some(public) = crate::ui::own_public_profile(&s.username, &ctx)
+        && !public.playlists.is_empty()
+    {
+        section_title(ui, "Public playlists", None);
+        let cards: Vec<_> = public.playlists.iter().map(|l| l.info(&s.username)).collect();
+        crate::ui::playlist_grid(app, ui, &cards, None);
     }
 
     // Recently played

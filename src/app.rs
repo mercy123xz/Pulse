@@ -1206,6 +1206,11 @@ impl App {
     // ---------------------------------------------------------------- navigation
 
     pub fn navigate(&mut self, route: Route, ctx: &egui::Context) {
+        // Your own public profile is part of your profile page (one page, not two).
+        let route = match route {
+            Route::User(name) if crate::account::session().is_some_and(|s| s.username == name) => Route::Profile,
+            r => r,
+        };
         if route == self.route {
             return;
         }
@@ -2204,8 +2209,17 @@ impl App {
         }
         let p = &mut self.saved.profile;
         p.name = f.name.trim().to_string();
+        let bio_changed = p.bio != f.bio.trim();
         p.bio = f.bio.trim().to_string();
         p.picture = picture;
+        // Signed in: the same bio on your public profile.
+        if bio_changed && crate::account::session().is_some() {
+            let bio = p.bio.clone();
+            std::thread::spawn(move || {
+                let _ = crate::account::set_bio(&bio);
+                crate::ui::forget_own_public_profile();
+            });
+        }
         if p.created == 0 {
             p.created = now_unix();
         }
