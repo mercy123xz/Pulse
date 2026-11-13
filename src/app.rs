@@ -2556,7 +2556,10 @@ impl App {
                     }
                 })
             };
-            let r = crate::import::run(&url, &p, &c);
+            // A failure inside the import ends it with a message instead of leaving it
+            // stuck partway forever.
+            let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| crate::import::run(&url, &p, &c)))
+                .unwrap_or_else(|_| Err("The import hit a problem partway through. Please try again; if it keeps happening, send a bug report.".into()));
             let _ = tx.send(r);
             c.store(true, std::sync::atomic::Ordering::Relaxed);
             let _ = ticker.join();
@@ -2576,8 +2579,10 @@ impl App {
         let Some(job) = &self.import_running else {
             return;
         };
-        let Ok(result) = job.rx.try_recv() else {
-            return;
+        let result = match job.rx.try_recv() {
+            Ok(r) => r,
+            Err(std::sync::mpsc::TryRecvError::Empty) => return,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => Err("The import stopped unexpectedly. Please try again.".into()),
         };
         self.import_running = None;
         match result {

@@ -659,7 +659,9 @@ pub(crate) static EXPLICIT_TEST: std::sync::Mutex<()> = std::sync::Mutex::new(()
 /// "Nelly, City Spud" / "Nelly feat. City Spud" → ("Nelly", ["City Spud"]). Names
 /// joined by "&" stay together: that is often one act ("Simon & Garfunkel").
 pub fn split_artists(artists: &str) -> (String, Vec<String>) {
-    let lower = artists.to_lowercase();
+    // ASCII-only lowercase keeps every letter at the same place, so positions found in
+    // it can cut the original ("İ" and a few others change length when lowercased).
+    let lower = artists.to_ascii_lowercase();
     let mut cuts = vec![];
     for m in [",", " feat. ", " feat ", " ft. ", " featuring ", " with "] {
         let mut from = 0;
@@ -685,7 +687,7 @@ pub fn split_artists(artists: &str) -> (String, Vec<String>) {
 
 /// The artists a title credits: "Ride Wit Me (feat. City Spud)" → ["City Spud"].
 pub fn featured_in_title(title: &str) -> Vec<String> {
-    let lower = title.to_lowercase();
+    let lower = title.to_ascii_lowercase();
     let Some(i) = ["(feat", "[feat", "(ft.", "(with ", " feat.", " ft. "].iter().filter_map(|m| lower.find(m)).min() else {
         return vec![];
     };
@@ -1307,6 +1309,14 @@ pub fn similar_to(t: &Track) -> Result<Vec<Track>, String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn names_with_letters_that_change_length_dont_break() {
+        // "İ" is 2 bytes but lowercases to 3: positions from to_lowercase() would be off.
+        assert_eq!(split_artists("İrem Derici, ẞtar feat. ÖZİL"), ("İrem Derici".to_string(), vec!["ẞtar".to_string(), "ÖZİL".to_string()]));
+        assert_eq!(featured_in_title("İİİİ Song (feat. ÇAĞRI)"), ["ÇAĞRI"]);
+        assert_eq!(crate::youtube::core_title("İİİİİİ Şarkı (feat. Biri)"), "İİİİİİ Şarkı");
+    }
+
     fn release(id: u64, fans: u64, genre: i64) -> DzAlbum {
         DzAlbum { id, fans, genre_id: genre, ..Default::default() }
     }
