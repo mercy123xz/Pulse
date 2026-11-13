@@ -50,6 +50,8 @@ r = await call("GET", "/me", undefined, { token: r.data.token, origin: "https://
 r = await call("POST", "/signup", { username: "webby", password: "web password", email: "w@example.com" }, { origin: "https://mercy123xz.github.io" }); ok(r.status === 403 && /app/.test(r.data.error), "sign-up stays in the app");
 r = await worker.fetch(new Request("https://acc.example/login", { method: "OPTIONS", headers: { Origin: "https://mercy123xz.github.io" } }), env);
 ok(r.status === 204 && r.headers.get("Access-Control-Allow-Origin") === "https://mercy123xz.github.io" && /Authorization/.test(r.headers.get("Access-Control-Allow-Headers")) && /DELETE/.test(r.headers.get("Access-Control-Allow-Methods")), "the website may send sign-ins");
+r = await worker.fetch(new Request("https://acc.example/login", { method: "OPTIONS", headers: { Origin: "https://listen2pulse.github.io" } }), env);
+ok(r.headers.get("Access-Control-Allow-Origin") === "https://listen2pulse.github.io", "the new website address is allowed too");
 r = await worker.fetch(new Request("https://acc.example/login", { method: "OPTIONS", headers: { Origin: "https://evil.example" } }), env);
 ok(r.headers.get("Access-Control-Allow-Origin") !== "https://evil.example", "other websites aren't");
 // publish

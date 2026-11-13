@@ -12,7 +12,7 @@
 // EMAILJS_PRIVATE_KEY. Brevo (BREVO_API_KEY + MAIL_FROM) or Resend (RESEND_API_KEY +
 // MAIL_FROM) work too. See server/README.md.
 
-const ALLOWED_ORIGINS = ["https://mercy123xz.github.io", "https://pulse.is-a.software"];
+const ALLOWED_ORIGINS = ["https://listen2pulse.github.io", "https://mercy123xz.github.io", "https://pulse.is-a.software"];
 
 // Limits
 const MAX_BODY = 1_500_000; // bytes

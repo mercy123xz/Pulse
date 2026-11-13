@@ -1,11 +1,13 @@
 name: Publish website
 
-# Publishes the site/ folder to GitHub Pages (https://mercy123xz.github.io/Pulse/)
-# whenever it changes on main.
+# The website lives in site/ and is published at https://listen2pulse.github.io/
+# (the listen2pulse/listen2pulse.github.io repository) whenever it changes on main.
+# The old address, https://mercy123xz.github.io/Pulse/, is kept as a set of pages that
+# forward every link (with its ?name=, ?id= and #part) to the same page at the new one.
 on:
   push:
     branches: [main]
-    paths: ["site/**", ".github/workflows/pages.yml"]
+    paths: ["site/**", ".github/workflows/pages.yml", ".github/scripts/redirects.py"]
   workflow_dispatch:
 
 permissions:
@@ -18,16 +20,38 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  deploy:
+  new-site:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Copy site/ to listen2pulse.github.io
+        env:
+          # A classic token with public_repo (the one winget uses works).
+          TOKEN: ${{ secrets.SITE_TOKEN || secrets.WINGET_TOKEN }}
+        run: |
+          git clone --depth 1 "https://x-access-token:${TOKEN}@github.com/listen2pulse/listen2pulse.github.io.git" out
+          find out -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp -r site/. out/
+          touch out/.nojekyll
+          cd out
+          git config user.name "MERCY"
+          git config user.email "itsjoemama1233@gmail.com"
+          git add -A
+          git diff --cached --quiet && { echo "Nothing changed."; exit 0; }
+          git commit -m "Website from mercy123xz/Pulse@${GITHUB_SHA::7}"
+          git push
+
+  old-address:
     runs-on: ubuntu-latest
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+      - run: python3 .github/scripts/redirects.py site redirects
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: site
+          path: redirects
       - id: deployment
         uses: actions/deploy-pages@v4
