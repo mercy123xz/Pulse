@@ -10,8 +10,7 @@
 use egui::load::{Bytes, BytesLoadResult, BytesLoader, BytesPoll, LoadError};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::mpsc::{Sender, channel};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime};
 
 /// How many pictures download at the same time.
@@ -34,38 +33,62 @@ fn file_for(uri: &str) -> PathBuf {
 }
 
 enum Entry {
-    Loading,
+    /// Waiting for a worker, since this moment.
+    Loading(Instant),
     Ready(Arc<[u8]>),
-    Failed(String),
+    /// Couldn't get it at this moment; tried again after `RETRY_AFTER`.
+    Failed(String, Instant),
+}
+
+/// A failed picture (network hiccup, server busy) is tried again after this long.
+const RETRY_AFTER: Duration = Duration::from_secs(15);
+/// A picture still not loaded after this long is asked for again.
+const STUCK_AFTER: Duration = Duration::from_secs(45);
+
+/// Pictures waiting for a worker. The newest is fetched first: after clicking through a
+/// few pages, the covers on screen now come before the ones of pages already left.
+#[derive(Default)]
+struct Queue {
+    jobs: Mutex<Vec<(String, egui::Context)>>,
+    ready: Condvar,
 }
 
 pub struct ArtLoader {
     entries: Mutex<HashMap<String, Entry>>,
-    jobs: Mutex<Sender<(String, egui::Context)>>,
+    queue: Arc<Queue>,
 }
 
 impl ArtLoader {
     pub fn install(ctx: &egui::Context) -> Arc<ArtLoader> {
-        let (tx, rx) = channel::<(String, egui::Context)>();
-        let loader = Arc::new(ArtLoader { entries: Mutex::default(), jobs: Mutex::new(tx) });
-        let rx = Arc::new(Mutex::new(rx));
+        let queue = Arc::new(Queue::default());
+        let loader = Arc::new(ArtLoader { entries: Mutex::default(), queue: queue.clone() });
         for n in 0..WORKERS {
-            let rx = rx.clone();
+            let queue = queue.clone();
             let weak = Arc::downgrade(&loader);
             std::thread::Builder::new()
                 .name(format!("art-{n}"))
                 .spawn(move || {
                     loop {
-                        let job = rx.lock().unwrap().recv();
-                        let Ok((uri, ctx)) = job else { return };
-                        let result = fetch(&uri);
+                        let (uri, ctx) = {
+                            let mut jobs = queue.jobs.lock().unwrap_or_else(|e| e.into_inner());
+                            while jobs.is_empty() {
+                                jobs = queue.ready.wait(jobs).unwrap_or_else(|e| e.into_inner());
+                            }
+                            jobs.pop().expect("not empty")
+                        };
                         let Some(loader) = weak.upgrade() else { return };
-                        let mut map = loader.entries.lock().unwrap();
+                        // Let go of while it waited (scrolled away long ago): skip it.
+                        if !matches!(loader.entries().get(&uri), Some(Entry::Loading(_))) {
+                            continue;
+                        }
+                        // A broken picture must not take a worker down with it.
+                        let result = std::panic::catch_unwind(|| fetch(&uri)).unwrap_or_else(|_| Err("unreadable picture".into()));
+                        let mut map = loader.entries();
                         // Forgotten while it downloaded: don't keep it.
                         if map.contains_key(&uri) {
                             map.insert(uri, match result {
                                 Ok(b) => Entry::Ready(b.into()),
-                                Err(e) => Entry::Failed(e),
+                                Err(e) => Entry::Failed(e, Instant::now()),
                             });
                         }
                         drop(map);
@@ -76,6 +99,18 @@ impl ArtLoader {
         }
         ctx.add_bytes_loader(loader.clone());
         loader
+    }
+
+    fn entries(&self) -> std::sync::MutexGuard<'_, HashMap<String, Entry>> {
+        self.entries.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn request(&self, uri: &str, ctx: &egui::Context) {
+        let mut jobs = self.queue.jobs.lock().unwrap_or_else(|e| e.into_inner());
+        jobs.retain(|(u, _)| u != uri);
+        jobs.push((uri.to_string(), ctx.clone()));
+        drop(jobs);
+        self.queue.ready.notify_one();
     }
 }
 
@@ -164,31 +199,34 @@ impl BytesLoader for ArtLoader {
         if !(uri.starts_with("https://") || uri.starts_with("http://") || uri.starts_with("file://")) {
             return Err(LoadError::NotSupported);
         }
-        let mut map = self.entries.lock().unwrap();
+        let mut map = self.entries();
         match map.get(uri) {
-            Some(Entry::Ready(b)) => Ok(BytesPoll::Ready { size: None, bytes: Bytes::Shared(b.clone()), mime: mime_of(b) }),
-            Some(Entry::Loading) => Ok(BytesPoll::Pending { size: None }),
-            Some(Entry::Failed(e)) => Err(LoadError::Loading(e.clone())),
-            None => {
-                map.insert(uri.to_string(), Entry::Loading);
-                let _ = self.jobs.lock().unwrap().send((uri.to_string(), ctx.clone()));
-                Ok(BytesPoll::Pending { size: None })
+            Some(Entry::Ready(b)) => return Ok(BytesPoll::Ready { size: None, bytes: Bytes::Shared(b.clone()), mime: mime_of(b) }),
+            Some(Entry::Loading(since)) if since.elapsed() < STUCK_AFTER => return Ok(BytesPoll::Pending { size: None }),
+            Some(Entry::Failed(e, at)) if at.elapsed() < RETRY_AFTER => {
+                // Look again once it's time to try again.
+                ctx.request_repaint_after(RETRY_AFTER);
+                return Err(LoadError::Loading(e.clone()));
             }
+            // Not asked for yet, failed a while ago, or stuck: (re)fetch it.
+            _ => {}
         }
+        map.insert(uri.to_string(), Entry::Loading(Instant::now()));
+        drop(map);
+        self.request(uri, ctx);
+        Ok(BytesPoll::Pending { size: None })
     }
 
     fn forget(&self, uri: &str) {
-        self.entries.lock().unwrap().remove(uri);
+        self.entries().remove(uri);
     }
 
     fn forget_all(&self) {
-        self.entries.lock().unwrap().clear();
+        self.entries().clear();
     }
 
     fn byte_size(&self) -> usize {
-        self.entries
-            .lock()
-            .unwrap()
+        self.entries()
             .values()
             .map(|e| match e {
                 Entry::Ready(b) => b.len(),
