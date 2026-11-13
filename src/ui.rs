@@ -2138,6 +2138,12 @@ fn total_time(tracks: &[Track]) -> String {
 fn player_bar(app: &mut App, ui: &mut Ui) {
     let ctx = ui.ctx().clone();
     let full = ui.max_rect();
+    // The Tung Tung theme: the player bar is a dark wooden shelf (faint grain).
+    if tung_theme(app) {
+        let shelf = full.expand2(vec2(24.0, 0.0)).intersect(ui.clip_rect());
+        let c = pal().text;
+        wood_grain(ui, shelf, Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), 22), 1.0, 0.0);
+    }
     let left_w = (full.width() * 0.28).clamp(220.0, 360.0);
     let right_w = left_w.min(260.0);
     let controls_left = layout().player == crate::theme::PlayerStyle::ControlsLeft;
@@ -2331,7 +2337,7 @@ fn player_bar(app: &mut App, ui: &mut Ui) {
         });
         let buffered = (!app.needs_load && app.current.is_some()).then(|| app.audio.buffered());
         let (resp, val) = slim_slider(ui, bar_w, shown, buffered, "Seek");
-        if app.saved.settings.theme == crate::themes::SECRET_THEME && app.current.is_some() {
+        if tung_theme(app) && app.current.is_some() {
             tung_runner(ui, resp.rect, shown, app.is_playing());
         }
         if let Some(v) = val {
@@ -2505,6 +2511,39 @@ fn report_dialog(app: &mut App, ctx: &egui::Context) {
     }
 }
 
+/// One of the Tung Tung theme's pictures, loaded once (`repeat`: tiles when stretched).
+fn tung_texture(ctx: &egui::Context, name: &'static str, bytes: &'static [u8], repeat: bool) -> egui::TextureHandle {
+    let id = egui::Id::new(("tung_texture", name));
+    if let Some(t) = ctx.data(|d| d.get_temp::<egui::TextureHandle>(id)) {
+        return t;
+    }
+    let img = image::load_from_memory(bytes).map(|i| i.to_rgba8()).unwrap_or_default();
+    let color = egui::ColorImage::from_rgba_unmultiplied([img.width() as usize, img.height() as usize], img.as_raw());
+    let mut opts = egui::TextureOptions::LINEAR;
+    if repeat {
+        opts.wrap_mode = egui::TextureWrapMode::Repeat;
+    }
+    let t = ctx.load_texture(name, color, opts);
+    ctx.data_mut(|d| d.insert_temp(id, t.clone()));
+    t
+}
+
+/// Faint wood grain over `rect` (the Tung Tung theme only): `tint` is the grain's color,
+/// `scale` how big the grain is (1.0 = the picture's own size).
+fn wood_grain(ui: &Ui, rect: Rect, tint: Color32, scale: f32, v_offset: f32) {
+    if crate::perf::mode() == crate::perf::Mode::UltraLow || crate::perf::software() {
+        return;
+    }
+    let tex = tung_texture(ui.ctx(), "tung_wood", include_bytes!("../assets/themes/Tung Tung/wood.png"), true);
+    let [w, h] = tex.size().map(|v| v as f32 * scale);
+    let uv = Rect::from_min_size(pos2(rect.left() / w, v_offset + rect.top() / h), vec2(rect.width() / w, rect.height() / h));
+    ui.painter().image(tex.id(), rect, uv, tint);
+}
+
+fn tung_theme(app: &App) -> bool {
+    app.saved.settings.theme == crate::themes::SECRET_THEME
+}
+
 /// The Tung Tung theme's runner: a small figure that runs along the progress bar, his feet
 /// on the bar where the song is. 8 frames at 12 a second while music plays; standing still
 /// on the first frame when paused, with reduce motion, or in Gaming and Ultra-low modes.
@@ -2512,14 +2551,10 @@ fn tung_runner(ui: &mut Ui, bar: Rect, at: f32, playing: bool) {
     const FRAMES: usize = 8;
     const FPS: f64 = 12.0;
     const SIZE: f32 = 26.0;
-    let tex = ui.ctx().data_mut(|d| d.get_temp::<egui::TextureHandle>(egui::Id::new("tung_runner")));
-    let tex = tex.unwrap_or_else(|| {
-        let img = image::load_from_memory(include_bytes!("../assets/themes/Tung Tung/runner.png")).map(|i| i.to_rgba8()).unwrap_or_default();
-        let color = egui::ColorImage::from_rgba_unmultiplied([img.width() as usize, img.height() as usize], img.as_raw());
-        let t = ui.ctx().load_texture("tung_runner", color, egui::TextureOptions::LINEAR);
-        ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("tung_runner"), t.clone()));
-        t
-    });
+    let tex = tung_texture(ui.ctx(), "tung_runner", include_bytes!("../assets/themes/Tung Tung/runner.png"), false);
+    // The bar is a wooden plank he runs on: grain over the whole track, played part too.
+    let track = Rect::from_center_size(bar.center(), vec2(bar.width(), 5.0));
+    wood_grain(ui, track, Color32::from_black_alpha(110), 0.35, 0.3);
     let moving = playing && !crate::theme::reduce_motion();
     let frame = if moving { (ui.input(|i| i.time) * FPS) as usize % FRAMES } else { 0 };
     if moving {
