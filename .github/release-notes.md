@@ -1,6 +1,19 @@
 **Download `PulseSetup` below and run it** to install Pulse (no administrator password needed).
 Works on any 64-bit Windows 10 or 11 PC.
 
+## Pulse 1.2.4
+<!-- x: Songs start faster, profile pictures everyone can see, and one tidy profile page. P.S. not every theme shows up in Settings 👀 -->
+
+**New**
+- **Profile pictures others can see.** Set one on your profile while signed in and it shows on your public profile, in the app and on the website.
+- **One profile page.** The picture in the top corner and Settings → Your profile now open the same page, with your link, bio and public playlists.
+
+**Faster**
+- Songs start faster: Pulse gets a song ready when you hover over it, so it's usually playing within a second of your click.
+
+**Fixes**
+- The early-supporters thank-you list in Settings no longer breaks names letter by letter.
+
 ## Pulse 1.2.3
 <!-- x: A glow-up for the Founders theme our first 100 members get: gold trim, gold titles and a gold play button. Thank you for being here early. -->
 

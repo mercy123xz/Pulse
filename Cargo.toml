@@ -1,6 +1,6 @@
 [package]
 name = "pulse"
-version = "1.2.3"
+version = "1.2.4"
 edition = "2024"
 description = "A fast, native music player written in Rust: any song, with info from Deezer and audio from YouTube"
 
