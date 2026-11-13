@@ -2331,6 +2331,9 @@ fn player_bar(app: &mut App, ui: &mut Ui) {
         });
         let buffered = (!app.needs_load && app.current.is_some()).then(|| app.audio.buffered());
         let (resp, val) = slim_slider(ui, bar_w, shown, buffered, "Seek");
+        if app.saved.settings.theme == crate::themes::SECRET_THEME && app.current.is_some() {
+            tung_runner(ui, resp.rect, shown, app.is_playing());
+        }
         if let Some(v) = val {
             app.seek_preview = Some(v);
         }
@@ -2500,6 +2503,33 @@ fn report_dialog(app: &mut App, ctx: &egui::Context) {
     } else if open {
         app.report = Some((text, include));
     }
+}
+
+/// The Tung Tung theme's runner: a small figure that runs along the progress bar, his feet
+/// on the bar where the song is. 8 frames at 12 a second while music plays; standing still
+/// on the first frame when paused, with reduce motion, or in Gaming and Ultra-low modes.
+fn tung_runner(ui: &mut Ui, bar: Rect, at: f32, playing: bool) {
+    const FRAMES: usize = 8;
+    const FPS: f64 = 12.0;
+    const SIZE: f32 = 26.0;
+    let tex = ui.ctx().data_mut(|d| d.get_temp::<egui::TextureHandle>(egui::Id::new("tung_runner")));
+    let tex = tex.unwrap_or_else(|| {
+        let img = image::load_from_memory(include_bytes!("../assets/themes/Tung Tung/runner.png")).map(|i| i.to_rgba8()).unwrap_or_default();
+        let color = egui::ColorImage::from_rgba_unmultiplied([img.width() as usize, img.height() as usize], img.as_raw());
+        let t = ui.ctx().load_texture("tung_runner", color, egui::TextureOptions::LINEAR);
+        ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("tung_runner"), t.clone()));
+        t
+    });
+    let moving = playing && !crate::theme::reduce_motion();
+    let frame = if moving { (ui.input(|i| i.time) * FPS) as usize % FRAMES } else { 0 };
+    if moving {
+        ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(1.0 / FPS));
+    }
+    let x = bar.left() + bar.width() * at.clamp(0.0, 1.0);
+    // Feet just on the bar's line (the frame has a little empty space under the feet).
+    let rect = Rect::from_center_size(pos2(x, bar.center().y - SIZE / 2.0 + 3.0), vec2(SIZE, SIZE));
+    let uv = Rect::from_min_max(pos2(frame as f32 / FRAMES as f32, 0.0), pos2((frame + 1) as f32 / FRAMES as f32, 1.0));
+    ui.painter().image(tex.id(), rect, uv, Color32::WHITE);
 }
 
 /// "Pulse 1.2.1 is available": asked once each time Pulse opens with an update out, after
