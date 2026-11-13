@@ -14,6 +14,9 @@ on:
 
 permissions:
   contents: write
+  # For the build provenance below.
+  id-token: write
+  attestations: write
 
 jobs:
   windows:
@@ -89,6 +92,17 @@ jobs:
           # The signature must check out with the key Pulse has, or nothing is published.
           "$openssl" pkeyutl -verify -pubin -inkey installer/update-key.pub.pem -rawin -in "$setup" -sigfile "$RUNNER_TEMP/setup.sig"
           base64 -w0 "$RUNNER_TEMP/setup.sig" > target/installer/signature.b64
+
+      # Proof, signed by GitHub, that these exact files were built here from this commit
+      # of the public source. Anyone can check a download with:
+      #   gh attestation verify PulseSetup-X.Y.Z.exe -R mercy123xz/Pulse
+      - name: Record build provenance
+        if: github.ref == 'refs/heads/main' || github.event_name == 'release'
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            target/release/pulse.exe
+            target/installer/PulseSetup-*.exe
 
       - uses: actions/upload-artifact@v4
         with:
