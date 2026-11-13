@@ -157,7 +157,10 @@ fn lyrics_body(app: &mut App, ui: &mut Ui, t: &Track, size: f32, place: &str, fo
             return;
         }
         Some(Err(e)) if e.is_empty() => {
-            notice(ui, compact, icon::MICROPHONE_STAGE, "No lyrics for this song yet", "LRCLIB and Genius don't have them yet.", None);
+            if notice(ui, compact, icon::MICROPHONE_STAGE, "No lyrics for this song yet", "LRCLIB doesn't have them yet. Genius might.", Some("Open on Genius"))
+            {
+                open_genius(&ctx, t);
+            }
             return;
         }
         Some(Err(e)) => {
@@ -185,7 +188,7 @@ fn lyrics_body(app: &mut App, ui: &mut Ui, t: &Track, size: f32, place: &str, fo
             }
         });
         ui.add_space(20.0);
-        ui.with_layout(layout, |ui| source_note(ui, lyr.genius.as_deref()));
+        ui.with_layout(layout, |ui| source_note(ui, t));
         return;
     }
 
@@ -231,7 +234,7 @@ fn lyrics_body(app: &mut App, ui: &mut Ui, t: &Track, size: f32, place: &str, fo
         ctx.request_repaint_after(std::time::Duration::from_secs_f32((next - pos).max(0.05)));
     }
     ui.add_space(30.0);
-    ui.with_layout(layout, |ui| source_note(ui, lyr.genius.as_deref()));
+    ui.with_layout(layout, |ui| source_note(ui, t));
 }
 
 /// An empty-state message: the big one on the page, a short one in the panel.
@@ -252,19 +255,18 @@ fn notice(ui: &mut Ui, compact: bool, glyph: &str, title: &str, body: &str, butt
     }
 }
 
-fn source_note(ui: &mut Ui, genius: Option<&str>) {
-    match genius {
-        Some(url) => {
-            let r = ui.add(
-                egui::Label::new(RichText::new(tr("Lyrics from Genius · open the page")).font(regular(11.5)).color(pal().text_faint))
-                    .sense(egui::Sense::click()),
-            );
-            if r.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
-                ui.ctx().open_url(egui::OpenUrl::new_tab(url));
-            }
-        }
-        None => {
-            ui.add(egui::Label::new(RichText::new(tr("Lyrics from LRCLIB, a free, open lyrics database.")).font(regular(11.5)).color(pal().text_faint)).wrap());
-        }
+fn source_note(ui: &mut Ui, t: &Track) {
+    ui.add(egui::Label::new(RichText::new(tr("Lyrics from LRCLIB, a free, open lyrics database.")).font(regular(11.5)).color(pal().text_faint)).wrap());
+    // Wrong or incomplete lyrics: Genius's page for the song is one click away.
+    let r =
+        ui.add(egui::Label::new(RichText::new(tr("See them on Genius")).font(regular(11.5)).color(pal().text_muted).underline()).sense(egui::Sense::click()));
+    if r.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+        open_genius(ui.ctx(), t);
     }
+}
+
+/// Genius's search for the song, in the browser.
+fn open_genius(ctx: &egui::Context, t: &Track) {
+    let q = format!("{} {}", t.artist.name, crate::youtube::core_title(&t.title));
+    ctx.open_url(egui::OpenUrl::new_tab(format!("https://genius.com/search?q={}", crate::net::encode(&q))));
 }

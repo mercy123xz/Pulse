@@ -393,6 +393,9 @@ pub fn public_page(app: &mut App, ui: &mut Ui) {
                 ctx.copy_text(account::playlist_link(&p.id));
                 app.toast(tr("Link copied"), &ctx);
             }
+            if ghost_button(ui, icon::GLOBE, "Open on the website").clicked() {
+                ctx.open_url(egui::OpenUrl::new_tab(account::playlist_link(&p.id)));
+            }
             if !mine && ghost_button(ui, icon::COPY, "Save a copy").clicked() {
                 app.save_copy(p, &ctx);
             }
@@ -448,9 +451,10 @@ pub fn user_page(app: &mut App, ui: &mut Ui) {
                 ctx.copy_text(account::profile_link(&p.user.username));
                 app.toast(tr("Link copied"), &ctx);
             }
-            // Your own profile on the website; it then greets you by name on Pulse's home page.
-            if mine && ghost_button(ui, icon::GLOBE, "Open on the website").clicked() {
-                ctx.open_url(egui::OpenUrl::new_tab(format!("{}&me=1", account::profile_link(&p.user.username))));
+            // The profile on the website. Your own also makes the site greet you by name.
+            if ghost_button(ui, icon::GLOBE, "Open on the website").clicked() {
+                let link = account::profile_link(&p.user.username);
+                ctx.open_url(egui::OpenUrl::new_tab(if mine { format!("{link}&me=1") } else { link }));
             }
             if mine && ghost_button(ui, icon::PENCIL_SIMPLE, "Edit profile").clicked() {
                 let mut d = AccountDialog::new(AccountMode::Bio);
