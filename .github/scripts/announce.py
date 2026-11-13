@@ -121,9 +121,6 @@ def check() -> int:
     key = os.environ.get("TYPEFULLY_API_KEY", "").strip()
     print("Typefully key secret:", "set" if key else "MISSING")
     _, body = section(open(".github/release-notes.md", encoding="utf-8").read())
-    if x_summary(body).lower() == "quiet":
-        print("A quiet release: not announcing it anywhere.")
-        return 0
     print("The X post would be:\n" + tweet_text("x.y.z", body))
     if not key:
         return 1
@@ -143,6 +140,9 @@ def main() -> int:
     version, tag = sys.argv[1], sys.argv[2]
     page = f"https://github.com/mercy123xz/Pulse/releases/tag/{tag}"
     _, body = section(open(".github/release-notes.md", encoding="utf-8").read())
+    if x_summary(body).lower() == "quiet":
+        print("A quiet release: not announcing it anywhere.")
+        return 0
     # One failing shouldn't stop the other, or the release.
     for name, step in (("Discord", lambda: discord(version, page, body)), ("X", lambda: x(version, body))):
         try:
