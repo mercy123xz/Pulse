@@ -1,6 +1,16 @@
 **Download `PulseSetup` below and run it** to install Pulse (no administrator password needed).
 Works on any 64-bit Windows 10 or 11 PC.
 
+## Pulse 1.2.7
+<!-- x: quiet -->
+
+**Fixes**
+- The intro plays every time Pulse opens, in Gaming and Ultra-low modes too, and a slow start can't cut it short.
+
+**New**
+- No lyrics for a song? An **Open on Genius** button takes you straight to it on Genius, and songs with lyrics have a **See them on Genius** link.
+- Other people's profiles and public playlists have an **Open on the website** button.
+
 ## Pulse 1.2.6
 <!-- x: quiet -->
 
