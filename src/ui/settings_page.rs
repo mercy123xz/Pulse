@@ -342,12 +342,14 @@ fn supporters_section(ui: &mut Ui) {
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
         for n in names {
-            egui::Frame::new().fill(pal().surface).stroke(Stroke::new(1.0, pal().border)).corner_radius(12).inner_margin(egui::Margin::symmetric(10, 4)).show(
-                ui,
-                |ui| {
-                    ui.label(RichText::new(format!("{} @{n}", icon::STAR)).font(med(12.5)).color(pal().text));
-                },
-            );
+            // Measured first, so the row knows each chip's width and wraps whole chips.
+            let text = format!("{} @{n}", icon::STAR);
+            let galley = ui.painter().layout_no_wrap(text, med(12.5), pal().text);
+            let size = galley.size() + vec2(20.0, 8.0);
+            let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::hover());
+            resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, format!("@{n}")));
+            ui.painter().rect(rect, 12.0, pal().surface, Stroke::new(1.0, pal().border), egui::StrokeKind::Inside);
+            ui.painter().galley(rect.center() - galley.size() / 2.0, galley, pal().text);
         }
     });
 }
