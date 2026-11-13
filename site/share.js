@@ -112,7 +112,15 @@ var PulseShare = (function () {
       var u = p.user;
       document.title = "@" + u.username + " · Pulse";
       var top = el("div", "top");
-      top.appendChild(el("div", "avatar", u.username.charAt(0).toUpperCase()));
+      if (u.avatar && /^https:\/\/pulse-accounts\.[a-z0-9-]+\.workers\.dev\/avatars\//.test(u.avatar)) {
+        var a = el("img", "avatar");
+        a.src = u.avatar;
+        a.alt = "";
+        a.referrerPolicy = "no-referrer";
+        top.appendChild(a);
+      } else {
+        top.appendChild(el("div", "avatar", u.username.charAt(0).toUpperCase()));
+      }
       var info = el("div");
       info.appendChild(el("p", "kind", "Profile"));
       info.appendChild(el("h1", null, "@" + u.username));
