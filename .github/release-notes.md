@@ -1,6 +1,12 @@
 **Download `PulseSetup` below and run it** to install Pulse (no administrator password needed).
 Works on any 64-bit Windows 10 or 11 PC.
 
+## Pulse 1.2.6
+<!-- x: quiet -->
+
+**Fixes**
+- Song covers no longer go missing after clicking around. Covers that fail to load are tried again, and the covers on the page you're looking at load first.
+
 ## Pulse 1.2.5
 <!-- x: skip -->
 
