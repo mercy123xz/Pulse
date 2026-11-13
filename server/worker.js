@@ -727,7 +727,20 @@ async function tidalSearch(c) {
   if (await overLimit(c, "tidal", c.ip, TIDAL_LOOKUPS_PER_HOUR, 3600)) fail(429, "Too many lookups. Try again in a bit.");
   await note(c, "tidal", c.ip);
 
-  const found = await tidalGet(c.env, `/searchResults/${encodeURIComponent(q)}?countryCode=${country}&include=tracks`);
+  // TIDAL is picky about how the search words are written in the address; try the
+  // ways it accepts, first one that works wins.
+  let found = null;
+  const tried = [];
+  for (const id of [encodeURIComponent(q), encodeURIComponent(q).replace(/%20/g, "+"), encodeURIComponent(q.replace(/\s+/g, "-")), encodeURIComponent(q.replace(/\s+/g, ""))]) {
+    try {
+      found = await tidalGet(c.env, `/searchResults/${id}?countryCode=${country}&include=tracks`);
+      break;
+    } catch (e) {
+      if (!(e instanceof Reply)) throw e;
+      tried.push(`${id} -> ${e.message}`);
+    }
+  }
+  if (!found) fail(502, tried.join(" | ").slice(0, 900));
   const ids = (found.data?.relationships?.tracks?.data || []).map((d) => d.id).slice(0, 10);
   let tracks = [];
   if (ids.length) {
