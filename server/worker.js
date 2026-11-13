@@ -30,6 +30,7 @@ const RESET_MAILS_PER_ACCOUNT_PER_HOUR = 3;
 const RESET_CHECKS_PER_IP_PER_15_MIN = 20;
 const MAX_AVATAR = 200_000; // bytes; the app sends a 256×256 JPEG of about 20–40 KB
 const AVATAR_CHANGES_PER_HOUR = 10;
+const TIDAL_LOOKUPS_PER_HOUR = 600; // per IP; about one per song played that Deezer doesn't have
 
 // Pictures may only come from the music services Pulse uses, so a published playlist
 // can't make other people's Pulse load pictures from (and reveal them to) any server.
@@ -112,6 +113,7 @@ async function route(c, method, path) {
   if (method === "POST" && path === "/report") return report(c);
   if (method === "GET" && path === "/fixes") return songFixes(c);
   if (method === "GET" && path === "/supporters") return supporters(c);
+  if (method === "GET" && path === "/tidal/search") return tidalSearch(c);
   fail(404, "Not found.");
 }
 
@@ -665,4 +667,94 @@ async function report(c) {
   const n = await c.env.DB.prepare("SELECT COUNT(*) AS n FROM reports WHERE playlist_id = ?").bind(id).first();
   if ((n?.n || 0) >= HIDE_AFTER_REPORTS) await c.env.DB.prepare("UPDATE playlists SET hidden = 1 WHERE id = ?").bind(id).run();
   return c.reply(200, { ok: true });
+}
+
+// ---------------------------------------------------------------- TIDAL
+
+// Song details from TIDAL, for songs Deezer doesn't have: the real length, whether it's
+// explicit, the ISRC (the recording's own code), the album and its cover. The TIDAL key
+// (TIDAL_CLIENT_ID / TIDAL_CLIENT_SECRET) stays here on the server; the app only ever
+// sees the song details.
+let tidalToken = null; // { token, expires }
+
+async function tidalAuth(env) {
+  if (tidalToken && tidalToken.expires > Date.now() + 60_000) return tidalToken.token;
+  if (!env.TIDAL_CLIENT_ID || !env.TIDAL_CLIENT_SECRET) fail(503, "TIDAL isn't set up on the server.");
+  const r = await fetch("https://auth.tidal.com/v1/oauth2/token", {
+    method: "POST",
+    headers: { Authorization: "Basic " + btoa(`${env.TIDAL_CLIENT_ID}:${env.TIDAL_CLIENT_SECRET}`), "Content-Type": "application/x-www-form-urlencoded" },
+    body: "grant_type=client_credentials",
+  });
+  if (!r.ok) {
+    console.error("TIDAL sign-in failed", r.status, await r.text());
+    fail(502, "Couldn't reach TIDAL.");
+  }
+  const j = await r.json();
+  tidalToken = { token: j.access_token, expires: Date.now() + (j.expires_in || 3600) * 1000 };
+  return tidalToken.token;
+}
+
+async function tidalGet(env, path) {
+  const r = await fetch("https://openapi.tidal.com/v2" + path, {
+    headers: { Authorization: `Bearer ${await tidalAuth(env)}`, Accept: "application/vnd.api+json" },
+  });
+  if (r.status === 401) tidalToken = null;
+  if (!r.ok) {
+    console.error("TIDAL", path, r.status, (await r.text()).slice(0, 300));
+    fail(502, "TIDAL didn't answer.");
+  }
+  return r.json();
+}
+
+// "PT2M36S" -> 156
+function isoSeconds(d) {
+  const m = String(d || "").match(/^P(?:(\d+)D)?T?(?:(\d+)H)?(?:(\d+)M)?(?:([\d.]+)S)?$/);
+  if (!m) return 0;
+  return Math.round((+m[1] || 0) * 86400 + (+m[2] || 0) * 3600 + (+m[3] || 0) * 60 + (+m[4] || 0));
+}
+
+async function tidalSearch(c) {
+  const url = new URL(c.request.url);
+  const q = (url.searchParams.get("q") || "").trim().slice(0, 200);
+  const country = /^[A-Z]{2}$/.test(url.searchParams.get("country") || "") ? url.searchParams.get("country") : "US";
+  if (!q) fail(400, "Search for something.");
+  // The same search from anyone gives the same answer, so it's kept for a day.
+  const cacheKey = new Request(`https://pulse-cache/tidal/${country}/${encodeURIComponent(q.toLowerCase())}`);
+  const cache = typeof caches !== "undefined" ? caches.default : null;
+  const hit = cache && (await cache.match(cacheKey));
+  if (hit) return new Response(hit.body, { headers: { ...c.cors, "Content-Type": "application/json", "Cache-Control": "no-store" } });
+  if (await overLimit(c, "tidal", c.ip, TIDAL_LOOKUPS_PER_HOUR, 3600)) fail(429, "Too many lookups. Try again in a bit.");
+  await note(c, "tidal", c.ip);
+
+  const found = await tidalGet(c.env, `/searchResults/${encodeURIComponent(q)}/relationships/tracks?countryCode=${country}&explicitFilter=INCLUDE`);
+  const ids = (found.data || []).map((d) => d.id).slice(0, 10);
+  let tracks = [];
+  if (ids.length) {
+    const doc = await tidalGet(c.env, `/tracks?countryCode=${country}&filter[id]=${ids.join(",")}&include=artists,albums`);
+    const included = new Map((doc.included || []).map((x) => [`${x.type}:${x.id}`, x]));
+    const byId = new Map((doc.data || []).map((t) => [t.id, t]));
+    tracks = ids
+      .map((id) => byId.get(id))
+      .filter(Boolean)
+      .map((t) => {
+        const a = t.attributes || {};
+        const rel = t.relationships || {};
+        const artists = (rel.artists?.data || []).map((r) => included.get(`artists:${r.id}`)?.attributes?.name).filter(Boolean);
+        const album = (rel.albums?.data || []).map((r) => included.get(`albums:${r.id}`)).find(Boolean);
+        return {
+          id: t.id,
+          title: a.title || "",
+          version: a.version || "",
+          isrc: a.isrc || "",
+          duration: isoSeconds(a.duration),
+          explicit: !!a.explicit,
+          popularity: typeof a.popularity === "number" ? a.popularity : 0,
+          artists,
+          album: album?.attributes?.title || "",
+        };
+      });
+  }
+  const text = JSON.stringify({ tracks });
+  if (cache) await cache.put(cacheKey, new Response(text, { headers: { "Content-Type": "application/json", "Cache-Control": "public, max-age=86400" } }));
+  return new Response(text, { headers: { ...c.cors, "Content-Type": "application/json", "Cache-Control": "no-store" } });
 }
