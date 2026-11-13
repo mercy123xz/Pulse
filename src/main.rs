@@ -27,6 +27,7 @@ mod settings;
 mod share;
 mod single;
 mod suggest;
+mod tidal;
 mod theme;
 mod themes;
 mod ui;

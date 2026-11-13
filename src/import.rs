@@ -169,7 +169,12 @@ pub fn run(url: &str, progress: &Arc<Mutex<Progress>>, cancel: &AtomicBool) -> R
                 if let Some(art) = crate::itunes::cover(&item.artist, &item.title) {
                     item.art = Some(art);
                 }
-                unmatched(&item, source, i)
+                let mut t = unmatched(&item, source, i);
+                // TIDAL knows the song's real length, whether it swears and who's on it.
+                if let Some(song) = crate::tidal::find(&item.artist, &item.title, item.duration) {
+                    with_tidal(&mut t, &song);
+                }
+                t
             }
         };
         if !tracks.iter().any(|(x, _): &(Track, Option<String>)| x.id == t.id) {
@@ -219,6 +224,19 @@ fn unmatched(item: &Item, source: Source, n: usize) -> Track {
         cover_small: item.art.clone(),
         cover_big: item.art.clone(),
         ..Default::default()
+    }
+}
+
+/// Fills in what TIDAL knows about a song Deezer doesn't have.
+fn with_tidal(t: &mut Track, song: &crate::tidal::Song) {
+    if song.duration >= 60 {
+        t.duration = song.duration;
+    }
+    t.explicit = song.explicit;
+    for name in song.artists.iter().skip(1) {
+        if !t.artist.name.eq_ignore_ascii_case(name) && !t.featured.iter().any(|a| a.name.eq_ignore_ascii_case(name)) {
+            t.featured.push(ArtistRef { name: name.clone(), ..Default::default() });
+        }
     }
 }
 

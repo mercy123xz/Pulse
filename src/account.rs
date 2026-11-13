@@ -17,7 +17,7 @@ const ACCOUNTS_URL: &str = "https://pulse-accounts.y0hyotuube.workers.dev";
 /// Where public links point: the website's page for a playlist or a profile.
 pub const SITE: &str = "https://mercy123xz.github.io/Pulse/";
 
-fn base() -> String {
+pub(crate) fn base() -> String {
     // Developer check: PULSE_DEBUG_ACCOUNTS points Pulse at a test server.
     std::env::var("PULSE_DEBUG_ACCOUNTS").unwrap_or_else(|_| ACCOUNTS_URL.to_string()).trim_end_matches('/').to_string()
 }

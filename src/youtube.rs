@@ -1150,7 +1150,7 @@ mod tests {
             deno: std::env::var("PULSE_DENO").unwrap_or("deno".into()).into(),
             dir: std::env::temp_dir(),
         });
-        let (mut ok, mut flagged, mut missing) = (0, 0, 0);
+        let (mut ok, mut flagged, mut missing, mut on_tidal) = (0, 0, 0, 0);
         for (n, (artists, title, secs)) in songs.iter().enumerate() {
             std::thread::sleep(std::time::Duration::from_millis(250));
             // The real song listed only as a clip: a row for the song fixes list.
@@ -1182,9 +1182,18 @@ mod tests {
                         println!("       had: {} – {} ({}s, rank {})", c.artist.name, c.title, c.duration, c.rank);
                     }
                     let (main, also) = crate::deezer::split_artists(artists);
+                    let tidal = crate::tidal::find(artists, title, *secs);
+                    match &tidal {
+                        Some(s) => {
+                            on_tidal += 1;
+                            println!("       TIDAL: {} – {} ({}s, explicit {}, {})", s.artists.join(", "), s.title, s.duration, s.explicit, s.isrc);
+                        }
+                        None => println!("       TIDAL: not found"),
+                    }
                     Track {
                         title: title.clone(),
                         duration: *secs,
+                        explicit: tidal.as_ref().is_some_and(|s| s.explicit),
                         artist: crate::deezer::ArtistRef { name: main, ..Default::default() },
                         featured: also.into_iter().map(|name| crate::deezer::ArtistRef { name, ..Default::default() }).collect(),
                         ..Default::default()
@@ -1264,6 +1273,9 @@ mod tests {
                 println!("  {} – {} ({}s, rank {})", t.all_artists(), t.title, t.duration, t.rank);
             }
         }
-        println!("\nSUMMARY: {ok} ok on Deezer, {missing} not on Deezer (played from YouTube), {flagged} to check, of {} songs", songs.len());
+        println!(
+            "\nSUMMARY: {ok} ok on Deezer, {missing} not on Deezer (played from YouTube; TIDAL knew {on_tidal} of them), {flagged} to check, of {} songs",
+            songs.len()
+        );
     }
 }
