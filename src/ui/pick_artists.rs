@@ -15,7 +15,7 @@ use std::sync::mpsc::{Receiver, channel};
 
 /// Genres offered (Deezer ids), in the order shown.
 const OFFERED: [u32; 12] = [116, 132, 165, 152, 85, 113, 106, 197, 464, 84, 169, 122];
-const ENOUGH: usize = 3;
+pub(crate) const ENOUGH: usize = 3;
 
 /// A request's number and what came back.
 type Answer = (u64, Result<Vec<ArtistInfo>, String>);
@@ -25,7 +25,7 @@ pub struct Picker {
     genres: Vec<u32>,
     query: String,
     shown: Vec<ArtistInfo>,
-    picked: Vec<ArtistInfo>,
+    pub(crate) picked: Vec<ArtistInfo>,
     loading: bool,
     error: Option<String>,
     /// The newest request, so an older answer arriving late is ignored.
@@ -36,6 +36,13 @@ pub struct Picker {
 }
 
 impl Picker {
+    /// A picker that starts loading popular artists.
+    pub(crate) fn start(ctx: &egui::Context) -> Self {
+        let mut p = Picker::default();
+        p.load(ctx);
+        p
+    }
+
     fn load(&mut self, ctx: &egui::Context) {
         self.asked += 1;
         let (n, q, genres) = (self.asked, self.query.trim().to_string(), self.genres.clone());
@@ -94,16 +101,8 @@ pub fn open(app: &mut App, ctx: &egui::Context) {
 /// The window. Call each frame.
 pub fn show(app: &mut App, ctx: &egui::Context) {
     let Some(p) = &mut app.picker else { return };
-    p.receive();
+    p.tick(ctx);
     let now = ctx.input(|i| i.time);
-    if let Some(at) = p.typed_at
-        && now - at > 0.45
-    {
-        p.typed_at = None;
-        p.load(ctx);
-    } else if p.typed_at.is_some() {
-        ctx.request_repaint_after(std::time::Duration::from_millis(150));
-    }
     let (mut finish, mut skip) = (false, false);
     let screen = ctx.content_rect();
     let width = (screen.width() - 80.0).clamp(420.0, 760.0);
@@ -120,83 +119,7 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
         );
         ui.add_space(16.0);
 
-        // Search.
-        let r =
-            egui::Frame::new().fill(pal().surface_hover).corner_radius(CornerRadius::same(18)).inner_margin(egui::Margin::symmetric(14, 9)).show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    paint_icon(ui.painter(), ui.cursor().min + vec2(8.0, 9.0), icon::MAGNIFYING_GLASS, regular(16.0), pal().text_muted);
-                    ui.add_space(22.0);
-                    ui.add(
-                        egui::TextEdit::singleline(&mut p.query)
-                            .id(egui::Id::new("pick_artists_search"))
-                            .frame(egui::Frame::NONE)
-                            .hint_text(tr("Search for an artist"))
-                            .desired_width(f32::INFINITY),
-                    )
-                })
-                .inner
-            });
-        if r.inner.changed() {
-            p.typed_at = Some(now);
-        }
-        ui.add_space(12.0);
-
-        // Genres.
-        ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
-            for g in OFFERED {
-                let Some((_, name)) = deezer::GENRES.iter().find(|(id, _)| *id == g) else { continue };
-                let on = p.genres.contains(&g);
-                if pill(ui, name, on).clicked() {
-                    if on {
-                        p.genres.retain(|x| *x != g);
-                    } else {
-                        p.genres.push(g);
-                    }
-                    p.query.clear();
-                    p.typed_at = None;
-                    p.load(ui.ctx());
-                }
-            }
-        });
-        ui.add_space(14.0);
-
-        // Artists.
-        egui::ScrollArea::vertical().max_height(grid_h).min_scrolled_height(grid_h).auto_shrink([false, false]).show(ui, |ui| {
-            if let Some(e) = &p.error {
-                ui.add_space(30.0);
-                ui.vertical_centered(|ui| ui.label(RichText::new(tr(e)).font(regular(13.5)).color(pal().text_muted)));
-                return;
-            }
-            if p.loading && p.shown.is_empty() {
-                ui.add_space(40.0);
-                ui.vertical_centered(|ui| ui.spinner());
-                return;
-            }
-            // As many columns as fit, then widened to fill the row.
-            let avail = ui.available_width() - 4.0;
-            let cols = ((avail + 12.0) / 130.0).floor().max(2.0) as usize;
-            let cell = (avail - 12.0 * (cols as f32 - 1.0)) / cols as f32;
-            let list = p.shown.clone();
-            for row in list.chunks(cols) {
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 12.0;
-                    for a in row {
-                        let picked = p.picked.iter().any(|x| x.id == a.id);
-                        if artist(ui, a, picked, cell).clicked() {
-                            if picked {
-                                p.picked.retain(|x| x.id != a.id);
-                            } else {
-                                p.picked.push(a.clone());
-                            }
-                        }
-                    }
-                });
-                ui.add_space(14.0);
-            }
-        });
-        ui.add_space(14.0);
-
+        body(p, ui, now, grid_h);
         // Done.
         ui.horizontal(|ui| {
             let n = p.picked.len();
@@ -233,6 +156,104 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
             }
             app.cache.remove("home");
             app.toast(tr("Your home page now starts from your artists"), ctx);
+        }
+    }
+}
+
+/// The search box, genre buttons and artist grid (shared with first-time setup).
+/// Call `p.tick(ctx)` once per frame before this.
+pub(crate) fn body(p: &mut Picker, ui: &mut Ui, now: f64, grid_h: f32) {
+    // Search.
+    let r =
+        egui::Frame::new().fill(pal().surface_hover).corner_radius(CornerRadius::same(18)).inner_margin(egui::Margin::symmetric(14, 9)).show(ui, |ui| {
+            ui.horizontal(|ui| {
+                paint_icon(ui.painter(), ui.cursor().min + vec2(8.0, 9.0), icon::MAGNIFYING_GLASS, regular(16.0), pal().text_muted);
+                ui.add_space(22.0);
+                ui.add(
+                    egui::TextEdit::singleline(&mut p.query)
+                        .id(egui::Id::new("pick_artists_search"))
+                        .frame(egui::Frame::NONE)
+                        .hint_text(tr("Search for an artist"))
+                        .desired_width(f32::INFINITY),
+                )
+            })
+            .inner
+        });
+    if r.inner.changed() {
+        p.typed_at = Some(now);
+    }
+    ui.add_space(12.0);
+
+    // Genres.
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
+        for g in OFFERED {
+            let Some((_, name)) = deezer::GENRES.iter().find(|(id, _)| *id == g) else { continue };
+            let on = p.genres.contains(&g);
+            if pill(ui, name, on).clicked() {
+                if on {
+                    p.genres.retain(|x| *x != g);
+                } else {
+                    p.genres.push(g);
+                }
+                p.query.clear();
+                p.typed_at = None;
+                p.load(ui.ctx());
+            }
+        }
+    });
+    ui.add_space(14.0);
+
+    // Artists.
+    egui::ScrollArea::vertical().max_height(grid_h).min_scrolled_height(grid_h).auto_shrink([false, false]).show(ui, |ui| {
+        if let Some(e) = &p.error {
+            ui.add_space(30.0);
+            ui.vertical_centered(|ui| ui.label(RichText::new(tr(e)).font(regular(13.5)).color(pal().text_muted)));
+            return;
+        }
+        if p.loading && p.shown.is_empty() {
+            ui.add_space(40.0);
+            ui.vertical_centered(|ui| ui.spinner());
+            return;
+        }
+        // As many columns as fit, then widened to fill the row.
+        let avail = ui.available_width() - 4.0;
+        let cols = ((avail + 12.0) / 130.0).floor().max(2.0) as usize;
+        let cell = (avail - 12.0 * (cols as f32 - 1.0)) / cols as f32;
+        let list = p.shown.clone();
+        for row in list.chunks(cols) {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 12.0;
+                for a in row {
+                    let picked = p.picked.iter().any(|x| x.id == a.id);
+                    if artist(ui, a, picked, cell).clicked() {
+                        if picked {
+                            p.picked.retain(|x| x.id != a.id);
+                        } else {
+                            p.picked.push(a.clone());
+                        }
+                    }
+                }
+            });
+            ui.add_space(14.0);
+        }
+    });
+    ui.add_space(14.0);
+
+}
+
+impl Picker {
+    /// Takes in answers and runs the search once typing pauses. Call each frame.
+    pub(crate) fn tick(&mut self, ctx: &egui::Context) {
+        self.receive();
+        let now = ctx.input(|i| i.time);
+        if let Some(at) = self.typed_at
+            && now - at > 0.45
+        {
+            self.typed_at = None;
+            self.load(ctx);
+        } else if self.typed_at.is_some() {
+            ctx.request_repaint_after(std::time::Duration::from_millis(150));
         }
     }
 }

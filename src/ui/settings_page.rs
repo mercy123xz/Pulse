@@ -269,6 +269,11 @@ pub fn settings_page(app: &mut App, ui: &mut Ui) {
             app.report = Some((String::new(), true));
         }
     });
+    row(ui, tr("First-time setup"), tr("Go through the welcome steps again: account, artists, settings and theme."), |ui| {
+        if ui.button(tr("Run again")).clicked() {
+            app.setup = Some(crate::ui::setup::Setup::new());
+        }
+    });
 
     ui.add_space(30.0);
 
@@ -556,7 +561,7 @@ fn themes_section(app: &mut App, ui: &mut Ui) {
 }
 
 /// A tiny picture of a theme: sidebar, page, a card, a song row and the accent.
-fn swatch(ui: &Ui, r: Rect, p: &crate::theme::Palette) {
+pub(crate) fn swatch(ui: &Ui, r: Rect, p: &crate::theme::Palette) {
     let painter = ui.painter();
     painter.rect_filled(r, r_md(), p.bg);
     let side = Rect::from_min_size(r.min, vec2(44.0, r.height()));
@@ -618,21 +623,9 @@ fn quality_combo(ui: &mut Ui, id: &str, q: &mut Quality) {
     });
 }
 
-/// An on/off switch like Spotify's.
+/// An on/off switch.
 pub fn switch(ui: &mut Ui, on: &mut bool, label: &str) -> egui::Response {
-    let (rect, mut resp) = ui.allocate_exact_size(vec2(40.0, 22.0), Sense::click());
-    if resp.clicked() {
-        *on = !*on;
-        resp.mark_changed();
-    }
-    resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, true, *on, label));
-    focus_ring(ui, &resp);
-    let t = ui.ctx().animate_bool(resp.id, *on);
-    let track = if *on { pal().accent } else { pal().text_faint };
-    ui.painter().rect_filled(rect, CornerRadius::same(11), track);
-    let x = egui::lerp(rect.left() + 11.0..=rect.right() - 11.0, t);
-    ui.painter().circle_filled(pos2(x, rect.center().y), 8.0, Color32::WHITE);
-    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+    crate::widgets::toggle_switch(ui, on, label, pal().accent, pal().text_faint)
 }
 
 /// The equalizer: preset picker and a curve with one draggable point per band.

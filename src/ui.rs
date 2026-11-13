@@ -14,6 +14,7 @@ pub mod mini;
 mod online;
 mod personal;
 pub mod pick_artists;
+pub mod setup;
 mod settings_page;
 mod song_page;
 
@@ -90,6 +91,7 @@ pub fn draw(app: &mut App, ui: &mut Ui) {
 
     dialogs(app, &ctx);
     toast(app, &ctx);
+    setup::show(app, &ctx);
     intro::show(app, &ctx);
 }
 

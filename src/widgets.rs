@@ -215,6 +215,52 @@ fn icon_button_impl(ui: &mut Ui, glyph: &str, size: f32, color: Color32, tip: &s
 }
 
 /// Small dot-indicator used under active toggle buttons (shuffle / repeat).
+/// An on/off switch. The knob slides across with a little overshoot, stretches while
+/// it's pressed, and carries a check mark when on. `on_color` is the track color when on.
+pub fn toggle_switch(ui: &mut Ui, on: &mut bool, label: &str, on_color: Color32, off_color: Color32) -> Response {
+    let size = vec2(42.0, 24.0);
+    let (rect, mut resp) = ui.allocate_exact_size(size, Sense::click());
+    if resp.clicked() {
+        *on = !*on;
+        resp.mark_changed();
+    }
+    resp.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, true, *on, label));
+    focus_ring(ui, &resp);
+    if ui.is_rect_visible(rect) {
+        let ctx = ui.ctx();
+        let t = ctx.animate_bool_with_time(resp.id, *on, 0.22);
+        // Ease out with a small overshoot, like a spring settling.
+        let slide = {
+            let c = 1.6;
+            let x = t - 1.0;
+            if *on { 1.0 + (c + 1.0) * x.powi(3) + c * x.powi(2) } else { t * t * (3.0 - 2.0 * t) }
+        };
+        let pressed = resp.is_pointer_button_down_on();
+        let stretch = ctx.animate_bool_with_time(resp.id.with("press"), pressed, 0.1);
+        let p = ui.painter();
+        let track = lerp_color(off_color, on_color, t);
+        p.rect_filled(rect, CornerRadius::same(12), track);
+        let pad = 3.0;
+        let d = rect.height() - pad * 2.0;
+        let w = d + 4.0 * stretch;
+        let x0 = egui::lerp(rect.left() + pad..=rect.right() - pad - w, slide.clamp(-0.1, 1.1));
+        let knob = Rect::from_min_size(pos2(x0, rect.top() + pad), vec2(w, d));
+        p.rect_filled(knob.translate(vec2(0.0, 1.0)), CornerRadius::same((d / 2.0) as u8), Color32::from_black_alpha(40));
+        p.rect_filled(knob, CornerRadius::same((d / 2.0) as u8), Color32::WHITE);
+        if t > 0.5 {
+            let a = ((t - 0.5) * 2.0).clamp(0.0, 1.0);
+            paint_icon(p, knob.center(), icon::CHECK, FontId::proportional(11.0), on_color.gamma_multiply(a));
+        }
+    }
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+fn lerp_color(a: Color32, b: Color32, t: f32) -> Color32 {
+    let l = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * t).round() as u8;
+    // Color32 stores premultiplied values, so mixing them straight is correct.
+    Color32::from_rgba_premultiplied(l(a.r(), b.r()), l(a.g(), b.g()), l(a.b(), b.b()), l(a.a(), b.a()))
+}
+
 pub fn active_dot(ui: &Ui, resp: &Response) {
     ui.painter().circle_filled(pos2(resp.rect.center().x, resp.rect.bottom() - 1.0), 2.0, pal().accent_soft);
 }
