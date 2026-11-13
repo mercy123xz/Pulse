@@ -1800,6 +1800,24 @@ fn artist(app: &mut App, ui: &mut Ui) {
             section_title(ui, "Discography", None);
             album_grid(app, ui, &p.releases, None);
         }
+        // Deezer files other artists with the same name here; keep them out of the way.
+        if !p.namesakes.is_empty() {
+            let open_id = egui::Id::new(("namesakes", &p.artist.id));
+            let open = ui.data(|d| d.get_temp::<bool>(open_id)).unwrap_or(false);
+            let title = tr("Other artists named {}").replace("{}", &p.artist.name);
+            if section_title(ui, &title, Some(if open { "Hide" } else { "Show" })) {
+                ui.data_mut(|d| d.insert_temp(open_id, !open));
+            }
+            ui.label(
+                RichText::new(tr("Deezer lists these under the same name, but they're probably different artists."))
+                    .font(regular(12.5))
+                    .color(pal().text_muted),
+            );
+            if open {
+                ui.add_space(6.0);
+                album_grid(app, ui, &p.namesakes, None);
+            }
+        }
         if p.songs_like.len() >= 3 {
             section_title(ui, &tr("Songs like {}").replace("{}", &p.artist.name), None);
             tracks_block(app, ui, "artist_like", &p.songs_like[..p.songs_like.len().min(10)]);

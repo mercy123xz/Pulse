@@ -359,6 +359,9 @@ pub struct SearchEntry {
     pub channel: Option<String>,
     pub uploader: Option<String>,
     pub view_count: Option<u64>,
+    /// From YouTube Music only: whether this is the explicit (uncensored) version.
+    #[serde(skip)]
+    pub explicit: Option<bool>,
 }
 
 #[derive(Deserialize, Default)]
@@ -534,6 +537,13 @@ pub fn score(track: &Track, e: &SearchEntry) -> i32 {
             _ => 0,
         };
     }
+    // YouTube Music marks the explicit version. The clean one often has the very same
+    // title, length and channel, so this is the only way to tell them apart.
+    s += match (e.explicit, crate::deezer::prefer_explicit()) {
+        (Some(true), true) => 12,
+        (Some(true), false) => -20,
+        _ => 0,
+    };
     s
 }
 
@@ -561,6 +571,80 @@ fn search(tools: &Tools, target: String, limit: u32) -> Result<Vec<SearchEntry>,
     Ok(result.entries.into_iter().flatten().collect())
 }
 
+/// Searches YouTube Music's songs directly. Faster than going through yt-dlp, and it
+/// says how long each song is, who it's by and whether it's the explicit version.
+fn music_search(query: &str) -> Result<Vec<SearchEntry>, String> {
+    // "params" picks the Songs tab.
+    let body = serde_json::json!({
+        "context": { "client": { "clientName": "WEB_REMIX", "clientVersion": "1.20241106.01.00", "hl": "en" } },
+        "query": query,
+        "params": "EgWKAQIIAWoKEAkQBRAKEAMQBA%3D%3D",
+    });
+    let mut resp = crate::net::api()
+        .post("https://music.youtube.com/youtubei/v1/search?prettyPrint=false")
+        .header("Origin", "https://music.youtube.com")
+        .send_json(&body)
+        .map_err(crate::net::friendly_error)?;
+    let reply: serde_json::Value =
+        resp.body_mut().with_config().limit(8 * 1024 * 1024).read_json().map_err(|e| format!("Unexpected YouTube Music reply ({e})"))?;
+    Ok(music_entries(&reply))
+}
+
+/// Reads the songs out of a YouTube Music search reply.
+fn music_entries(reply: &serde_json::Value) -> Vec<SearchEntry> {
+    fn walk<'a>(v: &'a serde_json::Value, out: &mut Vec<&'a serde_json::Value>) {
+        match v {
+            serde_json::Value::Object(m) => {
+                if let Some(item) = m.get("musicResponsiveListItemRenderer") {
+                    out.push(item);
+                }
+                m.values().for_each(|x| walk(x, out));
+            }
+            serde_json::Value::Array(a) => a.iter().for_each(|x| walk(x, out)),
+            _ => {}
+        }
+    }
+    let mut items = Vec::new();
+    walk(reply, &mut items);
+    let column = |item: &serde_json::Value, i: usize| -> String {
+        item["flexColumns"][i]["musicResponsiveListItemFlexColumnRenderer"]["text"]["runs"]
+            .as_array()
+            .map(|runs| runs.iter().filter_map(|r| r["text"].as_str()).collect())
+            .unwrap_or_default()
+    };
+    items
+        .into_iter()
+        .filter_map(|item| {
+            let id = item["playlistItemData"]["videoId"].as_str()?.to_string();
+            let title = column(item, 0);
+            // "Artist & Artist • Album • 2:36"
+            let info = column(item, 1);
+            let parts: Vec<&str> = info.split(" • ").collect();
+            let duration = parts.last().and_then(|d| parse_clock(d));
+            let artists = parts.first().filter(|_| parts.len() > 1).map(|a| a.trim().to_string()).unwrap_or_default();
+            let explicit = item.to_string().contains("MUSIC_EXPLICIT_BADGE");
+            Some(SearchEntry {
+                id,
+                title,
+                duration,
+                // YouTube Music's songs are the album audio, the same as an "Artist - Topic" upload.
+                channel: (!artists.is_empty()).then(|| format!("{artists} - Topic")),
+                explicit: Some(explicit),
+                ..Default::default()
+            })
+        })
+        .collect()
+}
+
+/// "2:36" or "1:02:03" in seconds.
+fn parse_clock(s: &str) -> Option<f64> {
+    let mut total = 0.0;
+    for part in s.trim().split(':') {
+        total = total * 60.0 + part.parse::<u32>().ok()? as f64;
+    }
+    s.contains(':').then_some(total)
+}
+
 /// The two YouTube searches Pulse runs for a song: one with the title in quotes
 /// (YouTube then only returns videos that contain it) and one plain.
 fn queries(track: &Track) -> [String; 2] {
@@ -579,10 +663,18 @@ pub fn find_videos(tools: &Tools, track: &Track) -> Result<Vec<String>, String> 
     let [quoted, plain] = queries(track);
     let music_url = format!("https://music.youtube.com/search?q={}#songs", crate::net::encode(&plain));
     let (tx, rx) = std::sync::mpsc::channel::<(bool, Result<Vec<SearchEntry>, String>)>();
-    for (is_music, target, limit) in [(true, music_url, 6), (false, format!("ytsearch8:{quoted}"), 8), (false, format!("ytsearch8:{plain}"), 8)] {
+    // YouTube Music directly; through yt-dlp if that fails.
+    {
+        let (tx, tools, plain) = (tx.clone(), tools.clone(), plain.clone());
+        std::thread::spawn(move || {
+            let found = music_search(&plain).ok().filter(|e| !e.is_empty()).map(Ok).unwrap_or_else(|| search(&tools, music_url, 6));
+            let _ = tx.send((true, found));
+        });
+    }
+    for target in [format!("ytsearch8:{quoted}"), format!("ytsearch8:{plain}")] {
         let (tx, tools) = (tx.clone(), tools.clone());
         std::thread::spawn(move || {
-            let _ = tx.send((is_music, search(&tools, target, limit)));
+            let _ = tx.send((false, search(&tools, target, 8)));
         });
     }
     drop(tx);
@@ -779,7 +871,7 @@ mod tests {
     }
 
     fn entry(id: &str, title: &str, secs: f64, channel: &str) -> SearchEntry {
-        SearchEntry { id: id.into(), title: title.into(), duration: Some(secs), channel: Some(channel.into()), uploader: None, view_count: None }
+        SearchEntry { id: id.into(), title: title.into(), duration: Some(secs), channel: Some(channel.into()), ..Default::default() }
     }
 
     #[test]
@@ -789,6 +881,55 @@ mod tests {
         assert!(!clear_match(&t, &entry("b", "Meet Me Halfway", 284.0, "Pop Hits Orchestra - Topic")));
         assert!(!clear_match(&t, &entry("c", "Meet Me Halfway (Live)", 300.0, "Black Eyed Peas - Topic")));
         assert!(!clear_match(&t, &entry("d", "Black Eyed Peas - Meet Me Halfway", 284.0, "BlackEyedPeasVEVO")));
+    }
+
+    /// Live check (needs the network): the explicit version of a song whose clean version
+    /// looks identical, and an artist name Deezer shares between many artists.
+    #[test]
+    #[ignore]
+    fn live_explicit_and_namesakes() {
+        let found = music_search("ApolloRed1 - Geeked up").expect("YouTube Music search");
+        println!("YouTube Music: {:?}", found.iter().take(4).map(|e| (&e.id, &e.title, &e.channel, e.duration, e.explicit)).collect::<Vec<_>>());
+        let t = song("ApolloRed1", "Geeked up", 156);
+        let _turn = crate::deezer::EXPLICIT_TEST.lock().unwrap_or_else(|e| e.into_inner());
+        crate::deezer::set_prefer_explicit(true);
+        let best = pick_best(&t, &found).expect("a match");
+        println!("Picked: {} {:?}", best.id, best.explicit);
+        assert_eq!(best.explicit, Some(true));
+        let page = crate::deezer::artist_page("234701081").expect("Che's page");
+        println!("Che: {:?}", page.releases.iter().map(|a| &a.title).collect::<Vec<_>>());
+        println!("Others named Che: {}", page.namesakes.len());
+        assert!(page.releases.iter().any(|a| a.title == "RichPhønks"));
+        assert!(page.releases.len() < 15 && page.namesakes.len() > 40);
+    }
+
+    #[test]
+    fn reads_youtube_music_songs_and_the_explicit_badge() {
+        let col = |runs: &[&str]| serde_json::json!({ "musicResponsiveListItemFlexColumnRenderer": { "text": { "runs": runs.iter().map(|t| serde_json::json!({ "text": t })).collect::<Vec<_>>() } } });
+        let item = |id: &str, title: &str, info: &[&str], explicit: bool| {
+            let mut r = serde_json::json!({ "playlistItemData": { "videoId": id }, "flexColumns": [col(&[title]), col(info)] });
+            if explicit {
+                r["badges"] = serde_json::json!([{ "musicInlineBadgeRenderer": { "icon": { "iconType": "MUSIC_EXPLICIT_BADGE" } } }]);
+            }
+            serde_json::json!({ "musicResponsiveListItemRenderer": r })
+        };
+        let reply = serde_json::json!({ "contents": { "items": [
+            item("dirty", "Geeked up", &["ApolloRed1", " & ", "OsamaSon", " • ", "Demon Heart Radio", " • ", "2:36"], true),
+            item("clean", "Geeked up", &["ApolloRed1", " • ", "Demon Heart Radio", " • ", "2:35"], false),
+        ] } });
+        let found = music_entries(&reply);
+        assert_eq!(found.len(), 2);
+        assert_eq!(found[0].channel.as_deref(), Some("ApolloRed1 & OsamaSon - Topic"));
+        assert_eq!(found[0].duration, Some(156.0));
+        assert_eq!((found[0].explicit, found[1].explicit), (Some(true), Some(false)));
+        // The same song with the same length: only the badge tells them apart.
+        let t = song("ApolloRed1", "Geeked up", 156);
+        let _turn = crate::deezer::EXPLICIT_TEST.lock().unwrap_or_else(|e| e.into_inner());
+        crate::deezer::set_prefer_explicit(true);
+        assert_eq!(pick_best(&t, &found).unwrap().id, "dirty");
+        crate::deezer::set_prefer_explicit(false);
+        assert_eq!(pick_best(&t, &found).unwrap().id, "clean");
+        crate::deezer::set_prefer_explicit(true);
     }
 
     #[test]

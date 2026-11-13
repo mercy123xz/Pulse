@@ -184,6 +184,8 @@ pub struct ArtistPage {
     pub top: Vec<Track>,
     /// Albums, EPs and singles, newest first.
     pub releases: Vec<AlbumInfo>,
+    /// Releases by other artists with the same name, which Deezer files under this one.
+    pub namesakes: Vec<AlbumInfo>,
     pub related: Vec<ArtistInfo>,
     /// Songs by other artists that sound like this one.
     pub songs_like: Vec<Track>,
@@ -250,6 +252,9 @@ struct DzAlbum {
     nb_tracks: u64,
     label: Option<String>,
     artist: Option<DzArtist>,
+    /// Only in an artist's release list: how many fans the release has, and its genre.
+    fans: u64,
+    genre_id: i64,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -1021,8 +1026,12 @@ pub fn artist_page(id: &str) -> Result<ArtistPage, String> {
     let albums: List<DzAlbum> = get(&format!("/artist/{id}/albums"), &[("limit", "100")]).unwrap_or_default();
     let related = related_artists(id, 12);
     let songs_like = songs_like_artist(id, &artist.name);
-    let mut releases: Vec<AlbumInfo> = albums.data.into_iter().map(|a| album_info(a, Some(&me))).collect();
+    let top_albums: std::collections::HashSet<u64> = top.data.iter().filter_map(|t| t.album.as_ref().map(|a| a.id)).collect();
+    let (own, others) = split_namesakes(albums.data, &top_albums);
+    let mut releases: Vec<AlbumInfo> = own.into_iter().map(|a| album_info(a, Some(&me))).collect();
+    let mut namesakes: Vec<AlbumInfo> = others.into_iter().map(|a| album_info(a, Some(&me))).collect();
     sort_newest_first(&mut releases);
+    sort_newest_first(&mut namesakes);
     // The 10 most popular songs, most popular first (by Deezer's popularity score).
     let mut top = tracks(top);
     top.sort_by_key(|t| std::cmp::Reverse(t.rank));
@@ -1035,7 +1044,23 @@ pub fn artist_page(id: &str) -> Result<ArtistPage, String> {
     {
         latest.nb_tracks = full.nb_tracks;
     }
-    Ok(ArtistPage { artist: artist.into(), top, releases, related, songs_like })
+    Ok(ArtistPage { artist: artist.into(), top, releases, namesakes, related, songs_like })
+}
+
+/// Deezer sometimes files many different artists who share a name (there are dozens
+/// called "Che") under one artist. Their releases then span many unrelated genres. When
+/// that happens, only the releases with real listeners, or with one of the artist's
+/// popular songs, are kept as the artist's own; the rest are returned separately.
+/// An ordinary artist (a few genres) keeps everything.
+fn split_namesakes(albums: Vec<DzAlbum>, top_albums: &std::collections::HashSet<u64>) -> (Vec<DzAlbum>, Vec<DzAlbum>) {
+    let genres: std::collections::HashSet<i64> = albums.iter().map(|a| a.genre_id).filter(|g| *g > 0).collect();
+    if albums.len() < 12 || genres.len() < 5 {
+        return (albums, Vec::new());
+    }
+    let most = albums.iter().map(|a| a.fans).max().unwrap_or(0);
+    let enough = (most / 10).max(3);
+    let (own, others): (Vec<_>, Vec<_>) = albums.into_iter().partition(|a| a.fans >= enough || top_albums.contains(&a.id));
+    if own.is_empty() { (others, Vec::new()) } else { (own, others) }
 }
 
 /// Newest release first (Deezer returns them in no useful order).
@@ -1282,6 +1307,27 @@ pub fn similar_to(t: &Track) -> Result<Vec<Track>, String> {
 
 #[cfg(test)]
 mod tests {
+    fn release(id: u64, fans: u64, genre: i64) -> DzAlbum {
+        DzAlbum { id, fans, genre_id: genre, ..Default::default() }
+    }
+
+    #[test]
+    fn keeps_namesakes_apart() {
+        // One "Che" on Deezer: the real one (lots of fans) plus strangers in other genres.
+        let mut albums = vec![release(1, 98, 116), release(2, 83, 116), release(3, 7, 113)];
+        for (i, g) in [165, 106, 85, 132, 152, 144, 165, 106, 85, 132].into_iter().enumerate() {
+            albums.push(release(10 + i as u64, i as u64 % 2, g));
+        }
+        let top = std::collections::HashSet::from([3]);
+        let (own, others) = split_namesakes(albums, &top);
+        assert_eq!(own.iter().map(|a| a.id).collect::<Vec<_>>(), [1, 2, 3]);
+        assert_eq!(others.len(), 10);
+        // An ordinary artist: one or two genres, everything stays.
+        let albums: Vec<DzAlbum> = (0..30).map(|i| release(i, i % 3, if i % 4 == 0 { 132 } else { 116 })).collect();
+        let (own, others) = split_namesakes(albums, &top);
+        assert_eq!((own.len(), others.len()), (30, 0));
+    }
+
     fn artist(name: &str, fans: u64) -> ArtistInfo {
         ArtistInfo { id: name.into(), name: name.into(), picture: None, picture_xl: None, fans, albums: 0 }
     }

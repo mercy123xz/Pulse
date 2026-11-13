@@ -25,6 +25,11 @@ jobs:
           python3 -m pip install --user -U yt-dlp
           curl -fsSL https://deno.land/install.sh | sh -s -- -y
           echo "$HOME/.deno/bin" >> "$GITHUB_PATH"
+      - name: Explicit versions and shared artist names
+        env:
+          PULSE_YTDLP: yt-dlp
+          PULSE_DENO: deno
+        run: cargo test --release live_explicit_and_namesakes -- --ignored --nocapture
       - name: Match the playlist
         env:
           PULSE_LIVE_SONGS: tests/data/friend-playlist.txt
