@@ -700,8 +700,9 @@ async function tidalGet(env, path) {
   });
   if (r.status === 401) tidalToken = null;
   if (!r.ok) {
-    console.error("TIDAL", path, r.status, (await r.text()).slice(0, 300));
-    fail(502, "TIDAL didn't answer.");
+    const why = (await r.text()).slice(0, 300);
+    console.error("TIDAL", path, r.status, why);
+    fail(502, `TIDAL didn't answer (${r.status}: ${why.replace(/\s+/g, " ")})`);
   }
   return r.json();
 }
@@ -726,8 +727,8 @@ async function tidalSearch(c) {
   if (await overLimit(c, "tidal", c.ip, TIDAL_LOOKUPS_PER_HOUR, 3600)) fail(429, "Too many lookups. Try again in a bit.");
   await note(c, "tidal", c.ip);
 
-  const found = await tidalGet(c.env, `/searchResults/${encodeURIComponent(q)}/relationships/tracks?countryCode=${country}&explicitFilter=INCLUDE`);
-  const ids = (found.data || []).map((d) => d.id).slice(0, 10);
+  const found = await tidalGet(c.env, `/searchResults/${encodeURIComponent(q)}?countryCode=${country}&include=tracks`);
+  const ids = (found.data?.relationships?.tracks?.data || []).map((d) => d.id).slice(0, 10);
   let tracks = [];
   if (ids.length) {
     const doc = await tidalGet(c.env, `/tracks?countryCode=${country}&filter[id]=${ids.join(",")}&include=artists,albums`);
