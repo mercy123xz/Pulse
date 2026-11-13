@@ -1076,7 +1076,8 @@ impl App {
                 Some(s) => format!("@{}", s.username),
                 None => app.saved.profile.name.trim().to_string(),
             };
-            let still = crate::theme::reduce_motion() || !crate::perf::on(crate::perf::Extra::Animations);
+            // Only "Reduce motion" skips it; Gaming and Ultra-low modes still play it.
+            let still = app.saved.settings.reduce_motion;
             app.intro = Some(crate::ui::intro::Intro::for_launch(!app.saved.intro_seen, still, name));
             if still {
                 app.saved.intro_seen = true;

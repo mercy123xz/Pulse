@@ -3,8 +3,12 @@
 //! the window, and the app is behind it. Every launch after that: a small "Welcome back,
 //! @you" in the middle of the window for a moment.
 //!
-//! A click or a key skips either one. With "Reduce motion" (or Gaming and Ultra-low
-//! modes) there's no intro, only the welcome.
+//! A click or a key skips either one. With "Reduce motion" there's no intro, only the
+//! welcome. Gaming and Ultra-low modes still play it: it's two seconds at startup.
+//!
+//! The intro keeps its own clock that moves at most a twentieth of a second per frame,
+//! so a slow start (the window appearing, the library loading) can't make it run out
+//! before it's been seen.
 
 use crate::app::App;
 use crate::audio::INTRO_HITS;
@@ -23,19 +27,42 @@ const WIDEN: f64 = 0.35;
 const SLIDE: f64 = 0.5;
 
 pub enum Intro {
-    /// The intro with the beat, every time Pulse opens. `started`: when it began; `played`:
-    /// the beat has been started; `back`: Pulse has been opened before, so "Welcome back"
-    /// follows it (with this name).
-    First { started: Option<f64>, played: bool, back: Option<String> },
+    /// The intro with the beat, every time Pulse opens. `played`: the beat has been
+    /// started; `back`: Pulse has been opened before, so "Welcome back" follows it (with
+    /// this name).
+    First { clock: Clock, played: bool, back: Option<String> },
     /// "Welcome back" (with your name, if Pulse knows it).
-    Welcome { started: Option<f64>, name: String },
+    Welcome { clock: Clock, name: String },
+}
+
+/// Time since the intro first showed, moving at most `MAX_STEP` per frame.
+#[derive(Default)]
+pub struct Clock {
+    t: f64,
+    last: Option<f64>,
+}
+
+const MAX_STEP: f64 = 1.0 / 20.0;
+
+impl Clock {
+    fn tick(&mut self, now: f64) -> f64 {
+        if let Some(last) = self.last {
+            self.t += (now - last).clamp(0.0, MAX_STEP);
+        }
+        self.last = Some(now);
+        self.t
+    }
 }
 
 impl Intro {
     /// What to show as Pulse opens: the intro (then "Welcome back" if you've been here
-    /// before), or only "Welcome back" when animations are off.
+    /// before), or only "Welcome back" with "Reduce motion" on.
     pub fn for_launch(first: bool, still: bool, name: String) -> Self {
-        if still { Intro::Welcome { started: None, name } } else { Intro::First { started: None, played: false, back: (!first).then_some(name) } }
+        if still {
+            Intro::Welcome { clock: Clock::default(), name }
+        } else {
+            Intro::First { clock: Clock::default(), played: false, back: (!first).then_some(name) }
+        }
     }
 }
 
@@ -45,16 +72,16 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
     let now = ctx.input(|i| i.time);
     let skip = ctx.input(|i| i.pointer.any_pressed() || i.events.iter().any(|e| matches!(e, egui::Event::Key { pressed: true, .. })));
     let done = match intro {
-        Intro::First { started, played, .. } => {
-            let t0 = *started.get_or_insert(now);
-            if !*played && now - t0 >= LEAD {
+        Intro::First { clock, played, .. } => {
+            let t = clock.tick(now);
+            if !*played && t >= LEAD {
                 *played = true;
                 let volume = (app.saved.volume * 0.8).clamp(0.15, 0.8);
                 app.audio.play_intro(volume);
             }
-            let t = now - t0;
             let end = LEAD + INTRO_HITS[4].0 as f64 + 0.1 + GROW + WIDEN + SLIDE;
-            if t < end && !skip {
+            // A click or key in the first moment (the one that opened Pulse) doesn't skip it.
+            if t < end && !(skip && t > 0.3) {
                 first(ctx, t);
                 ctx.request_repaint();
                 false
@@ -62,8 +89,8 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                 true
             }
         }
-        Intro::Welcome { started, name } => {
-            let t = now - *started.get_or_insert(now);
+        Intro::Welcome { clock, name } => {
+            let t = clock.tick(now);
             if t < 1.9 && !(skip && t > 0.1) {
                 welcome(ctx, t, name);
                 ctx.request_repaint();
@@ -76,7 +103,7 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
     if done {
         let mut next = None;
         if let Some(Intro::First { back, .. }) = &mut app.intro {
-            next = back.take().map(|name| Intro::Welcome { started: None, name });
+            next = back.take().map(|name| Intro::Welcome { clock: Clock::default(), name });
             if !app.saved.intro_seen {
                 app.saved.intro_seen = true;
                 app.save_now = true;
@@ -211,4 +238,20 @@ fn welcome(ctx: &egui::Context, t: f64, name: &str) {
             Color32::from_rgb(253, 224, 71).gamma_multiply(a),
         );
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Clock;
+
+    #[test]
+    fn a_slow_start_doesnt_use_up_the_intro() {
+        let mut c = Clock::default();
+        assert_eq!(c.tick(10.0), 0.0);
+        // The window took 3 seconds to draw its next frame: the intro moves on a little only.
+        assert!(c.tick(13.0) <= 0.05 + 1e-9);
+        // Ordinary 60 fps frames count in full.
+        let t = c.tick(13.0 + 1.0 / 60.0);
+        assert!((t - (0.05 + 1.0 / 60.0)).abs() < 1e-9);
+    }
 }
