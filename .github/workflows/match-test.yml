@@ -26,6 +26,8 @@ jobs:
           curl -fsSL https://deno.land/install.sh | sh -s -- -y
           echo "$HOME/.deno/bin" >> "$GITHUB_PATH"
       - name: Lyrics from Genius
+        # Genius may turn away requests from GitHub's servers; don't skip the other checks.
+        continue-on-error: true
         run: cargo test --release live_genius_lyrics -- --ignored --nocapture
       - name: Explicit versions and shared artist names
         env:
