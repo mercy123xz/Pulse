@@ -1,0 +1,11 @@
+name: Diagnose
+on:
+  push:
+    branches: [features]
+    paths: [.github/scripts/diag.py]
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install -q yt-dlp && python .github/scripts/diag.py
