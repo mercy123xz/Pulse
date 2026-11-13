@@ -15,7 +15,7 @@ use std::sync::Mutex;
 const ACCOUNTS_URL: &str = "https://pulse-accounts.y0hyotuube.workers.dev";
 
 /// Where public links point: the website's page for a playlist or a profile.
-pub const SITE: &str = "https://mercy123xz.github.io/Pulse/";
+pub const SITE: &str = "https://listen2pulse.github.io/";
 
 pub(crate) fn base() -> String {
     // Developer check: PULSE_DEBUG_ACCOUNTS points Pulse at a test server.
@@ -404,7 +404,8 @@ pub enum Link {
 /// Reads a Pulse playlist or profile link ("…/Pulse/p.html?id=AbCdEfGh23", "…/u.html?name=mercy").
 pub fn read_link(text: &str) -> Option<Link> {
     let t = text.trim();
-    if !t.contains("/Pulse/") && !t.contains("pulse.is-a.software") {
+    // Today's site, the old one (mercy123xz.github.io/Pulse/, still shared around) and the old test domain.
+    if !t.contains("listen2pulse.github.io") && !t.contains("/Pulse/") && !t.contains("pulse.is-a.software") {
         return None;
     }
     let query = t.split_once('?')?.1.split('#').next().unwrap_or("");
@@ -426,6 +427,7 @@ mod tests {
     fn reads_pulse_links() {
         assert_eq!(read_link("https://mercy123xz.github.io/Pulse/p.html?id=AbCdEfGh23"), Some(Link::Playlist("AbCdEfGh23".into())));
         assert_eq!(read_link(" https://mercy123xz.github.io/Pulse/u.html?name=Mercy_1#x "), Some(Link::Profile("mercy_1".into())));
+        assert_eq!(read_link("https://listen2pulse.github.io/u.html?name=Mercy_1"), Some(Link::Profile("mercy_1".into())));
         assert_eq!(read_link(&playlist_link("Zz23456789")), Some(Link::Playlist("Zz23456789".into())));
         assert_eq!(read_link(&profile_link("joe")), Some(Link::Profile("joe".into())));
         assert_eq!(read_link("https://mercy123xz.github.io/Pulse/p.html?id=short"), None);

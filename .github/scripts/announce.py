@@ -21,7 +21,7 @@ import sys
 import urllib.request
 
 RAW = "https://raw.githubusercontent.com/mercy123xz/Pulse/main/assets"
-DOWNLOAD = "https://mercy123xz.github.io/Pulse/download/"
+DOWNLOAD = "https://listen2pulse.github.io/download/"
 X_ACCOUNT = 363390  # @ListenToPulse in Typefully
 TYPEFULLY = "https://api.typefully.com/v2"
 

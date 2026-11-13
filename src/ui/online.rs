@@ -174,7 +174,7 @@ pub fn account_dialog(app: &mut App, ctx: &egui::Context) {
                 .on_hover_cursor(egui::CursorIcon::PointingHand)
                 .clicked()
             {
-                ui.ctx().open_url(egui::OpenUrl::new_tab("https://mercy123xz.github.io/Pulse/privacy/"));
+                ui.ctx().open_url(egui::OpenUrl::new_tab("https://listen2pulse.github.io/privacy/"));
             }
             ui.add_space(14.0);
         }
