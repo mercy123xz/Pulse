@@ -702,7 +702,7 @@ async function tidalGet(env, path) {
   if (!r.ok) {
     const why = (await r.text()).slice(0, 300);
     console.error("TIDAL", path, r.status, why);
-    fail(502, `TIDAL didn't answer (${r.status}: ${why.replace(/\s+/g, " ")})`);
+    fail(502, `TIDAL didn't answer (${path.split("?")[0].split("/")[1]} ${r.status}: ${why.replace(/\s+/g, " ")})`);
   }
   return r.json();
 }
@@ -731,7 +731,7 @@ async function tidalSearch(c) {
   const ids = (found.data?.relationships?.tracks?.data || []).map((d) => d.id).slice(0, 10);
   let tracks = [];
   if (ids.length) {
-    const doc = await tidalGet(c.env, `/tracks?countryCode=${country}&filter[id]=${ids.join(",")}&include=artists,albums`);
+    const doc = await tidalGet(c.env, `/tracks?countryCode=${country}&${ids.map((id) => `filter[id]=${encodeURIComponent(id)}`).join("&")}&include=artists&include=albums`);
     const included = new Map((doc.included || []).map((x) => [`${x.type}:${x.id}`, x]));
     const byId = new Map((doc.data || []).map((t) => [t.id, t]));
     tracks = ids
