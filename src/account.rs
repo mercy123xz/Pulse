@@ -49,6 +49,8 @@ pub struct User {
     pub created: u64,
     /// One of Pulse's early supporters (shown as a badge).
     pub supporter: bool,
+    /// The address of their profile picture, if they have one.
+    pub avatar: Option<String>,
 }
 
 /// A public playlist, as listed on a profile.
@@ -287,6 +289,25 @@ pub fn valid_email(e: &str) -> bool {
         }
         None => false,
     }
+}
+
+/// Your profile picture, for others to see: the picture file on this PC, made into a small
+/// square JPEG (256×256) first. Only the picture goes up, never its file name or details.
+pub fn set_avatar(picture: &std::path::Path) -> Result<(), String> {
+    use base64::Engine;
+    let img = image::open(picture).map_err(|e| format!("Couldn't read the picture ({e})"))?;
+    let side = img.width().min(img.height());
+    let square = img.crop_imm((img.width() - side) / 2, (img.height() - side) / 2, side, side);
+    let small = square.resize_exact(256, 256, image::imageops::FilterType::Lanczos3).to_rgb8();
+    let mut jpeg = Vec::new();
+    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg, 85).encode_image(&small).map_err(|e| e.to_string())?;
+    let data = base64::engine::general_purpose::STANDARD.encode(&jpeg);
+    call("PUT", "/me/avatar", Some(json!({ "data": data })), true).map(|_| ())
+}
+
+/// Takes your profile picture off your public profile.
+pub fn remove_avatar() -> Result<(), String> {
+    call("DELETE", "/me/avatar", None, true).map(|_| ())
 }
 
 pub fn set_bio(bio: &str) -> Result<(), String> {

@@ -74,7 +74,8 @@ code { font-size: .9em; background: var(--surface); border: 1px solid var(--bord
     <li><strong>Your username.</strong> Public: it's on your profile and your shared playlists.</li>
     <li><strong>Your email address.</strong> Private: only used to send you a code if you forget your password. Never shown to anyone, never used for anything else, no newsletters.</li>
     <li><strong>A hash of your password</strong> (salted PBKDF2), never the password itself.</li>
-    <li><strong>Your profile text</strong> and <strong>the playlists you make public</strong>: their names and songs (title, artist, album and cover links). Public by design. Songs from your own computer are never uploaded.</li>
+    <li><strong>Your profile picture</strong>, if you set one while signed in: a small square copy (256×256), shown on your public profile. Public by design. Remove it from your profile in the app and it's deleted from the server.</li>
+<li><strong>Your profile text</strong> and <strong>the playlists you make public</strong>: their names and songs (title, artist, album and cover links). Public by design. Songs from your own computer are never uploaded.</li>
     <li><strong>Sign-in keys</strong>: only a hash of each one, which expires after 90 days or when you sign out.</li>
     <li><strong>When you joined</strong>, and whether you're one of the early supporters (the first 100 accounts), which shows a badge on your profile and your username in the app's thank-you list.</li>
   </ul>
@@ -90,7 +91,7 @@ code { font-size: .9em; background: var(--surface); border: 1px solid var(--bord
   <h3>Where it's stored</h3>
   <p>The accounts server runs on <strong>Cloudflare</strong> (Workers and its D1 database). Cloudflare handles the traffic and may keep its own short-term logs, as described in its privacy policy.</p>
   <h3>Deleting your account</h3>
-  <p>In the app (Settings → Account) or on the website (<a href="../account/">Your account</a>), you can delete your account. That removes your account, email, profile, sign-ins, reset codes and every playlist you made public, right away. You can also change your email or password, edit your profile and make playlists private there at any time.</p>
+  <p>In the app (Settings → Account) or on the website (<a href="../account/">Your account</a>), you can delete your account. That removes your account, email, profile, profile picture, sign-ins, reset codes and every playlist you made public, right away. You can also change your email or password, edit your profile and make playlists private there at any time.</p>
 
   <h2>This website</h2>
   <ul>

@@ -28,6 +28,8 @@ const RESET_TRIES = 5; // wrong codes before it stops working
 const RESET_MAILS_PER_IP_PER_HOUR = 5;
 const RESET_MAILS_PER_ACCOUNT_PER_HOUR = 3;
 const RESET_CHECKS_PER_IP_PER_15_MIN = 20;
+const MAX_AVATAR = 200_000; // bytes; the app sends a 256×256 JPEG of about 20–40 KB
+const AVATAR_CHANGES_PER_HOUR = 10;
 
 // Pictures may only come from the music services Pulse uses, so a published playlist
 // can't make other people's Pulse load pictures from (and reveal them to) any server.
@@ -62,7 +64,7 @@ export default {
     try {
       const url = new URL(request.url);
       const ip = request.headers.get("CF-Connecting-IP") || "unknown";
-      const ctx = { env, request, ip, reply, web: !!origin, now: Math.floor(Date.now() / 1000) };
+      const ctx = { env, request, ip, reply, cors, web: !!origin, now: Math.floor(Date.now() / 1000) };
       return await route(ctx, request.method, url.pathname.replace(/\/+$/, "") || "/");
     } catch (e) {
       if (e instanceof Reply) return reply(e.status, { error: e.message });
@@ -93,6 +95,9 @@ async function route(c, method, path) {
   if (method === "PUT" && path === "/me") return updateMe(c);
   if (method === "POST" && path === "/me/password") return changePassword(c);
   if (method === "DELETE" && path === "/me") return deleteMe(c);
+  if (method === "PUT" && path === "/me/avatar") return setAvatar(c);
+  if (method === "DELETE" && path === "/me/avatar") return removeAvatar(c);
+  if (method === "GET" && (p = m(/^\/avatars\/([A-Za-z0-9_.]{1,20})$/))) return getAvatar(c, p[1]);
   if (method === "PUT" && path === "/me/email") return changeEmail(c);
   if (method === "POST" && path === "/reset/start") return resetStart(c);
   if (method === "POST" && path === "/reset/finish") return resetFinish(c);
@@ -174,7 +179,7 @@ async function emailFree(c, email, exceptId = 0) {
 
 // A user by username, or by email if it has an @ in it.
 const findUser = (c, who) =>
-  c.env.DB.prepare(`SELECT id, username, email, pass_hash, pass_salt, bio, created, supporter FROM users WHERE ${who.includes("@") ? "email" : "username"} = ?`).bind(who).first();
+  c.env.DB.prepare(`SELECT id, username, email, pass_hash, pass_salt, bio, created, supporter, avatar_v FROM users WHERE ${who.includes("@") ? "email" : "username"} = ?`).bind(who).first();
 
 const emailjsReady = (env) => !!(env.EMAILJS_SERVICE_ID && env.EMAILJS_TEMPLATE_ID && env.EMAILJS_PUBLIC_KEY && env.EMAILJS_PRIVATE_KEY);
 const mailReady = (env) => typeof env.MAIL_HOOK === "function" || emailjsReady(env) || !!(env.MAIL_FROM && (env.BREVO_API_KEY || env.RESEND_API_KEY));
@@ -246,7 +251,7 @@ async function auth(c) {
   const token = h.startsWith("Bearer ") ? h.slice(7).trim() : "";
   if (!/^[0-9a-f]{64}$/.test(token)) fail(401, "Please sign in again.");
   const row = await c.env.DB.prepare(
-    "SELECT u.id, u.username, u.email, u.bio, u.created, u.supporter, s.token_hash FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ? AND s.expires > ?",
+    "SELECT u.id, u.username, u.email, u.bio, u.created, u.supporter, u.avatar_v, s.token_hash FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ? AND s.expires > ?",
   )
     .bind(await sha256(token), c.now)
     .first();
@@ -291,10 +296,12 @@ function cleanTracks(list) {
   return out;
 }
 
-// `supporter`: an early supporter of Pulse (set by hand in Cloudflare, see README).
-const publicUser = (u) => ({ username: u.username, bio: u.bio || "", created: u.created, supporter: !!u.supporter });
+// `supporter`: an early supporter of Pulse. `avatar`: the address of their profile picture
+// (with its version, so a new one is never served from a cache), or null.
+const avatarUrl = (c, u) => (u.avatar_v ? `${new URL(c.request.url).origin}/avatars/${u.username}?v=${u.avatar_v}` : null);
+const publicUser = (u, c) => ({ username: u.username, bio: u.bio || "", created: u.created, supporter: !!u.supporter, avatar: c ? avatarUrl(c, u) : null });
 // Only ever sent to the account's owner.
-const ownUser = (u) => ({ ...publicUser(u), email: u.email || "" });
+const ownUser = (u, c) => ({ ...publicUser(u, c), email: u.email || "" });
 
 // ---------------------------------------------------------------- accounts
 
@@ -327,7 +334,7 @@ async function signup(c) {
     .run();
   const supporter = (early.meta?.changes || 0) > 0;
   const token = await newSession(c, id);
-  return c.reply(201, { token, user: { username, bio: "", created: c.now, email: email || "", supporter } });
+  return c.reply(201, { token, user: { username, bio: "", created: c.now, email: email || "", supporter, avatar: null } });
 }
 
 async function login(c) {
@@ -344,7 +351,7 @@ async function login(c) {
     fail(401, "Wrong username or password.");
   }
   const token = await newSession(c, u.id);
-  return c.reply(200, { token, user: ownUser(u) });
+  return c.reply(200, { token, user: ownUser(u, c) });
 }
 
 async function logout(c) {
@@ -356,7 +363,7 @@ async function logout(c) {
 async function me(c) {
   const u = await auth(c);
   const lists = await c.env.DB.prepare("SELECT id, name, count, cover, updated FROM playlists WHERE user_id = ? ORDER BY updated DESC").bind(u.id).all();
-  return c.reply(200, { user: ownUser(u), playlists: lists.results || [] });
+  return c.reply(200, { user: ownUser(u, c), playlists: lists.results || [] });
 }
 
 async function updateMe(c) {
@@ -364,7 +371,7 @@ async function updateMe(c) {
   const b = await body(c);
   const bio = str(b.bio, 300);
   await c.env.DB.prepare("UPDATE users SET bio = ? WHERE id = ?").bind(bio, u.id).run();
-  return c.reply(200, { user: { ...ownUser(u), bio } });
+  return c.reply(200, { user: { ...ownUser(u, c), bio } });
 }
 
 async function changePassword(c) {
@@ -391,7 +398,7 @@ async function changeEmail(c) {
   await emailFree(c, email, u.id);
   await c.env.DB.prepare("UPDATE users SET email = ? WHERE id = ?").bind(email, u.id).run();
   await c.env.DB.prepare("DELETE FROM resets WHERE user_id = ?").bind(u.id).run();
-  return c.reply(200, { user: { ...ownUser(u), email } });
+  return c.reply(200, { user: { ...ownUser(u, c), email } });
 }
 
 // Forgot password, step 1: email a code to the account's address. The reply is the same
@@ -455,7 +462,7 @@ async function resetFinish(c) {
     db.prepare("DELETE FROM sessions WHERE user_id = ?").bind(u.id), // signed out everywhere
   ]);
   const token = await newSession(c, u.id);
-  return c.reply(200, { token, user: ownUser(u) });
+  return c.reply(200, { token, user: ownUser(u, c) });
 }
 
 async function deleteMe(c) {
@@ -469,6 +476,7 @@ async function deleteMe(c) {
     db.prepare("DELETE FROM playlists WHERE user_id = ?").bind(u.id),
     db.prepare("DELETE FROM sessions WHERE user_id = ?").bind(u.id),
     db.prepare("DELETE FROM resets WHERE user_id = ?").bind(u.id),
+    db.prepare("DELETE FROM avatars WHERE user_id = ?").bind(u.id),
     db.prepare("DELETE FROM users WHERE id = ?").bind(u.id),
   ]);
   return c.reply(200, { ok: true });
@@ -536,10 +544,10 @@ async function getPlaylist(c, id) {
 }
 
 async function getUser(c, name) {
-  const u = await c.env.DB.prepare("SELECT id, username, bio, created, supporter FROM users WHERE username = ?").bind(name.toLowerCase()).first();
+  const u = await c.env.DB.prepare("SELECT id, username, bio, created, supporter, avatar_v FROM users WHERE username = ?").bind(name.toLowerCase()).first();
   if (!u) fail(404, "There's no one called that.");
   const lists = await c.env.DB.prepare("SELECT id, name, count, cover, updated FROM playlists WHERE user_id = ? AND hidden = 0 ORDER BY updated DESC").bind(u.id).all();
-  return c.reply(200, { user: publicUser(u), playlists: lists.results || [] });
+  return c.reply(200, { user: publicUser(u, c), playlists: lists.results || [] });
 }
 
 async function searchUsers(c) {
@@ -549,6 +557,66 @@ async function searchUsers(c) {
     .bind(q, q + "￿")
     .all();
   return c.reply(200, { users: rows.results || [] });
+}
+
+// ---------------------------------------------------------------- profile pictures
+
+// The kind of picture, from its first bytes (never from what the sender says it is).
+function pictureType(bytes) {
+  const b = (i) => bytes[i];
+  if (b(0) === 0xff && b(1) === 0xd8 && b(2) === 0xff) return "image/jpeg";
+  if (b(0) === 0x89 && b(1) === 0x50 && b(2) === 0x4e && b(3) === 0x47) return "image/png";
+  if (b(0) === 0x52 && b(1) === 0x49 && b(2) === 0x46 && b(3) === 0x46 && b(8) === 0x57 && b(9) === 0x45 && b(10) === 0x42 && b(11) === 0x50) return "image/webp";
+  return null;
+}
+
+// Your profile picture: { data: base64 } of a JPEG, PNG or WebP picture, up to MAX_AVATAR.
+async function setAvatar(c) {
+  const u = await auth(c);
+  const b = await body(c);
+  if (await overLimit(c, "avatar", String(u.id), AVATAR_CHANGES_PER_HOUR, 3600)) fail(429, "Too many picture changes. Please try again later.");
+  let bytes;
+  try {
+    bytes = Uint8Array.from(atob(String(b.data || "")), (ch) => ch.charCodeAt(0));
+  } catch {
+    fail(400, "That picture couldn't be read.");
+  }
+  if (!bytes.length) fail(400, "That picture couldn't be read.");
+  if (bytes.length > MAX_AVATAR) fail(413, "That picture is too big.");
+  const type = pictureType(bytes);
+  if (!type) fail(400, "Profile pictures can be JPEG, PNG or WebP.");
+  await note(c, "avatar", String(u.id));
+  const db = c.env.DB;
+  await db.batch([
+    db.prepare("INSERT OR REPLACE INTO avatars (user_id, type, data, updated) VALUES (?, ?, ?, ?)").bind(u.id, type, String(b.data), c.now),
+    db.prepare("UPDATE users SET avatar_v = ? WHERE id = ?").bind(c.now, u.id),
+  ]);
+  return c.reply(200, { user: ownUser({ ...u, avatar_v: c.now }, c) });
+}
+
+async function removeAvatar(c) {
+  const u = await auth(c);
+  const db = c.env.DB;
+  await db.batch([db.prepare("DELETE FROM avatars WHERE user_id = ?").bind(u.id), db.prepare("UPDATE users SET avatar_v = 0 WHERE id = ?").bind(u.id)]);
+  return c.reply(200, { user: ownUser({ ...u, avatar_v: 0 }, c) });
+}
+
+// The picture itself, for the app and the website. Its address changes with every new
+// picture, so it can be cached for a long time.
+async function getAvatar(c, name) {
+  const row = await c.env.DB.prepare("SELECT a.type, a.data FROM avatars a JOIN users u ON u.id = a.user_id WHERE u.username = ?").bind(name.toLowerCase()).first();
+  if (!row) fail(404, "No picture.");
+  const bytes = Uint8Array.from(atob(row.data), (ch) => ch.charCodeAt(0));
+  return new Response(bytes, {
+    status: 200,
+    headers: {
+      ...c.cors,
+      "Content-Type": row.type,
+      "Cache-Control": "public, max-age=86400",
+      "X-Content-Type-Options": "nosniff",
+      "Content-Security-Policy": "default-src 'none'",
+    },
+  });
 }
 
 // How many of the first accounts become early supporters on their own.

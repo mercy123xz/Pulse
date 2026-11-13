@@ -1039,6 +1039,17 @@ impl App {
         crate::artcache::set_limit_mb(app.saved.settings.art_cache_mb);
         crate::audiocache::set_limit_mb(app.saved.settings.replay_cache_mb);
         std::thread::spawn(crate::artcache::trim_disk);
+        // Signed in with a profile picture your public profile doesn't have yet (made before
+        // pictures went online, or on another PC): put it up.
+        if let (Some(s), Some(pic)) = (crate::account::session(), app.saved.profile.picture.clone()) {
+            std::thread::spawn(move || {
+                if let Ok(p) = crate::account::profile(&s.username)
+                    && p.user.avatar.is_none()
+                {
+                    let _ = crate::account::set_avatar(&pic);
+                }
+            });
+        }
         // Real lengths for saved songs Deezer lists only as a clip.
         let clips: Vec<String> = app
             .saved
@@ -2207,11 +2218,23 @@ impl App {
             }
             picture = Some(dest);
         }
+        let picture_changed = self.saved.profile.picture != picture;
         let p = &mut self.saved.profile;
         p.name = f.name.trim().to_string();
         let bio_changed = p.bio != f.bio.trim();
         p.bio = f.bio.trim().to_string();
         p.picture = picture;
+        // Signed in: the same picture on your public profile, for others to see.
+        if picture_changed && crate::account::session().is_some() {
+            let pic = p.picture.clone();
+            std::thread::spawn(move || {
+                let _ = match &pic {
+                    Some(path) => crate::account::set_avatar(path),
+                    None => crate::account::remove_avatar(),
+                };
+                crate::ui::forget_own_public_profile();
+            });
+        }
         // Signed in: the same bio on your public profile.
         if bio_changed && crate::account::session().is_some() {
             let bio = p.bio.clone();

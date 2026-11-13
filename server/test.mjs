@@ -148,6 +148,18 @@ r = await call("GET", "/supporters"); ok(r.status === 200 && r.data.supporters.i
 r = await call("GET", "/users/earlybird"); ok(r.data.user.supporter === true, "badge on the profile");
 r = await call("GET", "/users/latecomer"); ok(r.data.user.supporter === false, "no badge for others");
 r = await call("GET", "/me", undefined, { token: early }); ok(r.data.user.supporter === true, "the app is told you're a supporter");
+// profile pictures
+const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4, 5, 6]).toString("base64");
+r = await call("PUT", "/me/avatar", { data: Buffer.from("<svg onload=alert(1)>").toString("base64") }, { token: early }); ok(r.status === 400, "only real pictures");
+r = await call("PUT", "/me/avatar", { data: Buffer.alloc(300000, 0xff).toString("base64") }, { token: early }); ok(r.status === 413 || r.status === 400, "too big");
+r = await call("PUT", "/me/avatar", { data: jpeg }); ok(r.status === 401, "signed in only");
+r = await call("PUT", "/me/avatar", { data: jpeg }, { token: early }); ok(r.status === 200 && /\/avatars\/earlybird\?v=\d+$/.test(r.data.user.avatar), "picture saved");
+r = await call("GET", "/users/earlybird"); ok(r.data.user.avatar && r.data.user.avatar.includes("/avatars/earlybird"), "others see the picture");
+let pic = await worker.fetch(new Request("https://acc.example/avatars/earlybird"), env);
+ok(pic.status === 200 && pic.headers.get("Content-Type") === "image/jpeg" && (await pic.arrayBuffer()).byteLength === 10 && pic.headers.get("X-Content-Type-Options") === "nosniff", "picture served as a JPEG");
+r = await call("GET", "/users/latecomer"); ok(r.data.user.avatar === null, "no picture, no address");
+r = await call("DELETE", "/me/avatar", undefined, { token: early }); ok(r.status === 200 && r.data.user.avatar === null, "picture removed");
+pic = await worker.fetch(new Request("https://acc.example/avatars/earlybird"), env); ok(pic.status === 404, "and gone");
 // Past 100 accounts: no more automatic supporters.
 for (let i = 0; i < 100; i++) env.DB.raw.exec(`INSERT INTO users (username, email, pass_hash, pass_salt, bio, created) VALUES ('filler${i}', NULL, 'x', 'x', '', 1)`);
 ip = "10.9.9.9";

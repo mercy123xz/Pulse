@@ -430,7 +430,17 @@ pub fn user_page(app: &mut App, ui: &mut Ui) {
         let title = format!("@{}", p.user.username);
         hero(
             ui,
-            &Hero { editable: false, kind: tr("Profile"), title: &title, subtitle: &sub, art: None, glyph: icon::USER, round: true, banner: None, links: &[] },
+            &Hero {
+                editable: false,
+                kind: tr("Profile"),
+                title: &title,
+                subtitle: &sub,
+                art: p.user.avatar.as_deref(),
+                glyph: icon::USER,
+                round: true,
+                banner: None,
+                links: &[],
+            },
         );
         let mine = account::session().is_some_and(|s| s.username == p.user.username);
         ui.horizontal(|ui| {
