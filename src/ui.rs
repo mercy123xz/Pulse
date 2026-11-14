@@ -581,23 +581,34 @@ fn search_dropdown(app: &mut App, ui: &mut Ui, pill: Rect, edit: &egui::Response
         chosen = sel;
     }
     let mut clear_history = false;
-    let area = egui::Area::new(area_id).order(egui::Order::Foreground).fixed_pos(pill.left_bottom() + vec2(0.0, 6.0)).show(&ctx, |ui| {
-        Frame::menu(ui.style()).inner_margin(6).show(ui, |ui| {
-            ui.set_width(pill.width() - 12.0);
-            ui.spacing_mut().item_spacing.y = 1.0;
+    // The × on a recent search: forget just that one.
+    let mut forget: Option<usize> = None;
+    let area = egui::Area::new(area_id).order(egui::Order::Foreground).fixed_pos(pill.left_bottom() + vec2(0.0, 8.0)).show(&ctx, |ui| {
+        // A rounded panel the width of the search box, lifted off the page by a soft shadow.
+        let panel = Frame::menu(ui.style())
+            .inner_margin(8)
+            .corner_radius(CornerRadius::same(14))
+            .stroke(Stroke::new(1.0, pal().border))
+            .shadow(egui::Shadow { offset: [0, 12], blur: 32, spread: 0, color: Color32::from_black_alpha(110) });
+        panel.show(ui, |ui| {
+            ui.set_width(pill.width() - 16.0);
+            ui.spacing_mut().item_spacing.y = 2.0;
             if q.is_empty() {
-                ui.horizontal(|ui| {
-                    menu_header(ui, "Recent searches");
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if ui
-                            .add(egui::Label::new(RichText::new(tr("Clear history")).font(med(11.5)).color(pal().text_muted)).sense(Sense::click()))
-                            .on_hover_cursor(egui::CursorIcon::PointingHand)
-                            .clicked()
-                        {
-                            clear_history = true;
-                        }
-                    });
-                });
+                // "Recent searches", and a quiet "Clear history" button across from it.
+                let (head, _) = ui.allocate_exact_size(vec2(ui.available_width(), 34.0), Sense::hover());
+                ui.painter().text(pos2(head.left() + 10.0, head.center().y), Align2::LEFT_CENTER, tr("Recent searches"), semi(13.5), pal().text);
+                let label = ui.painter().layout_no_wrap(tr("Clear history").to_owned(), med(12.0), pal().text_muted);
+                let b = Rect::from_min_size(pos2(head.right() - label.size().x - 20.0 - 4.0, head.center().y - 13.0), vec2(label.size().x + 20.0, 26.0));
+                let br = ui.interact(b, area_id.with("clear"), Sense::click());
+                a11y(ui, &br, egui::WidgetType::Button, || tr("Clear history").to_owned());
+                if br.hovered() {
+                    ui.painter().rect_filled(b, CornerRadius::same(13), pal().surface_hover);
+                }
+                ui.painter().galley(b.center() - label.size() / 2.0, label, if br.hovered() { pal().text } else { pal().text_muted });
+                if br.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                    clear_history = true;
+                }
+                ui.add_space(2.0);
             }
             for (k, s) in items.iter().enumerate() {
                 // A thin line between the searches and the results.
@@ -607,18 +618,45 @@ fn search_dropdown(app: &mut App, ui: &mut Ui, pill: Rect, edit: &egui::Response
                     ui.painter().hline(line.x_range().shrink(8.0), line.center().y, Stroke::new(1.0, pal().border));
                     ui.add_space(4.0);
                 }
-                let tall = matches!(s, Suggestion::Pick(_));
-                let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), if tall { 52.0 } else { 34.0 }), Sense::click());
-                let hot = resp.hovered() || sel == Some(k);
-                if hot {
-                    ui.painter().rect_filled(rect, r_sm(), pal().surface_hover);
+                let height = match s {
+                    Suggestion::Pick(_) => 52.0,
+                    Suggestion::Recent(_) => 44.0,
+                    Suggestion::Query(_) => 36.0,
+                };
+                let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::click());
+                // The whole row counts as pointed at, the × on it included.
+                let hot = ui.rect_contains_pointer(rect) || sel == Some(k);
+                let fade = ui.ctx().animate_bool(area_id.with(("hot", k)), hot);
+                if fade > 0.0 {
+                    ui.painter().rect_filled(rect, r_md(), pal().surface_hover.gamma_multiply(fade));
                 }
                 let mut x = rect.left() + 8.0;
                 let mut right = rect.right() - 8.0;
                 match s {
-                    Suggestion::Recent(text) | Suggestion::Query(text) => {
-                        let glyph = if matches!(s, Suggestion::Recent(_)) { icon::CLOCK_COUNTER_CLOCKWISE } else { icon::MAGNIFYING_GLASS };
-                        paint_icon(ui.painter(), pos2(x + 9.0, rect.center().y), glyph, regular(15.0), pal().text_muted);
+                    Suggestion::Recent(text) => {
+                        // The clock in a rounded tile, the search itself at full strength, and
+                        // an × (while pointed at) to forget it.
+                        let tile = Rect::from_min_size(pos2(x, rect.center().y - 16.0), Vec2::splat(32.0));
+                        ui.painter().rect_filled(tile, CornerRadius::same(8), pal().surface_active);
+                        paint_icon(ui.painter(), tile.center(), icon::CLOCK_COUNTER_CLOCKWISE, regular(16.0), if hot { pal().text } else { pal().text_muted });
+                        x = tile.right() + 12.0;
+                        if hot {
+                            let b = Rect::from_center_size(pos2(right - 13.0, rect.center().y), Vec2::splat(28.0));
+                            let br = ui.interact(b, area_id.with(("forget", k)), Sense::click());
+                            a11y(ui, &br, egui::WidgetType::Button, || format!("{} {text}", tr("Remove")));
+                            if br.hovered() {
+                                ui.painter().circle_filled(b.center(), 14.0, pal().surface_active);
+                            }
+                            paint_icon(ui.painter(), b.center(), icon::X, regular(14.0), if br.hovered() { pal().text } else { pal().text_muted });
+                            if br.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                                forget = Some(k);
+                            }
+                            right = b.left() - 6.0;
+                        }
+                        paint_line(ui, pos2(x, rect.center().y - 9.0), text, med(14.0), pal().text, right - x);
+                    }
+                    Suggestion::Query(text) => {
+                        paint_icon(ui.painter(), pos2(x + 9.0, rect.center().y), icon::MAGNIFYING_GLASS, regular(15.0), pal().text_muted);
                         x += 30.0;
                         // What you typed in bold, the rest plain, like music apps.
                         let typed = text.len().min(q.len());
@@ -677,13 +715,17 @@ fn search_dropdown(app: &mut App, ui: &mut Ui, pill: Rect, edit: &egui::Response
                         paint_line(ui, pos2(x, rect.center().y + 2.0), &sub, regular(12.0), pal().text_muted, w);
                     }
                 }
-                if toggled != Some(k) && resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                if toggled != Some(k) && forget != Some(k) && resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                     chosen = Some(k);
                 }
             }
             if searching {
                 ui.add_space(4.0);
-                ui.label(RichText::new(tr("Searching…")).font(regular(12.5)).color(pal().text_muted));
+                ui.horizontal(|ui| {
+                    ui.add_space(10.0);
+                    ui.spinner();
+                    ui.label(RichText::new(tr("Searching…")).font(regular(12.5)).color(pal().text_muted));
+                });
             }
         });
     });
@@ -693,6 +735,12 @@ fn search_dropdown(app: &mut App, ui: &mut Ui, pill: Rect, edit: &egui::Response
     });
     if clear_history {
         app.saved.recent_searches.clear();
+    }
+    if let Some(k) = forget
+        && let Suggestion::Recent(r) = &items[k]
+    {
+        app.saved.recent_searches.retain(|s| s != r);
+        return false;
     }
     if let Some(k) = toggled
         && let Suggestion::Pick(p) = &items[k]
