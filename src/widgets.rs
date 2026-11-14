@@ -682,11 +682,6 @@ struct Cols {
     time: Rect,
 }
 
-/// Where a song row's "more options" button goes: the end of the row.
-fn more_slot(row: Rect) -> Rect {
-    Rect::from_x_y_ranges(row.right() - 40.0..=row.right() - 4.0, row.y_range())
-}
-
 fn columns(row: Rect, with_date: bool, with_views: bool) -> Cols {
     let w = row.width();
     let x0 = row.left();
@@ -704,6 +699,11 @@ fn columns(row: Rect, with_date: bool, with_views: bool) -> Cols {
     let album = wide.then(|| col(album_right - album_w, album_right));
     let title_right = album.map(|a| a.left()).unwrap_or(like.left()) - 16.0;
     Cols { num, title: col(num.right() + 4.0, title_right), album, views, date, like, time }
+}
+
+/// Where a song row's "more options" button goes: the end of the row.
+fn more_slot(row: Rect) -> Rect {
+    Rect::from_x_y_ranges(row.right() - 40.0..=row.right() - 4.0, row.y_range())
 }
 
 /// 5003515 → "5,003,515".
