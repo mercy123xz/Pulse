@@ -659,7 +659,8 @@ pub(crate) static EXPLICIT_TEST: std::sync::Mutex<()> = std::sync::Mutex::new(()
 /// "Nelly, City Spud" / "Nelly feat. City Spud" → ("Nelly", ["City Spud"]). Names
 /// joined by "&" stay together: that is often one act ("Simon & Garfunkel").
 pub fn split_artists(artists: &str) -> (String, Vec<String>) {
-    let lower = artists.to_lowercase();
+    // These separators are ASCII. Keep byte offsets unchanged when matching them.
+    let lower = artists.to_ascii_lowercase();
     let mut cuts = vec![];
     for m in [",", " feat. ", " feat ", " ft. ", " featuring ", " with "] {
         let mut from = 0;
@@ -685,7 +686,7 @@ pub fn split_artists(artists: &str) -> (String, Vec<String>) {
 
 /// The artists a title credits: "Ride Wit Me (feat. City Spud)" → ["City Spud"].
 pub fn featured_in_title(title: &str) -> Vec<String> {
-    let lower = title.to_lowercase();
+    let lower = title.to_ascii_lowercase();
     let Some(i) = ["(feat", "[feat", "(ft.", "(with ", " feat.", " ft. "].iter().filter_map(|m| lower.find(m)).min() else {
         return vec![];
     };
@@ -1509,6 +1510,17 @@ mod matching_tests {
         assert_eq!(split_artists("Simon & Garfunkel"), ("Simon & Garfunkel".into(), vec![]));
         assert_eq!(featured_in_title("Ride Wit Me (feat. City Spud)"), vec!["City Spud".to_string()]);
         assert!(featured_in_title("Firework").is_empty());
+    }
+
+    #[test]
+    fn unicode_credits_keep_the_original_names_and_boundaries() {
+        for name in ["İ", "İİİ", "Ⱥ", "ȺȺȺ", "K東京", "Beyoncé", "東京"] {
+            assert_eq!(split_artists(&format!("{name}, Guest")), (name.into(), vec!["Guest".into()]));
+            assert_eq!(split_artists(&format!("{name} FEAT. Guest, Other")), (name.into(), vec!["Guest".into(), "Other".into()]));
+            assert_eq!(featured_in_title(&format!("{name}(FEAT. Guest)")), vec!["Guest".to_string()]);
+            assert_eq!(crate::youtube::core_title(&format!("{name}(FEAT. Guest)")), name);
+            assert_eq!(crate::youtube::core_title(name), name);
+        }
     }
 
     #[test]
