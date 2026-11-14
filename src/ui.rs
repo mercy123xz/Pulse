@@ -991,17 +991,26 @@ fn table_ctx<'a>(app: &'a App, names: &'a [String]) -> TableCtx<'a> {
         highlight: app.highlight.as_ref().map(|(id, at)| (id.as_str(), *at)),
         selection: (app.selection.0.as_str(), &app.selection.1),
         index_offset: 0,
+        compact: false,
     }
 }
 
 /// Draws a track table and applies whatever the user clicked.
 fn tracks_block(app: &mut App, ui: &mut Ui, salt: &str, tracks: &[Track]) {
+    tracks_block_ex(app, ui, salt, tracks, false, 0);
+}
+
+/// `compact`: no header or numbers (a short list beside something else); `numbered_from`:
+/// the number before the first row (a list that carries on from one above).
+fn tracks_block_ex(app: &mut App, ui: &mut Ui, salt: &str, tracks: &[Track], compact: bool, numbered_from: usize) {
     app.ensure_views(tracks);
     app.ensure_featured(tracks);
     let names = app.playlist_names();
     let mut ev = vec![];
     let mut cx = table_ctx(app, &names);
     cx.views = Some(&app.saved.views);
+    cx.compact = compact;
+    cx.index_offset = numbered_from;
     track_table(ui, salt, tracks, &cx, &mut ev);
     let ctx = ui.ctx().clone();
     app.handle_events(ev, tracks, &ctx);
@@ -1303,6 +1312,59 @@ fn shuffle_play(app: &mut App, tracks: &[Track], ctx: &egui::Context) {
     app.play_list(tracks, start, ctx);
 }
 
+/// A compact leading result with an explicit play action.
+fn search_top_card(app: &mut App, ui: &mut Ui, artist: Option<&ArtistInfo>, tracks: &[Track]) {
+    let Some((name, kind, art)) = artist.map(|a| (a.name.as_str(), "Artist", a.picture.as_deref()))
+        .or_else(|| tracks.first().map(|t| (t.title.as_str(), "Song", t.art_big()))) else { return };
+    // The same height as the four songs beside it, so the two sit level.
+    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 4.0 * 56.0), Sense::click());
+    let hot = response.hovered() || ui.rect_contains_pointer(rect);
+    // A soft wash of the theme's accent from the top-left corner, like a cover glow.
+    ui.painter().rect_filled(rect, r_lg(), if hot { pal().surface_active } else { pal().surface_hover });
+    let glow = pal().accent.gamma_multiply(if hot { 0.26 } else { 0.18 });
+    let mut mesh = egui::Mesh::default();
+    let inner = rect.shrink(1.0);
+    for (p, c) in [(inner.left_top(), glow), (inner.right_top(), Color32::TRANSPARENT), (inner.right_bottom(), Color32::TRANSPARENT), (inner.left_bottom(), glow.gamma_multiply(0.4))] {
+        mesh.colored_vertex(p, c);
+    }
+    mesh.add_triangle(0, 1, 2);
+    mesh.add_triangle(0, 2, 3);
+    ui.painter().with_clip_rect(rect.shrink(8.0)).add(mesh);
+    let size = 104.0;
+    let art_rect = Rect::from_min_size(rect.min + vec2(20.0, 20.0), Vec2::splat(size));
+    let radius = if artist.is_some() { CornerRadius::same(52) } else { r_md() };
+    // A soft shadow under the picture.
+    ui.painter().add(egui::Shadow { offset: [0, 6], blur: 18, spread: 0, color: Color32::from_black_alpha(90) }.as_shape(art_rect, radius));
+    if artist.is_some() && art.is_none_or(|url| url.is_empty()) {
+        artist_monogram(ui, art_rect, name, radius);
+    } else {
+        artwork(ui, art_rect, art, radius);
+    }
+    let text_w = rect.width() - 40.0 - 64.0;
+    paint_line(ui, pos2(rect.left() + 20.0, art_rect.bottom() + 16.0), name, heavy(26.0), pal().text, text_w);
+    // The kind of result as a small chip ("Artist", "Song").
+    let chip_text = ui.painter().layout_no_wrap(tr(kind).to_owned(), semi(11.5), pal().text);
+    let chip = Rect::from_min_size(pos2(rect.left() + 20.0, art_rect.bottom() + 54.0), vec2(chip_text.size().x + 18.0, 24.0));
+    ui.painter().rect_filled(chip, CornerRadius::same(12), pal().bg.gamma_multiply(0.55));
+    ui.painter().galley(chip.center() - chip_text.size() / 2.0, chip_text, pal().text);
+    // Play: in the corner, a little bigger when you point at the card.
+    let grow = ui.ctx().animate_bool(response.id.with("grow"), hot);
+    let button = Rect::from_center_size(pos2(rect.right() - 44.0, rect.bottom() - 44.0), Vec2::splat(48.0));
+    let play = ui.interact(button, response.id.with("play"), Sense::click());
+    ui.painter().add(egui::Shadow { offset: [0, 4], blur: 12, spread: 0, color: Color32::from_black_alpha(80) }.as_shape(button, CornerRadius::same(24)));
+    ui.painter().circle_filled(button.center(), 24.0 + 2.0 * grow, parts().play_button.fill.unwrap_or(pal().accent));
+    paint_icon(ui.painter(), button.center(), icon::PLAY, filled_icon(20.0), parts().play_button.color.unwrap_or(Color32::WHITE));
+    a11y(ui, &response, egui::WidgetType::Button, || format!("{}, {}", name, tr(kind)));
+    a11y(ui, &play, egui::WidgetType::Button, || format!("{} {}", tr("Play"), name));
+    let ctx = ui.ctx().clone();
+    if play.clicked() {
+        if let Some(a) = artist { open_and_play(app, Route::Mix(a.id.clone()), &ctx); }
+        else { app.play_list(tracks, 0, &ctx); }
+    } else if response.clicked() {
+        if let Some(a) = artist { app.navigate(Route::Artist(a.id.clone()), &ctx); }
+        else if let Some(t) = tracks.first() { app.navigate(Route::Song(t.id.clone()), &ctx); }
+    }
+}
 fn search(app: &mut App, ui: &mut Ui, q: &str) {
     page_title(ui, &format!("Results for “{q}”"), None);
     let query = q.to_string();
@@ -1339,38 +1401,40 @@ fn search(app: &mut App, ui: &mut Ui, q: &str) {
         ui.data_mut(|d| d.insert_temp(id, filter));
         let all = filter == 0;
 
-        // Top result: the best-ranked artist (popular and matching what you typed: "tyler" is
-        // Tyler, The Creator, not a small artist called just "Tyler"), else the best song.
-        if all {
-            let artist = r.artists.first().filter(|a| crate::deezer::name_match(&a.name, &query) >= 2);
-            match (artist, r.tracks.first()) {
-                (Some(a), _) => {
-                    section_title(ui, "Top result", None);
-                    artist_grid(app, ui, std::slice::from_ref(a), Some(1));
-                }
-                (None, Some(t)) => {
-                    section_title(ui, "Top result", None);
-                    let names = app.playlist_names();
-                    let mut ev = vec![];
-                    track_table(ui, "search_top", std::slice::from_ref(t), &table_ctx(app, &names), &mut ev);
-                    app.handle_events(ev, std::slice::from_ref(t), &ctx);
-                }
-                _ => {}
+        let top_artist = r.artists.first().filter(|a| crate::deezer::name_match(&a.name, &query) >= 2 && !crate::deezer::cover_act(&a.name));
+        let top_fans = top_artist.map_or(0, |a| a.fans);
+        let artists: Vec<ArtistInfo> = r.artists.iter().filter(|a| {
+            if crate::deezer::cover_act(&a.name) { return false; }
+            if let Some(top) = top_artist {
+                if a.id != top.id && a.name.contains(',') && a.name.to_lowercase().contains(&top.name.to_lowercase()) { return false; }
+                if a.id != top.id && top_fans >= 100 && a.fans < top_fans / 100 { return false; }
             }
+            true
+        }).cloned().collect();
+        if all && (top_artist.is_some() || !r.tracks.is_empty()) {
+            let total = ui.available_width();
+            let left = (total * 0.36).max(220.0);
+            ui.horizontal_top(|ui| {
+                ui.allocate_ui_with_layout(vec2(left, 0.0), Layout::top_down(Align::Min), |ui| {
+                    section_title(ui, "Top result", None);
+                    search_top_card(app, ui, top_artist, &r.tracks);
+                });
+                ui.allocate_ui_with_layout(vec2((total - left - 8.0).max(0.0), 0.0), Layout::top_down(Align::Min), |ui| {
+                    if !r.tracks.is_empty() {
+                        section_title(ui, "Songs", None);
+                        tracks_block_ex(app, ui, "search_top_tracks", &r.tracks[..r.tracks.len().min(4)], true, 0);
+                    }
+                });
+            });
         }
-        if (all || filter == 2) && !r.artists.is_empty() {
-            // On "All": one row of the top artists, with "See all" for the rest.
-            if section_title(ui, if all { "Top artists" } else { "Artists" }, all.then_some("See all")) {
-                ui.data_mut(|d| d.insert_temp(id, 2u8));
+        if (all || filter == 2) && !artists.is_empty() {
+            let rest: Vec<ArtistInfo> = artists.iter().filter(|a| !all || top_artist.is_none_or(|top| top.id != a.id)).cloned().collect();
+            if !rest.is_empty() {
+                if section_title(ui, "Artists", all.then_some("See all")) {
+                    ui.data_mut(|d| d.insert_temp(id, 2u8));
+                }
+                artist_grid(app, ui, &rest, if all { Some(1) } else { None });
             }
-            artist_grid(app, ui, &r.artists, if all { Some(1) } else { None });
-        }
-        // Searched for an artist: who their listeners also play.
-        if let Some((name, related, _)) = &r.around
-            && (all || filter == 2)
-            && !related.is_empty()
-        {
-            suggestion_row(app, ui, "search_also", &crate::deezer::Suggestion::AlsoListen(name.clone(), related.clone()));
         }
         // The top songs start loading once the results have stayed up for a moment
         // (not for every letter while you type), so the one you press plays at once.
@@ -1384,10 +1448,22 @@ fn search(app: &mut App, ui: &mut Ui, q: &str) {
                 ui.ctx().request_repaint_after(std::time::Duration::from_millis(250));
             }
         }
-        if (all || filter == 1) && !r.tracks.is_empty() {
+        if filter == 1 && !r.tracks.is_empty() {
             section_title(ui, "Songs", None);
             let shown = if all { &r.tracks[..r.tracks.len().min(10)] } else { &r.tracks[..] };
             tracks_block(app, ui, "search_tracks", shown);
+        }
+        if all && r.tracks.len() > 4 {
+            section_title(ui, "More songs", None);
+            // Numbered on from the four at the top.
+            tracks_block_ex(app, ui, "search_more_tracks", &r.tracks[4..r.tracks.len().min(10)], false, 4);
+        }
+        // Searched for an artist: who their listeners also play.
+        if let Some((name, related, _)) = &r.around
+            && (all || filter == 2)
+            && !related.is_empty()
+        {
+            suggestion_row(app, ui, "search_also", &crate::deezer::Suggestion::AlsoListen(name.clone(), related.clone()));
         }
         // ...and songs by others that sound like theirs.
         if let Some((name, _, songs)) = &r.around
