@@ -680,8 +680,11 @@ struct Cols {
     date: Option<Rect>,
     like: Rect,
     time: Rect,
-    /// The "more options" button: the song's menu without right-clicking.
-    more: Rect,
+}
+
+/// Where a song row's "more options" button goes: the end of the row.
+fn more_slot(row: Rect) -> Rect {
+    Rect::from_x_y_ranges(row.right() - 40.0..=row.right() - 4.0, row.y_range())
 }
 
 fn columns(row: Rect, with_date: bool, with_views: bool) -> Cols {
@@ -689,7 +692,7 @@ fn columns(row: Rect, with_date: bool, with_views: bool) -> Cols {
     let x0 = row.left();
     let col = |a: f32, b: f32| Rect::from_x_y_ranges(a..=b, row.y_range());
     let num = col(x0, x0 + 44.0);
-    let more = col(row.right() - 40.0, row.right() - 4.0);
+    let more = more_slot(row);
     let time = col(more.left() - 52.0, more.left() - 2.0);
     let like = col(time.left() - 40.0, time.left());
     let date = (with_date && w > 900.0).then(|| col(like.left() - 150.0, like.left() - 12.0));
@@ -700,7 +703,7 @@ fn columns(row: Rect, with_date: bool, with_views: bool) -> Cols {
     let album_w = (w * if date.is_some() { 0.24 } else { 0.3 }).min(320.0);
     let album = wide.then(|| col(album_right - album_w, album_right));
     let title_right = album.map(|a| a.left()).unwrap_or(like.left()) - 16.0;
-    Cols { num, title: col(num.right() + 4.0, title_right), album, views, date, like, time, more }
+    Cols { num, title: col(num.right() + 4.0, title_right), album, views, date, like, time }
 }
 
 /// 5003515 → "5,003,515".
@@ -896,9 +899,8 @@ fn track_row(ui: &mut Ui, id: egui::Id, list: &str, i: usize, t: &Track, tracks:
         return;
     }
     let is_current = cx.now_playing == Some(t.id.as_str());
-    let c = columns(rect, cx.added.is_some(), cx.views.is_some());
     // "More options": the same menu as a right-click, for anyone who doesn't right-click.
-    let more = ui.interact(Rect::from_center_size(c.more.center(), Vec2::splat(30.0)), id.with("more"), Sense::click());
+    let more = ui.interact(Rect::from_center_size(more_slot(rect).center(), Vec2::splat(30.0)), id.with("more"), Sense::click());
     a11y(ui, &more, WidgetType::Button, || format!("{} {}", tr("More options for"), t.title));
     let more_open = egui::Popup::menu(&more).is_open();
     // The heart, artist and album links sit on top of the row, so "the row is hovered"
@@ -939,6 +941,7 @@ fn track_row(ui: &mut Ui, id: egui::Id, list: &str, i: usize, t: &Track, tracks:
         // The song you came here for stays tinted for a moment.
         ui.painter().rect_filled(rect, radius, pal().accent.gamma_multiply(0.22));
     }
+    let c = columns(rect, cx.added.is_some(), cx.views.is_some());
 
     // Number / play icon / "now playing" bars
     if hovered {
