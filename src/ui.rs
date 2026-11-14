@@ -1303,6 +1303,40 @@ fn shuffle_play(app: &mut App, tracks: &[Track], ctx: &egui::Context) {
     app.play_list(tracks, start, ctx);
 }
 
+/// A compact leading result with an explicit play action.
+fn search_top_card(app: &mut App, ui: &mut Ui, artist: Option<&ArtistInfo>, tracks: &[Track]) {
+    let Some((name, kind, art)) = artist.map(|a| (a.name.as_str(), "Artist", a.picture.as_deref()))
+        .or_else(|| tracks.first().map(|t| (t.title.as_str(), "Song", t.art_big()))) else { return };
+    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 250.0), Sense::click());
+
+    let fill = if response.hovered() { pal().surface_active } else { pal().surface_hover };
+    ui.painter().rect_filled(rect, r_lg(), fill);
+    let size = 112.0;
+    let art_rect = Rect::from_min_size(rect.min + vec2(18.0, 16.0), Vec2::splat(size));
+    let radius = if artist.is_some() { CornerRadius::same(56) } else { r_md() };
+    if artist.is_some() && art.is_none_or(|url| url.is_empty()) {
+        artist_monogram(ui, art_rect, name, radius);
+    } else {
+        artwork(ui, art_rect, art, radius);
+    }
+    paint_line(ui, rect.min + vec2(18.0, 143.0), name, heavy(22.0), pal().text, rect.width() - 36.0);
+    paint_line(ui, rect.min + vec2(18.0, 177.0), tr(kind), med(13.0), pal().text_muted, rect.width() - 36.0);
+    let button = Rect::from_min_size(pos2(rect.right() - 62.0, rect.bottom() - 62.0), Vec2::splat(44.0));
+    let play = ui.interact(button, response.id.with("play"), Sense::click());
+
+    ui.painter().circle_filled(button.center(), 22.0, parts().play_button.fill.unwrap_or(pal().accent));
+    paint_icon(ui.painter(), button.center(), icon::PLAY, filled_icon(18.0), parts().play_button.color.unwrap_or(Color32::WHITE));
+    a11y(ui, &response, egui::WidgetType::Button, || format!("{}, {}", name, tr(kind)));
+    a11y(ui, &play, egui::WidgetType::Button, || format!("{} {}", tr("Play"), name));
+    let ctx = ui.ctx().clone();
+    if play.clicked() {
+        if let Some(a) = artist { open_and_play(app, Route::Mix(a.id.clone()), &ctx); }
+        else { app.play_list(tracks, 0, &ctx); }
+    } else if response.clicked() {
+        if let Some(a) = artist { app.navigate(Route::Artist(a.id.clone()), &ctx); }
+        else if let Some(t) = tracks.first() { app.navigate(Route::Song(t.id.clone()), &ctx); }
+    }
+}
 fn search(app: &mut App, ui: &mut Ui, q: &str) {
     page_title(ui, &format!("Results for “{q}”"), None);
     let query = q.to_string();
@@ -1339,13 +1373,40 @@ fn search(app: &mut App, ui: &mut Ui, q: &str) {
         ui.data_mut(|d| d.insert_temp(id, filter));
         let all = filter == 0;
 
-        // Keep the best-matching artist in the artist row so results do not repeat it
-        // in a separate, mostly empty section above the songs.
-        if (all || filter == 2) && !r.artists.is_empty() {
-            if section_title(ui, if all { "Top artists" } else { "Artists" }, all.then_some("See all")) {
-                ui.data_mut(|d| d.insert_temp(id, 2u8));
+        let top_artist = r.artists.first().filter(|a| crate::deezer::name_match(&a.name, &query) >= 2 && !crate::deezer::cover_act(&a.name));
+        let top_fans = top_artist.map_or(0, |a| a.fans);
+        let artists: Vec<ArtistInfo> = r.artists.iter().filter(|a| {
+            if crate::deezer::cover_act(&a.name) { return false; }
+            if let Some(top) = top_artist {
+                if a.id != top.id && a.name.contains(',') && a.name.to_lowercase().contains(&top.name.to_lowercase()) { return false; }
+                if a.id != top.id && top_fans >= 100 && a.fans < top_fans / 100 { return false; }
             }
-            artist_grid(app, ui, &r.artists, if all { Some(1) } else { None });
+            true
+        }).cloned().collect();
+        if all && (top_artist.is_some() || !r.tracks.is_empty()) {
+            let total = ui.available_width();
+            let left = (total * 0.36).max(220.0);
+            ui.horizontal_top(|ui| {
+                ui.allocate_ui_with_layout(vec2(left, 0.0), Layout::top_down(Align::Min), |ui| {
+                    section_title(ui, "Top result", None);
+                    search_top_card(app, ui, top_artist, &r.tracks);
+                });
+                ui.allocate_ui_with_layout(vec2((total - left - 8.0).max(0.0), 0.0), Layout::top_down(Align::Min), |ui| {
+                    if !r.tracks.is_empty() {
+                        section_title(ui, "Songs", None);
+                        tracks_block(app, ui, "search_top_tracks", &r.tracks[..r.tracks.len().min(4)]);
+                    }
+                });
+            });
+        }
+        if (all || filter == 2) && !artists.is_empty() {
+            let rest: Vec<ArtistInfo> = artists.iter().filter(|a| !all || top_artist.is_none_or(|top| top.id != a.id)).cloned().collect();
+            if !rest.is_empty() {
+                if section_title(ui, "Artists", all.then_some("See all")) {
+                    ui.data_mut(|d| d.insert_temp(id, 2u8));
+                }
+                artist_grid(app, ui, &rest, if all { Some(1) } else { None });
+            }
         }
         // The top songs start loading once the results have stayed up for a moment
         // (not for every letter while you type), so the one you press plays at once.
@@ -1359,10 +1420,14 @@ fn search(app: &mut App, ui: &mut Ui, q: &str) {
                 ui.ctx().request_repaint_after(std::time::Duration::from_millis(250));
             }
         }
-        if (all || filter == 1) && !r.tracks.is_empty() {
+        if filter == 1 && !r.tracks.is_empty() {
             section_title(ui, "Songs", None);
             let shown = if all { &r.tracks[..r.tracks.len().min(10)] } else { &r.tracks[..] };
             tracks_block(app, ui, "search_tracks", shown);
+        }
+        if all && r.tracks.len() > 4 {
+            section_title(ui, "More songs", None);
+            tracks_block(app, ui, "search_more_tracks", &r.tracks[4..r.tracks.len().min(10)]);
         }
         // Searched for an artist: who their listeners also play.
         if let Some((name, related, _)) = &r.around

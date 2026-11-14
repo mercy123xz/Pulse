@@ -408,6 +408,12 @@ pub fn hover_intent(ui: &Ui, id: egui::Id, hovered: bool) -> bool {
     }
 }
 
+/// A readable fallback for artists without a picture.
+pub fn artist_monogram(ui: &Ui, rect: Rect, name: &str, radius: CornerRadius) {
+    ui.painter().rect_filled(rect, radius, pal().surface_active.lerp_to_gamma(pal().accent, 0.18));
+    let initial = name.chars().find(|c| c.is_alphanumeric()).unwrap_or('?').to_uppercase().to_string();
+    paint_icon(ui.painter(), rect.center(), &initial, heavy(rect.height() * 0.42), pal().text);
+}
 pub fn card(ui: &mut Ui, w: f32, info: &CardInfo) -> CardClick {
     let h = w + 66.0;
     let (rect, resp) = ui.allocate_exact_size(vec2(w, h), Sense::click());
@@ -426,7 +432,11 @@ pub fn card(ui: &mut Ui, w: f32, info: &CardInfo) -> CardClick {
     let pad = style.padding.unwrap_or(10.0);
     let art_rect = Rect::from_min_size(rect.min + vec2(pad, pad), Vec2::splat(w - pad * 2.0));
     let radius = if info.round { CornerRadius::same(((w - pad * 2.0) / 2.0).min(255.0) as u8) } else { r_md() };
-    artwork(ui, art_rect, info.art, radius);
+    if info.round && info.art.is_none_or(|url| url.is_empty()) {
+        artist_monogram(ui, art_rect, info.title, radius);
+    } else {
+        artwork(ui, art_rect, info.art, radius);
+    }
     if let Some(b) = info.badge {
         // Darken the bottom of the picture a little and put the label on it.
         vgradient(ui, Rect::from_min_max(pos2(art_rect.left(), art_rect.bottom() - 46.0), art_rect.max), Color32::TRANSPARENT, Color32::from_black_alpha(150));
