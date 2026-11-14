@@ -348,6 +348,15 @@ pub fn apply_view(tracks: &[Track], view: &ListView, added: Option<&HashMap<Stri
     out
 }
 
+/// Borrows the songs when no filtering or sorting changes their original order.
+pub fn view_tracks<'a>(tracks: &'a [Track], view: &ListView, added: Option<&HashMap<String, u64>>, genres: &HashMap<String, Vec<String>>) -> std::borrow::Cow<'a, [Track]> {
+    if view.search.trim().is_empty() && view.genre.is_none() && view.sort == SortBy::Custom {
+        std::borrow::Cow::Borrowed(tracks)
+    } else {
+        std::borrow::Cow::Owned(apply_view(tracks, view, added, genres))
+    }
+}
+
 /// A song's genres (from its album), if known.
 pub fn track_genres<'a>(t: &Track, genres: &'a HashMap<String, Vec<String>>) -> &'a [String] {
     t.album.as_ref().and_then(|a| genres.get(&a.id)).map(Vec::as_slice).unwrap_or(&[])
@@ -3562,6 +3571,77 @@ mod search_tests {
         assert!(!track_matches(&t, &words("adele")));
         assert!(one_edit_apart("drake", "drakes"));
         assert!(!one_edit_apart("drake", "brakes"));
+    }
+}
+
+#[cfg(test)]
+mod borrowed_view_tests {
+    use super::*;
+
+    fn songs() -> Vec<Track> {
+        vec![
+            Track { id: "a".into(), title: "Zebra".into(), ..Default::default() },
+            Track { id: "b".into(), title: "Apple".into(), ..Default::default() },
+        ]
+    }
+
+    #[test]
+    fn an_unchanged_library_view_borrows_the_songs() {
+        let tracks = songs();
+        let genres = HashMap::new();
+        let view = ListView::default();
+        let shown = view_tracks(&tracks, &view, None, &genres);
+        assert!(matches!(shown, std::borrow::Cow::Borrowed(_)));
+        assert_eq!(shown.as_ptr(), tracks.as_ptr());
+        assert_eq!(shown.as_ref(), tracks);
+    }
+
+    #[test]
+    fn filtering_and_sorting_still_build_the_requested_view() {
+        let tracks = songs();
+        let genres = HashMap::new();
+        for view in [
+            ListView { search: "apple".into(), ..Default::default() },
+            ListView { sort: SortBy::Title, ..Default::default() },
+            ListView { genre: Some("Pop".into()), ..Default::default() },
+        ] {
+            let shown = view_tracks(&tracks, &view, None, &genres);
+            assert!(matches!(shown, std::borrow::Cow::Owned(_)));
+            assert_eq!(shown.as_ref(), apply_view(&tracks, &view, None, &genres));
+        }
+        let view = ListView { search: "  \t ".into(), ..Default::default() };
+        assert!(matches!(view_tracks(&tracks, &view, None, &genres), std::borrow::Cow::Borrowed(_)));
+    }
+
+    /// The toolbar and song rows both ask for the view on every frame.
+    #[test]
+    #[ignore = "manual timing comparison: run with --ignored --nocapture"]
+    fn unchanged_library_view_timing() {
+        use std::hint::black_box;
+        const ROUNDS: usize = 30;
+        let tracks: Vec<Track> = (0..10_000).map(|i| Track {
+            id: format!("dz:{i}"), title: format!("Song {i}"), duration: 200,
+            artist: deezer::ArtistRef { id: format!("{i}"), name: format!("Artist {i}"), ..Default::default() },
+            album: Some(deezer::AlbumRef { id: format!("{i}"), title: format!("Album {i}") }),
+            cover_small: Some(format!("https://example.invalid/{i}/small.jpg")),
+            cover_big: Some(format!("https://example.invalid/{i}/big.jpg")), ..Default::default()
+        }).collect();
+        let (view, genres) = (ListView::default(), HashMap::new());
+        assert_eq!(view_tracks(&tracks, &view, None, &genres).as_ref(), apply_view(&tracks, &view, None, &genres));
+        let (mut before, mut after) = (Duration::ZERO, Duration::ZERO);
+        for round in 0..ROUNDS {
+            let mut measure = |borrowed| {
+                let at = Instant::now();
+                for _ in 0..2 {
+                    if borrowed { black_box(view_tracks(black_box(&tracks), black_box(&view), None, &genres)); }
+                    else { black_box(apply_view(black_box(&tracks), black_box(&view), None, &genres)); }
+                }
+                if borrowed { after += at.elapsed(); } else { before += at.elapsed(); }
+            };
+            if round % 2 == 0 { measure(false); measure(true); }
+            else { measure(true); measure(false); }
+        }
+        println!("unchanged 10000-song view, two calls/frame, {ROUNDS} rounds: before {:.3} ms/frame, after {:.6} ms/frame", before.as_secs_f64() * 1000.0 / ROUNDS as f64, after.as_secs_f64() * 1000.0 / ROUNDS as f64);
     }
 }
 
