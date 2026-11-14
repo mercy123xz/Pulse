@@ -378,22 +378,29 @@ pub fn install(ctx: &egui::Context) {
     let add = |fonts: &mut FontDefinitions, name: &str, bytes: &'static [u8]| {
         fonts.font_data.insert(name.into(), Arc::new(FontData::from_static(bytes)));
     };
+    // Geist (Vercel, SIL Open Font License): crisp and compact, made for screens.
+    add(&mut fonts, "Geist-Regular", include_bytes!("../assets/fonts/Geist-Regular.ttf"));
+    add(&mut fonts, "Geist-Medium", include_bytes!("../assets/fonts/Geist-Medium.ttf"));
+    add(&mut fonts, "Geist-SemiBold", include_bytes!("../assets/fonts/Geist-SemiBold.ttf"));
+    add(&mut fonts, "Geist-Bold", include_bytes!("../assets/fonts/Geist-Bold.ttf"));
+    // Inter covers more of the world's letters and symbols (Greek, Cyrillic, Vietnamese,
+    // arrows); it fills in anything Geist doesn't have, in the same weight.
     add(&mut fonts, "Inter-Regular", include_bytes!("../assets/fonts/Inter-Regular.ttf"));
     add(&mut fonts, "Inter-Medium", include_bytes!("../assets/fonts/Inter-Medium.ttf"));
     add(&mut fonts, "Inter-SemiBold", include_bytes!("../assets/fonts/Inter-SemiBold.ttf"));
     add(&mut fonts, "Inter-Bold", include_bytes!("../assets/fonts/Inter-Bold.ttf"));
 
-    // Inter first; egui's built-in fonts stay as fallback for emoji / other scripts.
+    // Geist first, then Inter; egui's built-in fonts stay as fallback for emoji / other scripts.
     let fallback = fonts.families.get(&FontFamily::Proportional).cloned().unwrap_or_default();
-    let family = |main: &str| {
-        let mut v = vec![main.to_string()];
+    let family = |weight: &str| {
+        let mut v = vec![format!("Geist-{weight}"), format!("Inter-{weight}")];
         v.extend(fallback.iter().cloned());
         v
     };
-    fonts.families.insert(FontFamily::Proportional, family("Inter-Regular"));
-    fonts.families.insert(medium(), family("Inter-Medium"));
-    fonts.families.insert(semibold(), family("Inter-SemiBold"));
-    fonts.families.insert(bold(), family("Inter-Bold"));
+    fonts.families.insert(FontFamily::Proportional, family("Regular"));
+    fonts.families.insert(medium(), family("Medium"));
+    fonts.families.insert(semibold(), family("SemiBold"));
+    fonts.families.insert(bold(), family("Bold"));
 
     // Icons: outline icons mixed into normal text, filled icons as their own family.
     egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
