@@ -41,6 +41,8 @@ ring = { version = "0.17", default-features = false }
 [target.'cfg(windows)'.dependencies]
 eframe = { version = "0.36", default-features = false, features = ["wgpu"] }
 rfd = "0.18.0"
+# The window handle, to paint Windows' title bar in the theme's colours (titlebar.rs).
+raw-window-handle = "0.6"
 
 [profile.release]
 opt-level = 3

@@ -3118,6 +3118,7 @@ dependencies = [
  "miniz_oxide 0.8.9",
  "notify",
  "rand 0.9.5",
+ "raw-window-handle",
  "rfd",
  "ring",
  "rodio",

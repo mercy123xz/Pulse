@@ -30,6 +30,7 @@ mod suggest;
 mod tidal;
 mod theme;
 mod themes;
+mod titlebar;
 mod ui;
 mod update;
 mod widgets;

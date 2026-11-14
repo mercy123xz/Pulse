@@ -3511,6 +3511,8 @@ impl eframe::App for App {
         }
         self.updates(&ctx);
         self.discord_status(&ctx);
+        // The title bar in the theme's colours (Windows draws it white otherwise).
+        crate::titlebar::match_theme(frame, &ctx);
         // Developer check: PULSE_DEBUG_REPAINT=1 prints what asked for each redraw.
         static DEBUG_REPAINT: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
         if *DEBUG_REPAINT.get_or_init(|| std::env::var_os("PULSE_DEBUG_REPAINT").is_some()) {
