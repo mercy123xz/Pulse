@@ -35,6 +35,35 @@ mod update;
 mod widgets;
 mod youtube;
 
+/// Windows slows down programs that are minimized or in the background ("Efficiency
+/// mode"), and that can starve the threads that download and decode the music: it stalls
+/// as if paused. Ask Windows to leave Pulse at full speed.
+#[cfg(windows)]
+fn no_power_throttling() {
+    #[repr(C)]
+    struct PowerThrottlingState {
+        version: u32,
+        control_mask: u32,
+        state_mask: u32,
+    }
+    const PROCESS_POWER_THROTTLING: i32 = 4; // ProcessPowerThrottling
+    const EXECUTION_SPEED: u32 = 0x1;
+    const IGNORE_TIMER_RESOLUTION: u32 = 0x4;
+    unsafe extern "system" {
+        fn GetCurrentProcess() -> isize;
+        fn SetProcessInformation(process: isize, class: i32, info: *const PowerThrottlingState, size: u32) -> i32;
+    }
+    // Control a setting with its state bit off: throttling turned off for that setting.
+    let state = PowerThrottlingState { version: 1, control_mask: EXECUTION_SPEED | IGNORE_TIMER_RESOLUTION, state_mask: 0 };
+    // SAFETY: passes a valid struct of the size we give; a failure (older Windows) is harmless.
+    let ok = unsafe { SetProcessInformation(GetCurrentProcess(), PROCESS_POWER_THROTTLING, &state, std::mem::size_of::<PowerThrottlingState>() as u32) };
+    if ok == 0 {
+        crash::note("Couldn't turn off Windows' power throttling for Pulse");
+    }
+}
+#[cfg(not(windows))]
+fn no_power_throttling() {}
+
 fn main() -> eframe::Result {
     // A crash leaves a report (on this PC only) that Pulse offers to copy next time.
     crash::install();
@@ -42,6 +71,7 @@ fn main() -> eframe::Result {
     if !single::claim() {
         return Ok(());
     }
+    no_power_throttling();
     #[allow(unused_mut)]
     let mut options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
