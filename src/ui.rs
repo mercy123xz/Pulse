@@ -168,8 +168,28 @@ fn update_banner(app: &mut App, ui: &mut Ui) {
 
 fn main_scroll(app: &mut App, ui: &mut Ui) {
     update_banner(app, ui);
-    egui::ScrollArea::vertical().id_salt(("page", format!("{:?}", app.route))).auto_shrink(false).show(ui, |ui| {
-        Frame::new().inner_margin(Margin { left: 28, right: 28, top: 4, bottom: 32 }).show(ui, |ui| {
+    let page_key = format!("{:?}", app.route);
+    // A page you open fades in as it rises into place (a fifth of a second).
+    let id = egui::Id::new("page_entrance");
+    let key = egui::Id::new(&page_key);
+    if ui.ctx().data(|d| d.get_temp::<egui::Id>(id)) != Some(key) {
+        let first = ui.ctx().data(|d| d.get_temp::<egui::Id>(id)).is_none();
+        ui.ctx().data_mut(|d| {
+            d.insert_temp(id, key);
+            d.remove::<f64>(id.with("t"));
+        });
+        if first {
+            // Not the page Pulse opens on: the intro has just played.
+            ui.ctx().data_mut(|d| d.insert_temp(id.with("t"), f64::NEG_INFINITY));
+        }
+    }
+    let t = crate::theme::appear(ui.ctx(), id.with("t"), 0.2);
+    egui::ScrollArea::vertical().id_salt(("page", page_key)).auto_shrink(false).show(ui, |ui| {
+        if t < 1.0 {
+            ui.multiply_opacity(t);
+        }
+        let rise = ((1.0 - t) * 12.0) as i8;
+        Frame::new().inner_margin(Margin { left: 28, right: 28, top: 4 + rise, bottom: 32 }).show(ui, |ui| {
             page(app, ui);
         });
     });
@@ -236,6 +256,19 @@ fn shortcuts(app: &mut App, ctx: &egui::Context) {
 // ---------------------------------------------------------------------------
 
 fn sidebar(app: &mut App, ui: &mut Ui) {
+    let ctx = ui.ctx().clone();
+    // The row for the page you're on says where it is as it's drawn (see `nav_item_art`).
+    ctx.data_mut(|d| d.remove::<(f32, f32)>(egui::Id::new("nav_bar")));
+    sidebar_items(app, ui);
+    // The accent bar beside that row, sliding there when you change pages.
+    if let Some((x, y)) = ctx.data(|d| d.get_temp::<(f32, f32)>(egui::Id::new("nav_bar"))) {
+        let y = ctx.animate_value_with_time(egui::Id::new("nav_bar_y"), y, crate::theme::motion(0.22));
+        let bar = Rect::from_min_size(pos2(x, y - 9.0), vec2(3.0, 18.0));
+        ui.painter().rect_filled(bar, CornerRadius::same(2), pal().accent_soft);
+    }
+}
+
+fn sidebar_items(app: &mut App, ui: &mut Ui) {
     let ctx = ui.ctx().clone();
 
     // Logo
@@ -457,17 +490,19 @@ fn nav_item_art(ui: &mut Ui, art: Option<&str>, glyph: &str, label: &str, select
     let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), if art.is_some() { 40.0 } else { 36.0 }), Sense::click());
     resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, label));
     focus_ring(ui, &resp);
-    let fill = if selected {
-        pal().surface_active
-    } else if resp.hovered() {
-        pal().surface_hover
-    } else {
-        Color32::TRANSPARENT
-    };
-    ui.painter().rect_filled(rect, r_md(), fill);
-    if selected {
-        let bar = Rect::from_min_size(pos2(rect.left(), rect.center().y - 9.0), vec2(3.0, 18.0));
-        ui.painter().rect_filled(bar, CornerRadius::same(2), pal().accent_soft);
+    // Highlights fade in and out; the accent bar beside the page you're on is drawn once
+    // for the whole sidebar (`nav_bar`), so it can slide from one row to the next.
+    let ctx = ui.ctx().clone();
+    let hover_t = ctx.animate_bool_with_time(resp.id.with("hover_fade"), resp.hovered(), crate::theme::motion(0.12));
+    let sel_t = ctx.animate_bool_with_time(resp.id.with("sel_fade"), selected, crate::theme::motion(0.18));
+    if hover_t > 0.0 && sel_t < 1.0 {
+        ui.painter().rect_filled(rect, r_md(), pal().surface_hover.gamma_multiply(hover_t));
+    }
+    if sel_t > 0.0 {
+        ui.painter().rect_filled(rect, r_md(), pal().surface_active.gamma_multiply(sel_t));
+    }
+    if selected && ui.clip_rect().contains_rect(rect) {
+        ctx.data_mut(|d| d.insert_temp(egui::Id::new("nav_bar"), (rect.left(), rect.center().y)));
     }
     let icon_c = pos2(rect.left() + 22.0, rect.center().y);
     if art.is_some() {
@@ -1695,7 +1730,8 @@ fn follow_button(ui: &mut Ui, following: bool) -> egui::Response {
 fn save_heart(ui: &mut Ui, liked: bool) -> egui::Response {
     let (rect, resp) = ui.allocate_exact_size(Vec2::splat(40.0), Sense::click());
     resp_selected(ui, &resp, liked, "Save to your library");
-    let (font, col) = if liked { (filled_icon(24.0), pal().accent_soft) } else { (regular(24.0), if resp.hovered() { pal().text } else { pal().text_muted }) };
+    let size = 24.0 * heart_pop(ui, resp.id.with("pop"), liked);
+    let (font, col) = if liked { (filled_icon(size), pal().accent_soft) } else { (regular(size), if resp.hovered() { pal().text } else { pal().text_muted }) };
     paint_icon(ui.painter(), rect.center(), icon::HEART, font, col);
     resp.on_hover_text(tr(if liked { "Remove from your library" } else { "Save to your library" })).on_hover_cursor(egui::CursorIcon::PointingHand)
 }
@@ -2259,7 +2295,9 @@ fn player_bar(app: &mut App, ui: &mut Ui) {
         let hr = Rect::from_center_size(pos2((text_right + 22.0).min(left.right() - 18.0), left.center().y), Vec2::splat(30.0));
         let h = ui.interact(hr, egui::Id::new("np_like"), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
         resp_selected(ui, &h, liked, "Like current song");
-        let (font, col) = if liked { (filled_icon(18.0), pal().accent_soft) } else { (regular(18.0), if h.hovered() { pal().text } else { pal().text_muted }) };
+        // Keyed to the song, so changing songs doesn't make an already-liked heart pop.
+        let size = 18.0 * heart_pop(ui, egui::Id::new(("np_like_pop", &t.id)), liked);
+        let (font, col) = if liked { (filled_icon(size), pal().accent_soft) } else { (regular(size), if h.hovered() { pal().text } else { pal().text_muted }) };
         paint_icon(ui.painter(), hr.center(), icon::HEART, font, col);
         if h.clicked() {
             app.toggle_like(&t, &ctx);
@@ -3049,7 +3087,9 @@ fn toast(app: &App, ctx: &egui::Context) {
     }
     .clamp(0.0, 1.0) as f32;
     let screen = ctx.content_rect();
-    egui::Area::new(egui::Id::new("toast")).order(egui::Order::Foreground).anchor(Align2::CENTER_BOTTOM, vec2(0.0, -104.0)).interactable(false).show(
+    // It rises into place as it fades in.
+    let rise = if still || age >= 0.15 { 0.0 } else { (1.0 - crate::theme::ease_out((age / 0.15) as f32)) * 14.0 };
+    egui::Area::new(egui::Id::new("toast")).order(egui::Order::Foreground).anchor(Align2::CENTER_BOTTOM, vec2(0.0, -104.0 + rise)).interactable(false).show(
         ctx,
         |ui| {
             ui.set_max_width(screen.width() * 0.6);

@@ -74,14 +74,17 @@ pub fn artwork(ui: &Ui, rect: Rect, url: Option<&str>, radius: CornerRadius) {
             };
             img = img.uv(uv);
         }
-        paint_loaded(ui, img, rect);
+        paint_loaded(ui, img, rect, url);
     }
 }
 
-/// Paints a picture once it's there. One that couldn't be downloaded (offline, a dead
-/// link) leaves the placeholder underneath, instead of egui's red "failed" mark.
-fn paint_loaded(ui: &Ui, img: egui::Image, rect: Rect) {
+/// Paints a picture once it's there, fading it in over the placeholder the first time
+/// (it used to pop in). One that couldn't be downloaded (offline, a dead link) leaves the
+/// placeholder underneath, instead of egui's red "failed" mark.
+fn paint_loaded(ui: &Ui, img: egui::Image, rect: Rect, url: &str) {
     if img.load_for_size(ui.ctx(), rect.size()).is_ok() {
+        let shown = crate::theme::appear(ui.ctx(), egui::Id::new(("art_in", url)), 0.22);
+        let img = if shown < 1.0 { img.tint(Color32::from_white_alpha((shown * 255.0) as u8)) } else { img };
         img.paint_at(ui, rect);
     }
 }
@@ -130,7 +133,7 @@ pub fn artwork_cover(ui: &Ui, rect: Rect, url: Option<&str>, radius: CornerRadiu
         Rect::from_min_max(pos2(left, 0.0), pos2(left + w, 1.0))
     };
     crate::artcache::drawn(url);
-    paint_loaded(ui, egui::Image::new(url).uv(uv).corner_radius(radius).show_loading_spinner(false), rect);
+    paint_loaded(ui, egui::Image::new(url).uv(uv).corner_radius(radius).show_loading_spinner(false), rect, url);
 }
 
 pub fn vgradient(ui: &Ui, rect: Rect, top: Color32, bottom: Color32) {
@@ -225,7 +228,9 @@ pub fn play_button(ui: &mut Ui, size: f32, playing: bool) -> Response {
     a11y(ui, &resp, WidgetType::Button, || if playing { "Pause" } else { "Play" }.to_owned());
     // Hover is shown by the grow animation only: white on the lighter accent is too faint.
     let t = ui.ctx().animate_bool(resp.id, resp.hovered());
-    let r = size / 2.0 * (1.0 + 0.05 * t);
+    // Grows a little under the pointer and gives a little when pressed.
+    let press = ui.ctx().animate_bool_with_time(resp.id.with("press"), resp.is_pointer_button_down_on(), crate::theme::motion(0.08));
+    let r = size / 2.0 * (1.0 + 0.05 * t - 0.08 * press);
     let style = &parts().play_button;
     ui.painter().circle_filled(rect.center(), r, style.fill.unwrap_or(pal().accent));
     if let Some(b) = style.border {
@@ -912,13 +917,18 @@ fn track_row(ui: &mut Ui, id: egui::Id, list: &str, i: usize, t: &Track, tracks:
     let style = &parts().track_row;
     let radius = style.radius.map(CornerRadius::same).unwrap_or(r_md());
     let is_selected = selected.contains(&i);
+    // The hover highlight fades in and out instead of blinking on and off.
+    let hover_t = ui.ctx().animate_bool_with_time(id.with("hover_fade"), hovered, crate::theme::motion(0.12));
     if is_selected {
         ui.painter().rect_filled(rect, radius, pal().surface_active);
         if hovered {
             ui.painter().rect_filled(rect, radius, Color32::from_white_alpha(6));
         }
-    } else if hovered {
-        ui.painter().rect_filled(rect, radius, style.fill.unwrap_or(pal().surface_hover));
+    } else if hover_t > 0.0 {
+        if is_current && hover_t < 1.0 {
+            ui.painter().rect_filled(rect, radius, pal().accent.gamma_multiply(0.08 * (1.0 - hover_t)));
+        }
+        ui.painter().rect_filled(rect, radius, style.fill.unwrap_or(pal().surface_hover).gamma_multiply(hover_t));
     } else if is_current {
         ui.painter().rect_filled(rect, radius, pal().accent.gamma_multiply(0.08));
     }
@@ -996,10 +1006,11 @@ fn track_row(ui: &mut Ui, id: egui::Id, list: &str, i: usize, t: &Track, tracks:
     let heart = ui.interact(Rect::from_center_size(c.like.center(), Vec2::splat(28.0)), id.with("like"), Sense::click());
     resp_selected(ui, &heart, liked, "Like");
     if liked || hovered || heart.has_focus() {
+        let size = 16.0 * heart_pop(ui, id.with("like_pop"), liked);
         let (font, col) = if liked {
-            (filled_icon(16.0), pal().accent_soft)
+            (filled_icon(size), pal().accent_soft)
         } else {
-            (regular(16.0), if heart.hovered() { pal().text } else { pal().text_muted })
+            (regular(size), if heart.hovered() { pal().text } else { pal().text_muted })
         };
         paint_icon(ui.painter(), c.like.center(), icon::HEART, font, col);
     }
@@ -1083,6 +1094,13 @@ fn track_row(ui: &mut Ui, id: egui::Id, list: &str, i: usize, t: &Track, tracks:
         };
         track_menu(ui, t, &mcx, ev);
     });
+}
+
+/// How big a heart is drawn (1 = normal): it pops up and settles back when you like
+/// something. Already-liked hearts on a page you open don't pop.
+pub fn heart_pop(ui: &Ui, id: egui::Id, liked: bool) -> f32 {
+    let t = ui.ctx().animate_bool_with_time(id, liked, crate::theme::motion(0.32));
+    if liked && t < 1.0 { 1.0 + 0.4 * (t * std::f32::consts::PI).sin() } else { 1.0 }
 }
 
 fn pointer_in(ui: &Ui, r: Rect) -> bool {

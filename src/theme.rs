@@ -435,6 +435,34 @@ pub fn set_reduce_motion(on: bool) {
     REDUCE_MOTION.store(on, Ordering::Relaxed);
 }
 
+/// How long an animation of `secs` should run: not at all with Reduce motion, in Gaming
+/// Mode or Ultra-low (then everything just appears, and nothing redraws for it).
+pub fn motion(secs: f32) -> f32 {
+    if reduce_motion() { 0.0 } else { secs }
+}
+
+/// 0..1 → 0..1: quick at first, settling gently at the end.
+pub fn ease_out(t: f32) -> f32 {
+    1.0 - (1.0 - t.clamp(0.0, 1.0)).powi(3)
+}
+
+/// 0 → 1 over `secs`, counted from the first frame that asks with this `id` (eased). The
+/// app only redraws for it while it runs. Forget the id (`ctx.data_mut(|d| d.remove::<f64>(id))`)
+/// to play it again.
+pub fn appear(ctx: &egui::Context, id: egui::Id, secs: f32) -> f32 {
+    let secs = motion(secs);
+    if secs <= 0.0 {
+        return 1.0;
+    }
+    let now = ctx.input(|i| i.time);
+    let start = ctx.data_mut(|d| *d.get_temp_mut_or(id, now));
+    let t = ((now - start) as f32 / secs).clamp(0.0, 1.0);
+    if t < 1.0 {
+        ctx.request_repaint();
+    }
+    ease_out(t)
+}
+
 /// Makes `a` the active theme and restyles egui's built-in widgets to match.
 pub fn set_active(ctx: &egui::Context, a: Active) {
     if *active() == a {
