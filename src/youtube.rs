@@ -702,6 +702,22 @@ pub fn find_videos(tools: &Tools, track: &Track) -> Result<Vec<String>, String> 
     }
 }
 
+/// The song's album audio on YouTube Music, if one clearly is the song (for autoplay,
+/// which starts from YouTube Music's radio for it). One quick request; no yt-dlp.
+pub fn music_video(track: &Track) -> Option<String> {
+    if let Some(video) = crate::fixes::video(&track.id) {
+        return Some(video);
+    }
+    let [_, plain] = queries(track);
+    let entries = music_search(&plain).ok()?;
+    let ranked = rank(track, &entries);
+    // A clear match, or else the best album audio by the artist: Deezer's title may carry
+    // extras YouTube Music's doesn't ("Enter Sandman (Remastered 2021)"), and for a radio
+    // the right song in another edition is just as good.
+    let topic = |e: &&SearchEntry| e.channel.as_deref().is_some_and(|c| c.to_lowercase().ends_with(" - topic"));
+    ranked.iter().find(|e| clear_match(track, e)).or_else(|| ranked.iter().find(|e| topic(e) && score(track, e) >= 40)).map(|e| e.id.clone())
+}
+
 /// Only the right song gets this: the artist's own album audio ("Artist - Topic") with the
 /// right title, and the right length (or YouTube Music didn't say how long it is).
 fn clear_match(track: &Track, e: &SearchEntry) -> bool {
