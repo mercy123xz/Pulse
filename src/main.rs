@@ -84,6 +84,10 @@ fn use_directx(options: &mut eframe::NativeOptions) {
                 .ok_or_else(|| "No graphics adapter found".to_string())
         }));
     }
+    // Graphics memory sized for a music player, not a game: wgpu otherwise sets aside big
+    // blocks of memory up front for speed, which Pulse (some text and a few pictures) never fills.
+    let device = setup.device_descriptor.clone();
+    setup.device_descriptor = std::sync::Arc::new(move |adapter| wgpu::DeviceDescriptor { memory_hints: wgpu::MemoryHints::MemoryUsage, ..device(adapter) });
     options.wgpu_options.wgpu_setup = WgpuSetup::CreateNew(setup);
 }
 
