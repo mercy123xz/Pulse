@@ -2110,36 +2110,79 @@ fn queue_page(app: &mut App, ui: &mut Ui) {
         }
     }
 
-    let has_upcoming = app.queue.len() > app.queue_pos + 1;
-    let clear = section_title(ui, "Next up", has_upcoming.then_some("Clear"));
-    if clear {
-        app.queue.truncate(app.queue_pos + 1);
-    }
-    ui.horizontal(|ui| {
-        let on = app.saved.autoplay;
-        if pill(ui, if on { "Autoplay: on" } else { "Autoplay: off" }, on).clicked() {
-            app.toggle_autoplay();
+    // What you queued plays first. The songs autoplay added follow, under their own heading,
+    // like Spotify: they're always the run at the end of the queue.
+    let start = app.queue_pos + 1;
+    let first_auto = if app.saved.autoplay {
+        (start..app.queue.len()).rev().take_while(|&i| app.autoplay_ids.contains(&app.queue[i].id)).last().unwrap_or(app.queue.len())
+    } else {
+        app.queue.len()
+    };
+    let yours = first_auto - start;
+    if yours > 0 || !app.saved.autoplay {
+        if section_title(ui, "Next up", (yours > 0).then_some("Clear")) {
+            // Only your songs: autoplay's stay (turn autoplay off to drop them too).
+            app.queue.drain(start..first_auto);
+            ctx.request_repaint();
+            return;
         }
-        ui.label(RichText::new("When your queue ends, keep playing similar songs.").font(regular(12.5)).color(pal().text_muted));
-    });
-    ui.add_space(8.0);
-    if app.queue.len() <= app.queue_pos + 1 {
-        let msg = if app.saved.autoplay {
-            "Nothing queued. Similar songs will play when this one ends."
+        if yours == 0 {
+            ui.label(RichText::new(tr("Nothing queued. Right-click a song → “Add to queue”.")).color(pal().text_muted));
         } else {
-            "Nothing queued. Right-click a song → “Add to queue”."
-        };
-        ui.label(RichText::new(msg).color(pal().text_muted));
-        return;
+            let mut cx = table_ctx(app, &names);
+            cx.queue_mode = true;
+            let mut ev = vec![];
+            // Drawn straight from the queue (no copy each frame, which adds up for long queues).
+            track_table(ui, "q_next", &app.queue[start..first_auto], &cx, &mut ev);
+            if !ev.is_empty() {
+                let upcoming: Vec<Track> = app.queue[start..].to_vec();
+                app.handle_events(ev, &upcoming, &ctx);
+                return;
+            }
+        }
     }
-    let mut cx = table_ctx(app, &names);
-    cx.queue_mode = true;
-    let mut ev = vec![];
-    // Drawn straight from the queue (no copy each frame, which adds up for long queues).
-    track_table(ui, "q_next", &app.queue[app.queue_pos + 1..], &cx, &mut ev);
-    if !ev.is_empty() {
-        let upcoming: Vec<Track> = app.queue[app.queue_pos + 1..].to_vec();
-        app.handle_events(ev, &upcoming, &ctx);
+
+    // Autoplay: on or off, which song it's playing songs like, and what's coming.
+    ui.add_space(18.0);
+    ui.horizontal(|ui| {
+        ui.label(RichText::new(tr("Autoplay")).font(heavy(20.0)));
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let mut on = app.saved.autoplay;
+            if settings_page::switch(ui, &mut on, tr("Autoplay")).changed() {
+                app.toggle_autoplay();
+            }
+        });
+    });
+    ui.add_space(2.0);
+    let about = match (&app.radio_seed, app.saved.autoplay) {
+        (_, false) => tr("Turn on to keep playing similar songs when your queue ends.").to_string(),
+        (Some(seed), true) if first_auto < app.queue.len() => format!("{} · {}", tr("Songs like {}").replace("{}", &format!("“{}”", seed.title)), seed.artist.name),
+        _ if app.autoplay_loading() => tr("Finding songs like this one…").to_string(),
+        _ => tr("Similar songs will play when your queue ends.").to_string(),
+    };
+    ui.label(RichText::new(about).font(regular(13.0)).color(pal().text_muted));
+    ui.add_space(8.0);
+    if app.saved.autoplay && first_auto < app.queue.len() {
+        let mut cx = table_ctx(app, &names);
+        cx.queue_mode = true;
+        let mut ev = vec![];
+        track_table(ui, "q_auto", &app.queue[first_auto..], &cx, &mut ev);
+        if !ev.is_empty() {
+            // The table counts from its own first song; the queue's events count from the song after the one playing.
+            let ev = ev.into_iter().map(|e| shift_queue_event(e, yours)).collect();
+            let upcoming: Vec<Track> = app.queue[start..].to_vec();
+            app.handle_events(ev, &upcoming, &ctx);
+        }
+    }
+}
+
+/// A queue event from a table that starts `by` songs into "next up".
+fn shift_queue_event(e: TrackEvent, by: usize) -> TrackEvent {
+    match e {
+        TrackEvent::Play(i) => TrackEvent::Play(i + by),
+        TrackEvent::MoveInQueue(i, d) => TrackEvent::MoveInQueue(i + by, d),
+        TrackEvent::RemoveFromQueue(i) => TrackEvent::RemoveFromQueue(i + by),
+        other => other,
     }
 }
 

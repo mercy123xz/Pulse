@@ -1273,6 +1273,17 @@ pub fn mix(artist_id: &str) -> Result<Vec<Track>, String> {
     Ok(out)
 }
 
+/// The best-known songs of each of these artists (Deezer ids), `each` per artist, in the
+/// artists' order (looked up side by side).
+pub fn top_songs_of(artist_ids: &[String], each: usize) -> Vec<Track> {
+    let each = each.to_string();
+    let each = each.as_str();
+    std::thread::scope(|s| {
+        let jobs: Vec<_> = artist_ids.iter().map(|id| s.spawn(move || get::<List<DzTrack>>(&format!("/artist/{id}/top"), &[("limit", each)]).map(tracks).unwrap_or_default())).collect();
+        jobs.into_iter().filter_map(|j| j.join().ok()).flatten().collect()
+    })
+}
+
 /// Fallback radio: a few songs from each of the artist's similar artists.
 fn similar_artists_songs(artist_id: &str) -> Vec<Track> {
     let Ok(related) = get::<List<DzArtist>>(&format!("/artist/{artist_id}/related"), &[("limit", "5")]) else {

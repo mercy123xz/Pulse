@@ -22,6 +22,7 @@ mod local;
 mod lyrics;
 mod net;
 mod perf;
+mod radio;
 mod report;
 mod settings;
 mod share;

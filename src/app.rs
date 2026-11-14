@@ -746,14 +746,19 @@ pub struct App {
     prefetch_failed_tx: Sender<String>,
     prefetch_failed_rx: Receiver<String>,
 
-    // autoplay
-    autoplay_rx: Option<Receiver<Vec<Track>>>,
+    // autoplay (see radio.rs)
+    autoplay_rx: Option<Receiver<(Track, Vec<crate::radio::Pick>)>>,
     /// Song whose similar songs were last fetched (so it happens once per song).
     autoplay_for: Option<String>,
     /// Queue ran out while similar songs were still loading: play them when they arrive.
     advance_when_autoplay_arrives: bool,
-    /// Songs added by autoplay (shown with a label in the queue).
+    /// Songs added by autoplay (shown under their own heading in the queue).
     pub autoplay_ids: HashSet<String>,
+    /// The song you picked that autoplay is playing songs like.
+    pub radio_seed: Option<Track>,
+    /// Its songs not queued yet: they go in a few at a time, so the queue stays short and a
+    /// new song you pick starts a new radio without a long tail of old picks.
+    radio_pool: VecDeque<Track>,
 
     // overlays
     pub toast: Option<(String, f64)>,
@@ -952,6 +957,8 @@ impl App {
             autoplay_for: None,
             advance_when_autoplay_arrives: false,
             autoplay_ids: HashSet::new(),
+            radio_seed: None,
+            radio_pool: VecDeque::new(),
             toast: None,
             new_playlist: None,
             selection: (String::new(), HashSet::new(), None),
@@ -1884,6 +1891,16 @@ impl App {
     pub fn next(&mut self, ctx: &egui::Context) {
         if self.queue.is_empty() {
             return;
+        }
+        self.note_skip();
+        if self.queue_pos + 1 >= self.queue.len() && self.saved.repeat == Repeat::Off && self.saved.autoplay {
+            // The last song: like Spotify, Next goes on to songs like it.
+            self.maybe_fetch_autoplay(ctx);
+            if self.queue_pos + 1 >= self.queue.len() && self.autoplay_rx.is_some() {
+                self.advance_when_autoplay_arrives = true;
+                self.toast("Finding songs like this one…", ctx);
+                return;
+            }
         }
         if self.queue_pos + 1 < self.queue.len() {
             self.queue_pos += 1;
@@ -3074,6 +3091,21 @@ impl App {
         self.saved.autoplay = !self.saved.autoplay;
         if !self.saved.autoplay {
             self.advance_when_autoplay_arrives = false;
+            // Like Spotify: the songs autoplay queued go too. The ones you queued stay.
+            let (ids, keep) = (&self.autoplay_ids, self.queue_pos + 1);
+            let mut i = 0;
+            self.queue.retain(|t| {
+                i += 1;
+                i <= keep || !ids.contains(&t.id)
+            });
+            let left: HashSet<&str> = self.queue.iter().map(|t| t.id.as_str()).collect();
+            if let Some(u) = &mut self.unshuffled {
+                u.retain(|t| !ids.contains(&t.id) || left.contains(t.id.as_str()));
+            }
+            self.radio_pool.clear();
+            self.radio_seed = None;
+            self.autoplay_rx = None;
+            self.autoplay_for = None;
         }
     }
 
@@ -3251,7 +3283,8 @@ impl App {
 
     // ---------------------------------------------------------------- autoplay
 
-    /// On the last song of the queue: start loading similar songs to play next.
+    /// On the last song of the queue: queue more songs like the one you picked (from its
+    /// radio, if it's already found), or start finding them.
     fn maybe_fetch_autoplay(&mut self, ctx: &egui::Context) {
         if !self.saved.autoplay || self.saved.repeat != Repeat::Off || self.autoplay_rx.is_some() {
             return;
@@ -3262,41 +3295,74 @@ impl App {
         let Some(cur) = self.current.clone() else {
             return;
         };
-        if !cur.has_artist_page() {
-            return; // similar songs come from Deezer; local files have no Deezer artist
+        if cur.title.trim().is_empty() || cur.artist.name.trim().is_empty() {
+            return; // nothing to go on
+        }
+        // Still on the radio of the song you picked: carry on with it.
+        let on_radio = self.autoplay_ids.contains(&cur.id) || self.radio_seed.as_ref().is_some_and(|s| s.id == cur.id);
+        if on_radio && !self.radio_pool.is_empty() && self.queue_more_autoplay() > 0 {
+            return;
         }
         if self.autoplay_for.as_deref() == Some(cur.id.as_str()) {
             return;
         }
         self.autoplay_for = Some(cur.id.clone());
+        // A song you picked starts a new radio. When it runs out on a song autoplay chose, it
+        // refills from the song you picked, not the one playing, so it never drifts away from
+        // it (what was played already is left out, so the refill brings new songs).
+        let seed = match &self.radio_seed {
+            Some(picked) if self.autoplay_ids.contains(&cur.id) => picked.clone(),
+            _ => cur,
+        };
+        let video = self.youtube_ids.lock().unwrap().get(&seed.id).cloned();
+        let mut avoid = crate::radio::Avoid::default();
+        for t in self.saved.recent.iter().take(50).chain(self.queue.iter()) {
+            avoid.add(t);
+        }
         let (tx, rx) = channel();
         self.autoplay_rx = Some(rx);
         let ctx = ctx.clone();
         std::thread::spawn(move || {
-            let _ = tx.send(deezer::similar_to(&cur).unwrap_or_default());
+            let picks = crate::radio::for_song(&seed, video, &avoid);
+            let _ = tx.send((seed, picks));
             ctx.request_repaint();
         });
     }
 
+    /// Similar songs are being looked for.
+    pub fn autoplay_loading(&self) -> bool {
+        self.autoplay_rx.is_some()
+    }
+
     fn receive_autoplay(&mut self, ctx: &egui::Context) {
         let Some(rx) = &self.autoplay_rx else { return };
-        let Ok(found) = rx.try_recv() else { return };
+        let Ok((seed, picks)) = rx.try_recv() else { return };
         self.autoplay_rx = None;
-        // Skip songs that were just played or are already queued.
-        let recent: HashSet<&str> = self.saved.recent.iter().take(30).map(|t| t.id.as_str()).collect();
-        let queued: HashSet<String> = self.queue.iter().map(|t| t.id.clone()).collect();
-        let mut added = 0;
-        for t in found {
-            if added >= 15 || recent.contains(t.id.as_str()) || queued.contains(&t.id) {
-                continue;
-            }
-            self.autoplay_ids.insert(t.id.clone());
-            if let Some(u) = &mut self.unshuffled {
-                u.push(t.clone());
-            }
-            self.queue.push(t);
-            added += 1;
+        // You picked something else while these were found (or turned autoplay off): they
+        // aren't wanted any more. Look again for what's playing now. (`autoplay_for` is the
+        // song that asked for them: the one playing then, or still ahead in the queue.)
+        let asked_by = self.autoplay_for.clone().unwrap_or_default();
+        let still_wanted = self.queue.iter().skip(self.queue_pos).any(|t| t.id == asked_by);
+        if !self.saved.autoplay || !still_wanted {
+            self.autoplay_for = None;
+            self.advance_when_autoplay_arrives = false;
+            self.maybe_fetch_autoplay(ctx);
+            return;
         }
+        // YouTube Music's own audio for its picks: they start without searching YouTube.
+        {
+            let mut ids = self.youtube_ids.lock().unwrap();
+            for p in &picks {
+                if let Some(v) = &p.video {
+                    ids.entry(p.track.id.clone()).or_insert_with(|| v.clone());
+                }
+            }
+        }
+        if !picks.is_empty() {
+            self.radio_seed = Some(seed);
+            self.radio_pool = picks.into_iter().map(|p| p.track).collect();
+        }
+        let added = self.queue_more_autoplay();
         if self.advance_when_autoplay_arrives {
             self.advance_when_autoplay_arrives = false;
             if added > 0 {
@@ -3305,6 +3371,40 @@ impl App {
                 self.audio.stop();
                 self.needs_load = true;
             }
+        }
+    }
+
+    /// Moves the next few songs of the radio into the queue. Returns how many went in.
+    fn queue_more_autoplay(&mut self) -> usize {
+        const AT_A_TIME: usize = 8;
+        let recent: HashSet<&str> = self.saved.recent.iter().take(50).map(|t| t.id.as_str()).collect();
+        let queued: HashSet<&str> = self.queue.iter().map(|t| t.id.as_str()).collect();
+        let mut batch = vec![];
+        while batch.len() < AT_A_TIME {
+            let Some(t) = self.radio_pool.pop_front() else { break };
+            if !recent.contains(t.id.as_str()) && !queued.contains(t.id.as_str()) {
+                batch.push(t);
+            }
+        }
+        let added = batch.len();
+        for t in batch {
+            self.autoplay_ids.insert(t.id.clone());
+            if let Some(u) = &mut self.unshuffled {
+                u.push(t.clone());
+            }
+            self.queue.push(t);
+        }
+        added
+    }
+
+    /// Next pressed early in a song autoplay chose: that artist isn't wanted right now, so
+    /// their other songs leave the radio (any already in the queue stay where you can see them).
+    fn note_skip(&mut self) {
+        let Some(cur) = &self.current else { return };
+        let early = matches!(self.audio.load_state(), LoadState::Ready) && !self.needs_load && !self.audio.finished() && self.audio.position() < Duration::from_secs(30);
+        if early && self.autoplay_ids.contains(&cur.id) {
+            let artist = crate::youtube::norm(&cur.artist.name);
+            self.radio_pool.retain(|t| crate::youtube::norm(&t.artist.name) != artist);
         }
     }
 
@@ -3369,6 +3469,8 @@ impl App {
                     }
                 }
                 TrackEvent::PlayNext(t) => {
+                    // Yours now, even if autoplay once picked it.
+                    self.autoplay_ids.remove(&t.id);
                     let at = if self.queue.is_empty() { 0 } else { self.queue_pos + 1 };
                     self.queue.insert(at, t.clone());
                     if let Some(u) = &mut self.unshuffled {
@@ -3381,13 +3483,16 @@ impl App {
                     }
                 }
                 TrackEvent::AddToQueue(t) => {
-                    self.queue.push(t.clone());
+                    self.autoplay_ids.remove(&t.id);
+                    // Before the songs autoplay added, like Spotify: what you queue plays first.
+                    let at = (self.queue_pos + 1..self.queue.len()).find(|&i| self.autoplay_ids.contains(&self.queue[i].id)).unwrap_or(self.queue.len());
+                    self.queue.insert(at, t.clone());
                     if let Some(u) = &mut self.unshuffled {
                         u.push(t.clone());
                     }
                     self.toast("Added to queue", ctx);
                     if self.current.is_none() {
-                        self.queue_pos = self.queue.len() - 1;
+                        self.queue_pos = at;
                         self.start_current(ctx);
                     }
                 }
