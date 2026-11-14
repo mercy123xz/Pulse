@@ -991,17 +991,26 @@ fn table_ctx<'a>(app: &'a App, names: &'a [String]) -> TableCtx<'a> {
         highlight: app.highlight.as_ref().map(|(id, at)| (id.as_str(), *at)),
         selection: (app.selection.0.as_str(), &app.selection.1),
         index_offset: 0,
+        compact: false,
     }
 }
 
 /// Draws a track table and applies whatever the user clicked.
 fn tracks_block(app: &mut App, ui: &mut Ui, salt: &str, tracks: &[Track]) {
+    tracks_block_ex(app, ui, salt, tracks, false, 0);
+}
+
+/// `compact`: no header or numbers (a short list beside something else); `numbered_from`:
+/// the number before the first row (a list that carries on from one above).
+fn tracks_block_ex(app: &mut App, ui: &mut Ui, salt: &str, tracks: &[Track], compact: bool, numbered_from: usize) {
     app.ensure_views(tracks);
     app.ensure_featured(tracks);
     let names = app.playlist_names();
     let mut ev = vec![];
     let mut cx = table_ctx(app, &names);
     cx.views = Some(&app.saved.views);
+    cx.compact = compact;
+    cx.index_offset = numbered_from;
     track_table(ui, salt, tracks, &cx, &mut ev);
     let ctx = ui.ctx().clone();
     app.handle_events(ev, tracks, &ctx);
@@ -1307,25 +1316,44 @@ fn shuffle_play(app: &mut App, tracks: &[Track], ctx: &egui::Context) {
 fn search_top_card(app: &mut App, ui: &mut Ui, artist: Option<&ArtistInfo>, tracks: &[Track]) {
     let Some((name, kind, art)) = artist.map(|a| (a.name.as_str(), "Artist", a.picture.as_deref()))
         .or_else(|| tracks.first().map(|t| (t.title.as_str(), "Song", t.art_big()))) else { return };
-    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 250.0), Sense::click());
-
-    let fill = if response.hovered() { pal().surface_active } else { pal().surface_hover };
-    ui.painter().rect_filled(rect, r_lg(), fill);
-    let size = 112.0;
-    let art_rect = Rect::from_min_size(rect.min + vec2(18.0, 16.0), Vec2::splat(size));
-    let radius = if artist.is_some() { CornerRadius::same(56) } else { r_md() };
+    // The same height as the four songs beside it, so the two sit level.
+    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 4.0 * 56.0), Sense::click());
+    let hot = response.hovered() || ui.rect_contains_pointer(rect);
+    // A soft wash of the theme's accent from the top-left corner, like a cover glow.
+    ui.painter().rect_filled(rect, r_lg(), if hot { pal().surface_active } else { pal().surface_hover });
+    let glow = pal().accent.gamma_multiply(if hot { 0.26 } else { 0.18 });
+    let mut mesh = egui::Mesh::default();
+    let inner = rect.shrink(1.0);
+    for (p, c) in [(inner.left_top(), glow), (inner.right_top(), Color32::TRANSPARENT), (inner.right_bottom(), Color32::TRANSPARENT), (inner.left_bottom(), glow.gamma_multiply(0.4))] {
+        mesh.colored_vertex(p, c);
+    }
+    mesh.add_triangle(0, 1, 2);
+    mesh.add_triangle(0, 2, 3);
+    ui.painter().with_clip_rect(rect.shrink(8.0)).add(mesh);
+    let size = 104.0;
+    let art_rect = Rect::from_min_size(rect.min + vec2(20.0, 20.0), Vec2::splat(size));
+    let radius = if artist.is_some() { CornerRadius::same(52) } else { r_md() };
+    // A soft shadow under the picture.
+    ui.painter().add(egui::Shadow { offset: [0, 6], blur: 18, spread: 0, color: Color32::from_black_alpha(90) }.as_shape(art_rect, radius));
     if artist.is_some() && art.is_none_or(|url| url.is_empty()) {
         artist_monogram(ui, art_rect, name, radius);
     } else {
         artwork(ui, art_rect, art, radius);
     }
-    paint_line(ui, rect.min + vec2(18.0, 143.0), name, heavy(22.0), pal().text, rect.width() - 36.0);
-    paint_line(ui, rect.min + vec2(18.0, 177.0), tr(kind), med(13.0), pal().text_muted, rect.width() - 36.0);
-    let button = Rect::from_min_size(pos2(rect.right() - 62.0, rect.bottom() - 62.0), Vec2::splat(44.0));
+    let text_w = rect.width() - 40.0 - 64.0;
+    paint_line(ui, pos2(rect.left() + 20.0, art_rect.bottom() + 16.0), name, heavy(26.0), pal().text, text_w);
+    // The kind of result as a small chip ("Artist", "Song").
+    let chip_text = ui.painter().layout_no_wrap(tr(kind).to_owned(), semi(11.5), pal().text);
+    let chip = Rect::from_min_size(pos2(rect.left() + 20.0, art_rect.bottom() + 54.0), vec2(chip_text.size().x + 18.0, 24.0));
+    ui.painter().rect_filled(chip, CornerRadius::same(12), pal().bg.gamma_multiply(0.55));
+    ui.painter().galley(chip.center() - chip_text.size() / 2.0, chip_text, pal().text);
+    // Play: in the corner, a little bigger when you point at the card.
+    let grow = ui.ctx().animate_bool(response.id.with("grow"), hot);
+    let button = Rect::from_center_size(pos2(rect.right() - 44.0, rect.bottom() - 44.0), Vec2::splat(48.0));
     let play = ui.interact(button, response.id.with("play"), Sense::click());
-
-    ui.painter().circle_filled(button.center(), 22.0, parts().play_button.fill.unwrap_or(pal().accent));
-    paint_icon(ui.painter(), button.center(), icon::PLAY, filled_icon(18.0), parts().play_button.color.unwrap_or(Color32::WHITE));
+    ui.painter().add(egui::Shadow { offset: [0, 4], blur: 12, spread: 0, color: Color32::from_black_alpha(80) }.as_shape(button, CornerRadius::same(24)));
+    ui.painter().circle_filled(button.center(), 24.0 + 2.0 * grow, parts().play_button.fill.unwrap_or(pal().accent));
+    paint_icon(ui.painter(), button.center(), icon::PLAY, filled_icon(20.0), parts().play_button.color.unwrap_or(Color32::WHITE));
     a11y(ui, &response, egui::WidgetType::Button, || format!("{}, {}", name, tr(kind)));
     a11y(ui, &play, egui::WidgetType::Button, || format!("{} {}", tr("Play"), name));
     let ctx = ui.ctx().clone();
@@ -1394,7 +1422,7 @@ fn search(app: &mut App, ui: &mut Ui, q: &str) {
                 ui.allocate_ui_with_layout(vec2((total - left - 8.0).max(0.0), 0.0), Layout::top_down(Align::Min), |ui| {
                     if !r.tracks.is_empty() {
                         section_title(ui, "Songs", None);
-                        tracks_block(app, ui, "search_top_tracks", &r.tracks[..r.tracks.len().min(4)]);
+                        tracks_block_ex(app, ui, "search_top_tracks", &r.tracks[..r.tracks.len().min(4)], true, 0);
                     }
                 });
             });
@@ -1427,7 +1455,8 @@ fn search(app: &mut App, ui: &mut Ui, q: &str) {
         }
         if all && r.tracks.len() > 4 {
             section_title(ui, "More songs", None);
-            tracks_block(app, ui, "search_more_tracks", &r.tracks[4..r.tracks.len().min(10)]);
+            // Numbered on from the four at the top.
+            tracks_block_ex(app, ui, "search_more_tracks", &r.tracks[4..r.tracks.len().min(10)], false, 4);
         }
         // Searched for an artist: who their listeners also play.
         if let Some((name, related, _)) = &r.around

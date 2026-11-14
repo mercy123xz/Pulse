@@ -678,6 +678,9 @@ pub struct TableCtx<'a> {
     pub selection: (&'a str, &'a HashSet<usize>),
     /// Number shown for the first row (queue shows "next up" starting at 1).
     pub index_offset: usize,
+    /// A short list beside other things (search's top songs): no header or numbers; the
+    /// play button sits on the cover.
+    pub compact: bool,
 }
 
 const ROW_H: f32 = 56.0;
@@ -692,17 +695,19 @@ struct Cols {
     time: Rect,
 }
 
-fn columns(row: Rect, with_date: bool, with_views: bool) -> Cols {
+/// `compact`: a short list beside other things (search's top songs): no number column,
+/// header, album, views or date, just the song.
+fn columns(row: Rect, with_date: bool, with_views: bool, compact: bool) -> Cols {
     let w = row.width();
     let x0 = row.left();
     let col = |a: f32, b: f32| Rect::from_x_y_ranges(a..=b, row.y_range());
-    let num = col(x0, x0 + 44.0);
+    let num = if compact { col(x0, x0 + 4.0) } else { col(x0, x0 + 44.0) };
     let time = col(row.right() - 64.0, row.right() - 12.0);
     let like = col(time.left() - 40.0, time.left());
-    let date = (with_date && w > 900.0).then(|| col(like.left() - 150.0, like.left() - 12.0));
+    let date = (!compact && with_date && w > 900.0).then(|| col(like.left() - 150.0, like.left() - 12.0));
     let after_views = date.map(|d| d.left()).unwrap_or(like.left());
-    let views = (with_views && w > 640.0).then(|| col(after_views - 130.0, after_views - 20.0));
-    let wide = w > 720.0;
+    let views = (!compact && with_views && w > 640.0).then(|| col(after_views - 130.0, after_views - 20.0));
+    let wide = !compact && w > 720.0;
     let album_right = views.map(|v| v.left()).unwrap_or(after_views) - 16.0;
     let album_w = (w * if date.is_some() { 0.24 } else { 0.3 }).min(320.0);
     let album = wide.then(|| col(album_right - album_w, album_right));
@@ -754,7 +759,7 @@ pub fn fmt_added(when: u64, now: u64) -> String {
 
 pub fn track_table_header(ui: &mut Ui, with_date: bool, with_views: bool) {
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 32.0), Sense::hover());
-    let c = columns(rect, with_date, with_views);
+    let c = columns(rect, with_date, with_views, false);
     let f = med(11.5);
     let p = ui.painter();
     paint_icon(p, c.num.center(), "#", f.clone(), pal().text_faint);
@@ -775,7 +780,9 @@ pub fn track_table_header(ui: &mut Ui, with_date: bool, with_views: bool) {
 }
 
 pub fn track_table(ui: &mut Ui, id_salt: &str, tracks: &[Track], cx: &TableCtx, events: &mut Vec<TrackEvent>) {
-    track_table_header(ui, cx.added.is_some(), cx.views.is_some());
+    if !cx.compact {
+        track_table_header(ui, cx.added.is_some(), cx.views.is_some());
+    }
     let base = ui.id().with(id_salt);
     // This list's selected rows (selection belongs to one list at a time).
     let empty = HashSet::new();
@@ -941,10 +948,11 @@ fn track_row(ui: &mut Ui, id: egui::Id, list: &str, i: usize, t: &Track, tracks:
         // The song you came here for stays tinted for a moment.
         ui.painter().rect_filled(rect, radius, pal().accent.gamma_multiply(0.22));
     }
-    let c = columns(rect, cx.added.is_some(), cx.views.is_some());
+    let c = columns(rect, cx.added.is_some(), cx.views.is_some(), cx.compact);
 
-    // Number / play icon / "now playing" bars
-    if hovered {
+    // Number / play icon / "now playing" bars (in a compact list, on the cover instead)
+    if cx.compact {
+    } else if hovered {
         let glyph = if is_current && cx.is_playing { icon::PAUSE } else { icon::PLAY };
         paint_icon(ui.painter(), c.num.center(), glyph, filled_icon(15.0), pal().text);
     } else if is_current && cx.is_playing {
@@ -959,6 +967,16 @@ fn track_row(ui: &mut Ui, id: egui::Id, list: &str, i: usize, t: &Track, tracks:
     // Ultra-low resource: no pictures in long lists (a plain tile instead).
     let pic = if crate::perf::on(crate::perf::Extra::ListArtwork) { t.art_small() } else { None };
     artwork(ui, art, pic, CornerRadius::same(5));
+    if cx.compact && (hovered || (is_current && cx.is_playing)) {
+        // A compact list has no number column: play / pause / "now playing" go on the cover.
+        ui.painter().rect_filled(art, CornerRadius::same(5), Color32::from_black_alpha(130));
+        if hovered {
+            let glyph = if is_current && cx.is_playing { icon::PAUSE } else { icon::PLAY };
+            paint_icon(ui.painter(), art.center(), glyph, filled_icon(16.0), Color32::WHITE);
+        } else {
+            equalizer(ui, art.center());
+        }
+    }
     let tx = art.right() + 12.0;
     let tw = c.title.right() - tx;
     let title_col = if is_current { pal().accent_soft } else { pal().text };
@@ -1036,7 +1054,7 @@ fn track_row(ui: &mut Ui, id: egui::Id, list: &str, i: usize, t: &Track, tracks:
         ev.push(TrackEvent::Play(i));
     } else if resp.clicked() {
         let (enter, mods) = ui.input(|inp| (inp.key_pressed(Key::Enter), inp.modifiers));
-        if enter || pointer_in(ui, c.num) {
+        if enter || pointer_in(ui, c.num) || (cx.compact && pointer_in(ui, art)) {
             // Enter on a focused row, or the play icon in the number column.
             ev.push(TrackEvent::Play(i));
         } else {
@@ -1236,7 +1254,7 @@ pub fn skeleton_rows(ui: &mut Ui, n: usize) {
     let col = pal().surface_hover.gamma_multiply(a);
     for k in 0..n {
         let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), ROW_H), Sense::hover());
-        let c = columns(rect, false, false);
+        let c = columns(rect, false, false, false);
         let art = Rect::from_min_size(pos2(c.title.left(), rect.center().y - 20.0), Vec2::splat(40.0));
         ui.painter().rect_filled(art, CornerRadius::same(5), col);
         let w1 = 140.0 + ((k * 37) % 90) as f32;
