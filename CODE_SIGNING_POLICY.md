@@ -20,8 +20,9 @@ gh attestation verify PulseSetup-X.Y.Z.exe -R mercy123xz/Pulse
 
 - Committers and reviewers: [MERCY (@mercy123xz)](https://github.com/mercy123xz)
 - Approvers: [MERCY (@mercy123xz)](https://github.com/mercy123xz)
+- Contributors: [Lachlan (@lachlan1234564)](https://github.com/lachlan1234564)
 
-Only code merged into this repository is built and signed. Pulse does not accept code contributions from outside the team at this time.
+Contributors send changes as pull requests. Every pull request is reviewed and merged by MERCY before it is built and signed; only code merged into this repository is built and signed.
 
 ## Privacy
 
