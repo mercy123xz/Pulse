@@ -1,12 +1,13 @@
 name: Publish website
 
 # The website lives in site/ and is published at https://listen2pulse.github.io/
-# (the listen2pulse/listen2pulse.github.io repository) whenever it changes on main.
+# (the listen2pulse/listen2pulse.github.io repository) whenever it changes on main or on
+# the website branch (website-only updates go live from there without touching main).
 # The old address, https://mercy123xz.github.io/Pulse/, is kept as a set of pages that
 # forward every link (with its ?name=, ?id= and #part) to the same page at the new one.
 on:
   push:
-    branches: [main]
+    branches: [main, website]
     paths: ["site/**", ".github/workflows/pages.yml", ".github/scripts/redirects.py"]
   workflow_dispatch:
 
@@ -42,6 +43,8 @@ jobs:
           git push
 
   old-address:
+    # GitHub Pages for the old address only deploys from main.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment:
       name: github-pages

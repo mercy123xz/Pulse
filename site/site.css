@@ -45,7 +45,7 @@ html { scroll-padding-top: 90px; }
 }
 @media (max-width: 440px) { .nav { gap: .35rem; } .nav > .btn { padding: .55rem .8rem; font-size: .85rem; } }
 @media (max-width: 380px) { .nav > .btn { display: none; } }
-@media (prefers-reduced-motion: no-preference) {
+@media all {
   .menu-panel:not([hidden]) { animation: menu-in .18s ease-out; }
   @keyframes menu-in { from { opacity: 0; transform: translateY(-6px); } }
 }
@@ -75,7 +75,7 @@ html[data-theme="light"] {
 html.theme-fade, html.theme-fade * { transition: background-color .3s ease, color .3s ease, border-color .3s ease !important; }
 
 /* ---------- Scroll-in motion ---------- */
-@media (prefers-reduced-motion: no-preference) {
+@media all {
   html.motion .reveal { opacity: 0; transform: translateY(22px); transition: opacity .7s cubic-bezier(.2, .7, .2, 1) var(--d, 0s), transform .7s cubic-bezier(.2, .7, .2, 1) var(--d, 0s); }
   html.motion .reveal.in { opacity: 1; transform: none; }
 }
@@ -94,7 +94,7 @@ html.theme-fade, html.theme-fade * { transition: background-color .3s ease, colo
 /* Lenis does the smooth scrolling where it runs (smooth.js); the browser's own would fight it. */
 html.lenis { scroll-behavior: auto !important; }
 /* Pages cross-fade into each other (browsers that support it), unless motion is reduced. */
-@media (prefers-reduced-motion: no-preference) {
+@media all {
   @view-transition { navigation: auto; }
   ::view-transition-old(root) { animation: .22s cubic-bezier(.4, 0, 1, 1) both vt-out; }
   ::view-transition-new(root) { animation: .32s cubic-bezier(.2, .7, .2, 1) both vt-in; }

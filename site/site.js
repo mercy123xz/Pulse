@@ -91,9 +91,9 @@
   }
 
   // ------------------------------------------------------------------ Scroll-in motion
-  // Things below the first screen rise in as they come into view. Without JavaScript,
-  // or with reduced motion, everything simply shows.
-  if (!("IntersectionObserver" in window) || (window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches)) return;
+  // Things below the first screen rise in as they come into view (for everyone, by the
+  // site owner's choice). Without JavaScript, everything simply shows.
+  if (!("IntersectionObserver" in window)) return;
   var targets = document.querySelectorAll(
     "main [data-reveal], main section:not(.hero) .kicker, main section:not(.hero) h2, main section:not(.hero) .section-lede, " +
     "main .shot:not(.screen):not([role=tabpanel] .shot), main .card, main .panel, main .meter, main .demo, main .facts li, main .box, " +

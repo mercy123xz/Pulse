@@ -3,7 +3,7 @@
 // Nothing here is needed to read the page or download Pulse.
 (function () {
   "use strict";
-  var still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  var still = false; // motion for everyone, even with "reduce motion" on (site owner's choice)
   var fine = matchMedia("(hover: hover) and (pointer: fine)").matches;
   var $ = function (s, r) { return (r || document).querySelector(s); };
   var clamp = function (v, a, b) { return Math.max(a, Math.min(b, v)); };
