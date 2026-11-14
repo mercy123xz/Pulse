@@ -239,7 +239,7 @@ Run the tests with `cargo test`, and the accounts server's with `node server/tes
 - [Cloudflare Workers](https://workers.cloudflare.com) and D1: the optional accounts server
 - [ureq](https://github.com/algesten/ureq) with [rustls](https://github.com/rustls/rustls): networking
 - [Inno Setup](https://jrsoftware.org/isinfo.php): the installer
-- [Phosphor Icons](https://phosphoricons.com) and the [Inter](https://rsms.me/inter/) typeface (SIL Open Font License)
+- [Phosphor Icons](https://phosphoricons.com), the [Geist](https://vercel.com/font) typeface, and [Inter](https://rsms.me/inter/) for characters Geist doesn't cover (SIL Open Font License)
 
 ## About the music
 
