@@ -649,6 +649,14 @@ impl AccountDialog {
 /// else a cover from iTunes if there is one).
 type Rematch = (String, Option<Track>, Option<String>);
 
+/// Keeps an imported song's known video when Deezer finds its proper id.
+fn copy_rematched_video(ids: &Mutex<HashMap<String, String>>, old: &str, new: &str) {
+    let mut ids = ids.lock().unwrap();
+    if let Some(video) = ids.get(old).cloned() {
+        ids.insert(new.to_string(), video);
+    }
+}
+
 /// A finished download: the song, and its file and YouTube video id (or what went wrong).
 type DownloadResult = (Track, Result<(std::path::PathBuf, String), String>);
 
@@ -2441,9 +2449,7 @@ impl App {
             match found {
                 Some(new) => {
                     // Swap in the Deezer song; keep its YouTube video and "date added".
-                    if let Some(v) = self.youtube_ids.lock().unwrap().get(&old).cloned() {
-                        self.youtube_ids.lock().unwrap().insert(new.id.clone(), v);
-                    }
+                    copy_rematched_video(&self.youtube_ids, &old, &new.id);
                     for p in &mut self.saved.playlists {
                         if let Some(when) = p.added.remove(&old) {
                             p.added.insert(new.id.clone(), when);
@@ -3670,5 +3676,25 @@ mod ahead_tests {
         assert!(!keep_ahead(&gone, &dir.join("dz_2.m4a")));
         assert!(!dir.join("dz_2.m4a").exists() && !dir.join("dz_2.ahead").exists());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod rematch_tests {
+    use super::*;
+
+    #[test]
+    fn a_rematched_song_keeps_its_video_without_locking_twice() {
+        let (tx, rx) = channel();
+        std::thread::spawn(move || {
+            let ids = Mutex::new(HashMap::from([("imp:youtube:old".into(), "video".into())]));
+            copy_rematched_video(&ids, "imp:youtube:old", "dz:1");
+            copy_rematched_video(&ids, "missing", "dz:2");
+            tx.send(ids.into_inner().unwrap()).unwrap();
+        });
+        let ids = rx.recv_timeout(Duration::from_secs(2)).expect("rematching must not deadlock the UI");
+        assert_eq!(ids.get("dz:1").map(String::as_str), Some("video"));
+        assert_eq!(ids.get("imp:youtube:old").map(String::as_str), Some("video"));
+        assert!(!ids.contains_key("dz:2"), "an unknown video isn't invented");
     }
 }
