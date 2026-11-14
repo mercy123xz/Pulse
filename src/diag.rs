@@ -156,7 +156,7 @@ fn gather(offline: PathBuf) -> Facts {
     let (art, lyrics, songs) = (size(&cache.join("art")), size(&cache.join("lyrics")), size(&cache.join("audio")));
     let tools = crate::youtube::tools_dir();
     let tools_cache = size(&tools.join("cache"));
-    let library = eframe::storage_dir("pulse-player").and_then(|d| std::fs::metadata(d.join("app.ron")).ok()).map_or(0, |m| m.len());
+    let library = crate::settings::library_file().and_then(|f| std::fs::metadata(f).ok()).map_or(0, |m| m.len());
     let mut storage = vec![
         ("Downloaded songs", size(&offline)),
         ("Played songs kept", songs),

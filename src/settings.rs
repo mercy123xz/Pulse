@@ -3,10 +3,24 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+/// A separate profile for testing (PULSE_DATA_DIR=<folder>): a whole second Pulse with its
+/// own library, settings and window, that opens next to the everyday one and never touches it.
+pub fn separate_profile() -> Option<PathBuf> {
+    std::env::var_os("PULSE_DATA_DIR").filter(|d| !d.is_empty()).map(PathBuf::from)
+}
+
+/// The file the library is saved in: eframe's `app.ron` (in a separate profile, its own copy).
+pub fn library_file() -> Option<PathBuf> {
+    match separate_profile() {
+        Some(dir) => Some(dir.join("data").join("app.ron")),
+        None => eframe::storage_dir("pulse-player").map(|d| d.join("app.ron")),
+    }
+}
+
 /// Pulse's data folder: %APPDATA%\pulse-player on Windows.
 pub fn data_dir() -> PathBuf {
-    if let Ok(dir) = std::env::var("PULSE_DATA_DIR") {
-        return PathBuf::from(dir);
+    if let Some(dir) = separate_profile() {
+        return dir;
     }
     let base = if cfg!(windows) {
         std::env::var_os("APPDATA").map(PathBuf::from)
