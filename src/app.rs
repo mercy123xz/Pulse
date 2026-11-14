@@ -336,9 +336,9 @@ pub fn apply_view(tracks: &[Track], view: &ListView, added: Option<&HashMap<Stri
     let key = |s: &str| s.to_lowercase();
     match view.sort {
         SortBy::Custom => {}
-        SortBy::Title => out.sort_by_key(|t| key(&t.title)),
-        SortBy::Artist => out.sort_by_key(|t| (key(&t.artist.name), key(&t.title))),
-        SortBy::Album => out.sort_by_key(|t| (t.album.as_ref().map(|a| key(&a.title)), key(&t.title))),
+        SortBy::Title => out.sort_by_cached_key(|t| key(&t.title)),
+        SortBy::Artist => out.sort_by_cached_key(|t| (key(&t.artist.name), key(&t.title))),
+        SortBy::Album => out.sort_by_cached_key(|t| (t.album.as_ref().map(|a| key(&a.title)), key(&t.title))),
         SortBy::Duration => out.sort_by_key(|t| t.duration),
         SortBy::RecentlyAdded => {
             let when = |t: &Track| added.and_then(|a| a.get(&t.id)).copied().unwrap_or(0);
@@ -3539,6 +3539,71 @@ impl eframe::App for App {
 
     fn auto_save_interval(&self) -> Duration {
         Duration::from_secs(15)
+    }
+}
+
+#[cfg(test)]
+mod sorting_tests {
+    use super::*;
+
+    #[test]
+    fn text_sorting_keeps_ties_in_their_original_order() {
+        let tracks: Vec<Track> = ["same", "Same", "SAME"].iter().enumerate().map(|(i, title)| Track {
+            id: i.to_string(), title: (*title).into(), artist: deezer::ArtistRef { name: (*title).into(), ..Default::default() },
+            album: Some(deezer::AlbumRef { id: i.to_string(), title: (*title).into() }), ..Default::default()
+        }).collect();
+        for sort in [SortBy::Title, SortBy::Artist, SortBy::Album] {
+            let sorted = apply_view(&tracks, &ListView { sort, ..Default::default() }, None, &HashMap::new());
+            assert_eq!(sorted, tracks, "{sort:?} must keep the order of equal keys");
+        }
+    }
+
+    /// Compare the full library view against the previous sorting on the same songs.
+    #[test]
+    #[ignore = "manual timing comparison: run with --ignored --nocapture"]
+    fn library_text_sort_timing() {
+        use std::hint::black_box;
+        const ROUNDS: usize = 12;
+        let tracks: Vec<Track> = (0..10_000).map(|i| {
+            let n = (i * 7919) % 10_000;
+            Track {
+                id: format!("dz:{i}"), title: format!("Song {n:05}"), duration: 200,
+                artist: deezer::ArtistRef { id: format!("{}", n % 100), name: format!("Artist {:03}", n % 100), ..Default::default() },
+                album: Some(deezer::AlbumRef { id: format!("{}", n % 1000), title: format!("Album {:04}", n % 1000) }),
+                cover_small: Some(format!("https://example.invalid/cover/{n}/small.jpg")),
+                cover_big: Some(format!("https://example.invalid/cover/{n}/big.jpg")), ..Default::default()
+            }
+        }).collect();
+        let genres = HashMap::new();
+        for sort in [SortBy::Title, SortBy::Artist, SortBy::Album] {
+            let view = ListView { sort, ..Default::default() };
+            let before = || {
+                let mut out = tracks.clone();
+                match sort {
+                    SortBy::Title => out.sort_by_key(|t| t.title.to_lowercase()),
+                    SortBy::Artist => out.sort_by_key(|t| (t.artist.name.to_lowercase(), t.title.to_lowercase())),
+                    SortBy::Album => out.sort_by_key(|t| (t.album.as_ref().map(|a| a.title.to_lowercase()), t.title.to_lowercase())),
+                    _ => unreachable!(),
+                }
+                out
+            };
+            let after = || apply_view(&tracks, &view, None, &genres);
+            assert_eq!(before(), after(), "the optimization must preserve every song and its order");
+            // Warm both paths, then alternate samples to reduce order bias.
+            black_box(before());
+            black_box(after());
+            let (mut old, mut new) = (Duration::ZERO, Duration::ZERO);
+            for round in 0..ROUNDS {
+                let mut measure = |cached| {
+                    let at = Instant::now();
+                    if cached { black_box(after()); new += at.elapsed(); }
+                    else { black_box(before()); old += at.elapsed(); }
+                };
+                if round % 2 == 0 { measure(false); measure(true); }
+                else { measure(true); measure(false); }
+            }
+            println!("{sort:?}: 10000 songs, {ROUNDS} rounds, before {:.2} ms/view, after {:.2} ms/view, {:.2}x faster", old.as_secs_f64() * 1000.0 / ROUNDS as f64, new.as_secs_f64() * 1000.0 / ROUNDS as f64, old.as_secs_f64() / new.as_secs_f64());
+        }
     }
 }
 
