@@ -491,6 +491,24 @@ fn offline_source(track: &Track, downloaded: Option<&std::path::Path>) -> Option
     }))
 }
 
+/// Ready audio on disk takes priority over waiting for a background YouTube lookup.
+fn offline_or_wait(track: &Track, downloaded: Option<&std::path::Path>, in_flight: &Mutex<HashSet<String>>) -> Option<Result<StreamSource, String>> {
+    let ready = || offline_source(track, downloaded).or_else(|| offline_source(track, crate::audiocache::find(&track.id).as_deref()));
+    // Nothing to wait for: check the disk once, as on an ordinary uncached play.
+    if !in_flight.lock().unwrap().contains(&track.id) {
+        return ready();
+    }
+    if let Some(src) = ready() {
+        return Some(src);
+    }
+    let started = Instant::now();
+    while in_flight.lock().unwrap().contains(&track.id) && started.elapsed() < Duration::from_secs(12) {
+        std::thread::sleep(Duration::from_millis(40));
+    }
+    // A download may have finished while its link was being found.
+    ready()
+}
+
 /// Loads one song ahead of time: its audio link, then (when played songs are kept) the
 /// song itself, so it plays from the disk.
 fn warm_one(
@@ -3090,16 +3108,8 @@ impl App {
         let quality = self.saved.settings.stream_quality;
         Box::new(move |status| {
             // Already being found (the pointer rested on it, or it's next in the queue):
-            // wait for that instead of starting over.
-            let started = Instant::now();
-            while in_flight.lock().unwrap().contains(&track.id) && started.elapsed() < Duration::from_secs(12) {
-                std::thread::sleep(Duration::from_millis(40));
-            }
-            if let Some(src) = offline_source(&track, offline.as_deref()) {
-                return src;
-            }
-            // Played before and still kept: starts at once, nothing to look up.
-            if let Some(src) = offline_source(&track, crate::audiocache::find(&track.id).as_deref()) {
+            // wait for that instead of starting over, unless audio is ready on disk.
+            if let Some(src) = offline_or_wait(&track, offline.as_deref(), &in_flight) {
                 return src;
             }
             if let Some((src, at)) = prefetched.lock().unwrap().remove(&track.id)
@@ -3638,6 +3648,89 @@ mod share_tests {
         assert!(share_link(&t, ShareTarget::YouTube, None).starts_with("https://www.youtube.com/results?search_query="));
         assert!(share_link(&t, ShareTarget::Spotify, None).contains("Song%20A"));
         assert_eq!(share_link(&t, ShareTarget::Deezer, None), "https://www.deezer.com/track/123");
+    }
+}
+
+#[cfg(test)]
+mod ready_audio_tests {
+    use super::*;
+
+    fn fixture(name: &str) -> (Track, std::path::PathBuf) {
+        let path = std::env::temp_dir().join(format!("pulse-ready-audio-{}-{name}.mp3", std::process::id()));
+        let track = Track { id: format!("test-ready-audio-{name}-{}", std::process::id()), ..Default::default() };
+        (track, path)
+    }
+
+    #[test]
+    fn a_ready_download_does_not_wait_for_a_pending_lookup() {
+        let (track, path) = fixture("ready");
+        std::fs::write(&path, b"synthetic audio").unwrap();
+        let pending = Arc::new(Mutex::new(HashSet::from([track.id.clone()])));
+        let (tx, rx) = channel();
+        let (t, p, busy) = (track.clone(), path.clone(), pending.clone());
+        let worker = std::thread::spawn(move || { tx.send(offline_or_wait(&t, Some(&p), &busy)).unwrap(); });
+        let early = rx.recv_timeout(Duration::from_secs(1));
+        pending.lock().unwrap().clear();
+        worker.join().unwrap();
+        let source = early.expect("a ready download must not wait for YouTube").unwrap().unwrap();
+        assert_eq!(source.url, format!("file://{}", path.display()));
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn a_download_that_finishes_during_lookup_is_still_used() {
+        let (track, path) = fixture("arrives");
+        let pending = Arc::new(Mutex::new(HashSet::from([track.id.clone()])));
+        let (p, busy) = (path.clone(), pending.clone());
+        let worker = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(80));
+            std::fs::write(&p, b"synthetic audio").unwrap();
+            busy.lock().unwrap().clear();
+        });
+        let source = offline_or_wait(&track, Some(&path), &pending).unwrap().unwrap();
+        worker.join().unwrap();
+        assert!(source.url.starts_with("file://"));
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn a_missing_download_still_falls_back_to_the_online_source() {
+        let (track, path) = fixture("missing");
+        assert!(!path.exists());
+        assert!(offline_or_wait(&track, Some(&path), &Mutex::new(HashSet::new())).is_none());
+    }
+
+    /// Resolver coordination only: no network or audio-device timing is claimed here.
+    #[test]
+    #[ignore = "manual timing comparison: run with --ignored --nocapture"]
+    fn ready_download_wait_timing() {
+        let (track, path) = fixture("timing");
+        std::fs::write(&path, b"synthetic audio").unwrap();
+        let (mut before, mut after) = (Duration::ZERO, Duration::ZERO);
+        for _ in 0..6 {
+            let pending = Arc::new(Mutex::new(HashSet::from([track.id.clone()])));
+            let busy = pending.clone();
+            let worker = std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(160));
+                busy.lock().unwrap().clear();
+            });
+            let at = Instant::now();
+            // The previous resolver waited first, then checked for the saved audio.
+            while pending.lock().unwrap().contains(&track.id) && at.elapsed() < Duration::from_secs(12) {
+                std::thread::sleep(Duration::from_millis(40));
+            }
+            let old = offline_source(&track, Some(&path)).unwrap().unwrap();
+            before += at.elapsed();
+            worker.join().unwrap();
+            pending.lock().unwrap().insert(track.id.clone());
+            let at = Instant::now();
+            let new = offline_or_wait(&track, Some(&path), &pending).unwrap().unwrap();
+            after += at.elapsed();
+            assert_eq!(old.url, new.url);
+            assert!(pending.lock().unwrap().contains(&track.id), "the lookup is still running");
+        }
+        println!("ready download with a synthetic 160 ms lookup in flight, 6 rounds: before {:.2} ms, after {:.3} ms", before.as_secs_f64() * 1000.0 / 6.0, after.as_secs_f64() * 1000.0 / 6.0);
+        std::fs::remove_file(path).unwrap();
     }
 }
 
