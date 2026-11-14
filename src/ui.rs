@@ -2113,7 +2113,11 @@ fn queue_page(app: &mut App, ui: &mut Ui) {
     // What you queued plays first. The songs autoplay added follow, under their own heading,
     // like Spotify: they're always the run at the end of the queue.
     let start = app.queue_pos + 1;
-    let first_auto = (start..app.queue.len()).rev().take_while(|&i| app.autoplay_ids.contains(&app.queue[i].id)).last().unwrap_or(app.queue.len());
+    let first_auto = if app.saved.autoplay {
+        (start..app.queue.len()).rev().take_while(|&i| app.autoplay_ids.contains(&app.queue[i].id)).last().unwrap_or(app.queue.len())
+    } else {
+        app.queue.len()
+    };
     let yours = first_auto - start;
     if yours > 0 || !app.saved.autoplay {
         if section_title(ui, "Next up", (yours > 0).then_some("Clear")) {

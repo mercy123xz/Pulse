@@ -3300,7 +3300,7 @@ impl App {
         }
         // Still on the radio of the song you picked: carry on with it.
         let on_radio = self.autoplay_ids.contains(&cur.id) || self.radio_seed.as_ref().is_some_and(|s| s.id == cur.id);
-        if on_radio && self.queue_more_autoplay() > 0 {
+        if on_radio && !self.radio_pool.is_empty() && self.queue_more_autoplay() > 0 {
             return;
         }
         if self.autoplay_for.as_deref() == Some(cur.id.as_str()) {
@@ -3466,6 +3466,8 @@ impl App {
                     }
                 }
                 TrackEvent::PlayNext(t) => {
+                    // Yours now, even if autoplay once picked it.
+                    self.autoplay_ids.remove(&t.id);
                     let at = if self.queue.is_empty() { 0 } else { self.queue_pos + 1 };
                     self.queue.insert(at, t.clone());
                     if let Some(u) = &mut self.unshuffled {
@@ -3478,6 +3480,7 @@ impl App {
                     }
                 }
                 TrackEvent::AddToQueue(t) => {
+                    self.autoplay_ids.remove(&t.id);
                     // Before the songs autoplay added, like Spotify: what you queue plays first.
                     let at = (self.queue_pos + 1..self.queue.len()).find(|&i| self.autoplay_ids.contains(&self.queue[i].id)).unwrap_or(self.queue.len());
                     self.queue.insert(at, t.clone());
