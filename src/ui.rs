@@ -1454,7 +1454,7 @@ fn hero(ui: &mut Ui, h: &Hero) -> HeroClicks {
         return hero_full_bleed(ui, h, hero_r);
     }
     ui.add_space(8.0);
-    let height = 232.0;
+    let height = 192.0;
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
     // Text is light on the normal dark banner; with a theme's own fill it uses the theme's text colors.
     let (on, on_muted) = match (style.color, style.fill) {
@@ -1476,10 +1476,10 @@ fn hero(ui: &mut Ui, h: &Hero) -> HeroClicks {
     if let Some(b) = style.border {
         ui.painter().rect_stroke(rect, hero_r, b, egui::StrokeKind::Inside);
     }
-    let art_size = 184.0;
+    let art_size = 144.0;
     let art_rect = Rect::from_min_size(pos2(rect.left() + 24.0, rect.center().y - art_size / 2.0), Vec2::splat(art_size));
     // shadow
-    let radius = if h.round { CornerRadius::same(92) } else { r_md() };
+    let radius = if h.round { CornerRadius::same(72) } else { r_md() };
     let shadow = egui::Shadow { offset: [0, 10], blur: 28, spread: 0, color: Color32::from_black_alpha(110) };
     ui.painter().add(shadow.as_shape(art_rect, radius));
     if h.art.is_some() {
@@ -1487,7 +1487,7 @@ fn hero(ui: &mut Ui, h: &Hero) -> HeroClicks {
     } else {
         ui.painter().rect_filled(art_rect, radius, pal().accent.gamma_multiply(0.55));
         vgradient(ui, art_rect, Color32::from_white_alpha(18), Color32::TRANSPARENT);
-        paint_icon(ui.painter(), art_rect.center(), h.glyph, filled_icon(72.0), Color32::WHITE);
+        paint_icon(ui.painter(), art_rect.center(), h.glyph, filled_icon(60.0), Color32::WHITE);
     }
     if h.editable {
         let r = ui.interact(art_rect, ui.id().with("hero_art"), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
@@ -1542,7 +1542,7 @@ fn hero(ui: &mut Ui, h: &Hero) -> HeroClicks {
 /// Header with a full-width photo (themes with `hero = "fullbleed"`, artist pages).
 fn hero_full_bleed(ui: &mut Ui, h: &Hero, radius: CornerRadius) -> HeroClicks {
     ui.add_space(8.0);
-    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 320.0), Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 260.0), Sense::hover());
     // Deezer's biggest artist photo is 1000 px square. Stretching it across a wide banner
     // made it blurry, so it's never drawn wider than its own pixels: on wide windows it sits
     // on the right and fades into a dark fill on the left.
@@ -1831,18 +1831,18 @@ fn artist(app: &mut App, ui: &mut Ui) {
 
 /// A wide card for an artist's newest album or single. Returns true when clicked.
 fn latest_release_card(ui: &mut Ui, a: &AlbumInfo) -> bool {
-    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width().min(560.0), 128.0), Sense::click());
+    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width().min(560.0), 104.0), Sense::click());
     a11y(ui, &resp, egui::WidgetType::Button, || format!("Latest release: {}", a.title));
     let fill = if resp.hovered() { pal().surface_active } else { pal().surface_hover };
     ui.painter().rect_filled(rect, r_lg(), fill);
-    let art = Rect::from_min_size(rect.min + vec2(12.0, 12.0), Vec2::splat(104.0));
+    let art = Rect::from_min_size(rect.min + vec2(12.0, 12.0), Vec2::splat(80.0));
     artwork(ui, art, a.cover.as_deref(), r_md());
     let tx = art.right() + 18.0;
     let tw = rect.right() - tx - 16.0;
     let date = a.release_date.as_deref().map(pretty_date).unwrap_or_default();
-    paint_line(ui, pos2(tx, rect.top() + 26.0), &date.to_uppercase(), semi(11.0), pal().text_muted, tw);
-    paint_line(ui, pos2(tx, rect.top() + 46.0), &a.title, heavy(20.0), pal().text, tw);
-    paint_line(ui, pos2(tx, rect.top() + 80.0), &release_line(a), regular(13.0), pal().text_muted, tw);
+    paint_line(ui, pos2(tx, rect.top() + 14.0), &date.to_uppercase(), semi(11.0), pal().text_muted, tw);
+    paint_line(ui, pos2(tx, rect.top() + 34.0), &a.title, heavy(20.0), pal().text, tw);
+    paint_line(ui, pos2(tx, rect.top() + 68.0), &release_line(a), regular(13.0), pal().text_muted, tw);
     resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
 }
 
