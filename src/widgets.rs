@@ -701,9 +701,11 @@ fn columns(row: Rect, with_date: bool, with_views: bool, compact: bool) -> Cols 
     let w = row.width();
     let x0 = row.left();
     let col = |a: f32, b: f32| Rect::from_x_y_ranges(a..=b, row.y_range());
-    let num = if compact { col(x0, x0 + 4.0) } else { col(x0, x0 + 44.0) };
+    let num = col(x0, x0 + 44.0);
     let time = col(row.right() - 64.0, row.right() - 12.0);
     let like = col(time.left() - 40.0, time.left());
+    // A compact list has no number column.
+    let num = if compact { col(x0, x0 + 4.0) } else { num };
     let date = (!compact && with_date && w > 900.0).then(|| col(like.left() - 150.0, like.left() - 12.0));
     let after_views = date.map(|d| d.left()).unwrap_or(like.left());
     let views = (!compact && with_views && w > 640.0).then(|| col(after_views - 130.0, after_views - 20.0));
