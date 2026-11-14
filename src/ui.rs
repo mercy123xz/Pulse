@@ -513,7 +513,10 @@ fn search_dropdown(app: &mut App, ui: &mut Ui, pill: Rect, edit: &egui::Response
     let over = last_rect.is_some_and(|r| ui.rect_contains_pointer(r) || ctx.pointer_hover_pos().is_some_and(|p| r.contains(p)));
     // Developer check: PULSE_DEBUG_DROPDOWN keeps it open for screenshots.
     if !edit.has_focus() && !over && std::env::var_os("PULSE_DEBUG_DROPDOWN").is_none() {
-        ui.data_mut(|d| d.remove::<Rect>(area_id.with("rect")));
+        ui.data_mut(|d| {
+            d.remove::<Rect>(area_id.with("rect"));
+            d.remove::<f64>(area_id.with("opened")); // so it drops in again next time
+        });
         return false;
     }
     let q = app.search_text.trim().to_string();
@@ -583,7 +586,19 @@ fn search_dropdown(app: &mut App, ui: &mut Ui, pill: Rect, edit: &egui::Response
     let mut clear_history = false;
     // The × on a recent search: forget just that one.
     let mut forget: Option<usize> = None;
-    let area = egui::Area::new(area_id).order(egui::Order::Foreground).fixed_pos(pill.left_bottom() + vec2(0.0, 8.0)).show(&ctx, |ui| {
+    // It drops into place below the search box as it fades in (at once with Reduce motion,
+    // in Gaming Mode and in Ultra-low).
+    let now = ui.input(|i| i.time);
+    let opened = ui.data_mut(|d| *d.get_temp_mut_or(area_id.with("opened"), now));
+    let t = if crate::theme::reduce_motion() { 1.0 } else { ((now - opened) / 0.14).clamp(0.0, 1.0) as f32 };
+    let shown = 1.0 - (1.0 - t).powi(3);
+    if shown < 1.0 {
+        ctx.request_repaint();
+    }
+    let area = egui::Area::new(area_id).order(egui::Order::Foreground).fixed_pos(pill.left_bottom() + vec2(0.0, 8.0 - (1.0 - shown) * 6.0)).show(&ctx, |ui| {
+        if shown < 1.0 {
+            ui.multiply_opacity(shown);
+        }
         // A rounded panel the width of the search box, lifted off the page by a soft shadow.
         let panel = Frame::menu(ui.style())
             .inner_margin(8)
