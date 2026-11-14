@@ -61,7 +61,27 @@ r = await call("POST", "/login", { username: "mercy_1", password: "correct horse
 r = await call("GET", "/users/mercy_1", undefined, { origin: "https://mercy123xz.github.io" }); ok(r.status === 200, "website can read");
 r = await call("POST", "/login", { username: "mercy_1", password: "correct horse" }, { origin: "https://mercy123xz.github.io" }); ok(r.status === 200 && r.data.token, "Pulse's website can sign in");
 r = await call("GET", "/me", undefined, { token: r.data.token, origin: "https://mercy123xz.github.io" }); ok(r.status === 200, "and use the account");
-r = await call("POST", "/signup", { username: "webby", password: "web password", email: "w@example.com" }, { origin: "https://mercy123xz.github.io" }); ok(r.status === 403 && /app/.test(r.data.error), "sign-up stays in the app");
+// sign-up on the website: Turnstile, the Terms and a birthday
+{
+  const web = { origin: "https://listen2pulse.github.io" };
+  const form = { username: "webby", password: "web password", email: "w@example.com", birthdate: "2000-05-05", agree: true, turnstile: "tok" };
+  r = await call("POST", "/signup", form, web); ok(r.status === 503 && /app/.test(r.data.error), "closed until TURNSTILE_SECRET is set");
+  env.TURNSTILE_SECRET = "secret";
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    if (String(url).includes("turnstile")) return new Response(JSON.stringify({ success: init.body.get("response") === "good" && init.body.get("secret") === "secret" }));
+    return realFetch(url, init);
+  };
+  r = await call("POST", "/signup", form, web); ok(r.status === 403 && /anti-spam/.test(r.data.error), "a failed Turnstile check is refused");
+  r = await call("POST", "/signup", { ...form, turnstile: "good", agree: false }, web); ok(r.status === 400 && /Terms/.test(r.data.error), "must agree to the Terms");
+  const { birthdate, ...noBirthday } = form;
+  r = await call("POST", "/signup", { ...noBirthday, turnstile: "good" }, web); ok(r.status === 400 && /birthday/.test(r.data.error), "the website always asks for a birthday");
+  r = await call("POST", "/signup", { ...form, turnstile: "good", birthdate: "2020-01-01" }, web); ok(r.status === 403 && /13/.test(r.data.error), "under 13 refused on the website too");
+  r = await call("POST", "/signup", { ...form, turnstile: "good" }, web); ok(r.status === 201 && r.data.user.username === "webby", "sign-up on the website");
+  r = await call("POST", "/login", { username: "webby", password: "web password" }); ok(r.status === 200, "and that account works in the app");
+  globalThis.fetch = realFetch;
+  delete env.TURNSTILE_SECRET;
+}
 r = await worker.fetch(new Request("https://acc.example/login", { method: "OPTIONS", headers: { Origin: "https://mercy123xz.github.io" } }), env);
 ok(r.status === 204 && r.headers.get("Access-Control-Allow-Origin") === "https://mercy123xz.github.io" && /Authorization/.test(r.headers.get("Access-Control-Allow-Headers")) && /DELETE/.test(r.headers.get("Access-Control-Allow-Methods")), "the website may send sign-ins");
 r = await worker.fetch(new Request("https://acc.example/login", { method: "OPTIONS", headers: { Origin: "https://listen2pulse.github.io" } }), env);

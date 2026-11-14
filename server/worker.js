@@ -307,6 +307,21 @@ const ownUser = (u, c) => ({ ...publicUser(u, c), email: u.email || "" });
 
 // ---------------------------------------------------------------- accounts
 
+// Cloudflare Turnstile, for sign-ups on the website. Needs the TURNSTILE_SECRET secret (the
+// same widget as the website's Ask box); without it, website sign-up stays closed.
+async function checkHuman(c, token) {
+  const secret = c.env.TURNSTILE_SECRET;
+  if (!secret) fail(503, "Sign-up on the website isn't open yet. Create your account in the Pulse app: Settings → Account.");
+  const form = new FormData();
+  form.append("secret", secret);
+  form.append("response", typeof token === "string" ? token : "");
+  if (c.ip) form.append("remoteip", c.ip);
+  const check = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", { method: "POST", body: form })
+    .then((r) => r.json())
+    .catch(() => ({ success: false }));
+  if (!check.success) fail(403, "The anti-spam check didn't pass. Please try again.");
+}
+
 // Accounts are for people 13 and older. The birthday is only checked, never stored.
 // Apps from before this send none: they're let through until REQUIRE_BIRTHDATE is "1"
 // (set it in the Worker's variables once the app that asks for it is out).
@@ -335,9 +350,13 @@ function ageOn(birth, today) {
 }
 
 async function signup(c) {
-  // New accounts are made in the app (a sign-up form on the open web would mostly invite bots).
-  if (c.web) fail(403, "Create your account in the Pulse app: Settings → Account.");
   const b = await body(c);
+  // From the website: a person (Turnstile), who agreed to the Terms and gave a birthday.
+  if (c.web) {
+    if (b.agree !== true) fail(400, "Please agree to the Terms of Service and Privacy Policy.");
+    if (!("birthdate" in b)) fail(400, "Enter your birthday.");
+    await checkHuman(c, b.turnstile);
+  }
   const username = str(b.username, 40).toLowerCase();
   checkUsername(username);
   checkPassword(b.password, username);

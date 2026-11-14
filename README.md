@@ -228,6 +228,13 @@ Run the tests with `cargo test`, and the accounts server's with `node server/tes
 - **Mastodon:** [@mercy123xz@mastodon.social](https://mastodon.social/@mercy123xz) for news and releases
 - **Problems and ideas:** [open an issue](https://github.com/mercy123xz/Pulse/issues), or use *Ask about Pulse* on the [website](https://mercy123xz.github.io/Pulse/)
 
+## Contributors
+
+- **[MERCY](https://github.com/mercy123xz)**: made Pulse, and reviews and merges every change.
+- **[Lachlan](https://github.com/lachlan1234564)**: autoplay that follows the song you picked, queue fixes, speed-ups and design work, including the Geist font.
+
+Want to help? Ideas and problem reports are welcome on [Discord](https://discord.gg/9mXy7v9wZ6) or in [issues](https://github.com/mercy123xz/Pulse/issues).
+
 ## Built with
 
 - [egui / eframe](https://github.com/emilk/egui): the user interface
