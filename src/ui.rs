@@ -548,10 +548,7 @@ fn search_dropdown(app: &mut App, ui: &mut Ui, pill: Rect, edit: &egui::Response
     let over = last_rect.is_some_and(|r| ui.rect_contains_pointer(r) || ctx.pointer_hover_pos().is_some_and(|p| r.contains(p)));
     // Developer check: PULSE_DEBUG_DROPDOWN keeps it open for screenshots.
     if !edit.has_focus() && !over && std::env::var_os("PULSE_DEBUG_DROPDOWN").is_none() {
-        ui.data_mut(|d| {
-            d.remove::<Rect>(area_id.with("rect"));
-            d.remove::<f64>(area_id.with("appear")); // so it drops in again next time
-        });
+        ui.data_mut(|d| d.remove::<Rect>(area_id.with("rect")));
         return false;
     }
     let q = app.search_text.trim().to_string();
@@ -619,12 +616,7 @@ fn search_dropdown(app: &mut App, ui: &mut Ui, pill: Rect, edit: &egui::Response
         chosen = sel;
     }
     let mut clear_history = false;
-    // It drops into place below the search box as it fades in.
-    let shown = crate::theme::appear(&ctx, area_id.with("appear"), 0.14);
-    let area = egui::Area::new(area_id).order(egui::Order::Foreground).fixed_pos(pill.left_bottom() + vec2(0.0, 6.0 - (1.0 - shown) * 6.0)).show(&ctx, |ui| {
-        if shown < 1.0 {
-            ui.multiply_opacity(shown);
-        }
+    let area = egui::Area::new(area_id).order(egui::Order::Foreground).fixed_pos(pill.left_bottom() + vec2(0.0, 6.0)).show(&ctx, |ui| {
         Frame::menu(ui.style()).inner_margin(6).show(ui, |ui| {
             ui.set_width(pill.width() - 12.0);
             ui.spacing_mut().item_spacing.y = 1.0;
