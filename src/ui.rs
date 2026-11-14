@@ -1956,7 +1956,7 @@ fn local_collection(app: &mut App, ui: &mut Ui, title: &str, sub: &str, glyph: &
         ui.add_space(8.0);
     }
 
-    let view = crate::app::apply_view(tracks, &app.list_view, added.as_ref(), &app.saved.album_genres);
+    let view = crate::app::view_tracks(tracks, &app.list_view, added.as_ref(), &app.saved.album_genres);
     if view.is_empty() {
         ui.add_space(20.0);
         ui.label(RichText::new(tr("No songs match.")).color(pal().text_muted));
@@ -2000,7 +2000,7 @@ fn pick_cover(app: &mut App, i: usize, ctx: &egui::Context) {
 fn list_toolbar(app: &mut App, ui: &mut Ui, tracks: &[Track], playlist: Option<usize>, title: &str) {
     let ctx = ui.ctx().clone();
     let playing_this = app.is_playing() && app.current.as_ref().is_some_and(|c| tracks.iter().any(|t| t.id == c.id));
-    let view = crate::app::apply_view(tracks, &app.list_view, None, &app.saved.album_genres);
+    let view = crate::app::view_tracks(tracks, &app.list_view, None, &app.saved.album_genres);
     ui.horizontal(|ui| {
         ui.set_min_height(56.0);
         if play_button(ui, 52.0, playing_this).clicked() {
