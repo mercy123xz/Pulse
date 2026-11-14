@@ -20,7 +20,8 @@
 const REPO = "mercy123xz/Pulse";
 const REPORTS = "mercy123xz/pulse-reports";
 const MAX_DETAILS = 20000;
-const ALLOWED_ORIGINS = ["https://pulse.is-a.software", "https://mercy123xz.github.io"];
+// The website moved to listen2pulse.github.io (Nov 2026); the old addresses still forward there.
+const ALLOWED_ORIGINS = ["https://listen2pulse.github.io", "https://pulse.is-a.software", "https://mercy123xz.github.io"];
 const MAX_MESSAGE = 3000;
 
 export default {

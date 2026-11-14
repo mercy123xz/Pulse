@@ -19,7 +19,7 @@ Cloudflare Worker, which checks it and opens an issue on the repo.
 What it checks before opening an issue:
 
 - **Turnstile**, Cloudflare's free anti-spam check (no puzzles for most people)
-- that it came from the website (`https://pulse.is-a.software`, or the old `https://mercy123xz.github.io`)
+- that it came from the website (`https://listen2pulse.github.io`, or the old `https://pulse.is-a.software` and `https://mercy123xz.github.io`)
 - length (5 to 3000 characters) and a hidden field that only bots fill in
 - an optional per-visitor rate limit (see below)
 
@@ -32,7 +32,7 @@ issue gets linked.
    fine-grained, *Only select repositories* → Pulse, *Permissions* → Issues: Read and
    write. Nothing else. Copy it.
 2. **Turnstile.** Cloudflare dashboard → Turnstile → Add widget. Hostname
-   `pulse.is-a.software` and `mercy123xz.github.io`, mode *Managed*. You get a **site key** (public, goes in
+   `listen2pulse.github.io`, `pulse.is-a.software` and `mercy123xz.github.io`, mode *Managed*. You get a **site key** (public, goes in
    `site/ask.js`) and a **secret key** (goes in the Worker).
 3. **Worker.** Workers & Pages → Create → Worker → name it `pulse-questions` → Deploy →
    Edit code → replace everything with `worker.js` → Deploy.
