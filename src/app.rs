@@ -3307,9 +3307,13 @@ impl App {
             return;
         }
         self.autoplay_for = Some(cur.id.clone());
-        // A song you picked starts a new radio. When the radio runs out on a song autoplay
-        // chose, that song's radio carries on from it, so it stays close to where you started.
-        let seed = cur;
+        // A song you picked starts a new radio. When it runs out on a song autoplay chose, it
+        // refills from the song you picked, not the one playing, so it never drifts away from
+        // it (what was played already is left out, so the refill brings new songs).
+        let seed = match &self.radio_seed {
+            Some(picked) if self.autoplay_ids.contains(&cur.id) => picked.clone(),
+            _ => cur,
+        };
         let video = self.youtube_ids.lock().unwrap().get(&seed.id).cloned();
         let mut avoid = crate::radio::Avoid::default();
         for t in self.saved.recent.iter().take(50).chain(self.queue.iter()) {
@@ -3335,9 +3339,11 @@ impl App {
         let Ok((seed, picks)) = rx.try_recv() else { return };
         self.autoplay_rx = None;
         // You picked something else while these were found (or turned autoplay off): they
-        // aren't wanted any more. Look again for what's playing now.
-        let seed_ahead = self.queue.iter().skip(self.queue_pos).any(|t| t.id == seed.id);
-        if !self.saved.autoplay || !seed_ahead {
+        // aren't wanted any more. Look again for what's playing now. (`autoplay_for` is the
+        // song that asked for them: the one playing then, or still ahead in the queue.)
+        let asked_by = self.autoplay_for.clone().unwrap_or_default();
+        let still_wanted = self.queue.iter().skip(self.queue_pos).any(|t| t.id == asked_by);
+        if !self.saved.autoplay || !still_wanted {
             self.autoplay_for = None;
             self.advance_when_autoplay_arrives = false;
             self.maybe_fetch_autoplay(ctx);
@@ -3353,10 +3359,7 @@ impl App {
             }
         }
         if !picks.is_empty() {
-            // Songs autoplay chose stay "like" the song you picked, which is what the queue says.
-            if !self.autoplay_ids.contains(&seed.id) || self.radio_seed.is_none() {
-                self.radio_seed = Some(seed);
-            }
+            self.radio_seed = Some(seed);
             self.radio_pool = picks.into_iter().map(|p| p.track).collect();
         }
         let added = self.queue_more_autoplay();

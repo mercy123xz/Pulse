@@ -84,37 +84,104 @@ fn artist_key(t: &Track) -> String {
 
 /// Songs to play after `seed`, best first. `video` is the YouTube video playing it, if
 /// known. Empty if nothing could be found (offline, say).
+///
+/// Staying in the song's genre: YouTube Music's radio sometimes wanders off to whatever's
+/// popular (an R&B song followed by chart pop). So songs by artists like the one you picked
+/// (Deezer's "fans also like") go first, with their best-known songs added when the radio
+/// has few of them, and songs from further afield only now and then. Deezer's genre tags
+/// aren't used for this: they're per album and coarse (Frank Ocean's "Blonde" is "Pop").
 pub fn for_song(seed: &Track, video: Option<String>, avoid: &Avoid) -> Vec<Pick> {
     let video = video.or_else(|| crate::youtube::music_video(seed));
-    let mut picks = match video.as_deref().map(youtube_radio) {
-        Some(Ok(items)) => match_to_deezer(items.into_iter().filter(|i| Some(&i.video) != video.as_ref()).collect(), 32),
-        _ => vec![],
-    };
-    // YouTube Music had little or nothing: fill up from Deezer.
-    if picks.len() < 12 {
-        picks.extend(deezer_radio(seed).into_iter().map(|track| Pick { track, video: None }));
+    // Side by side: YouTube Music's radio for the song, and the artists like this one.
+    let (items, similar) = std::thread::scope(|s| {
+        let radio = s.spawn(|| video.as_deref().map(|v| youtube_radio(v, 2)).and_then(Result::ok).unwrap_or_default());
+        let similar = s.spawn(|| similar_artists(seed));
+        (radio.join().unwrap_or_default(), similar.join().unwrap_or_default())
+    });
+    let picks = match_to_deezer(items.into_iter().filter(|i| Some(&i.video) != video.as_ref()).collect(), 36);
+    let close: HashSet<String> = similar.iter().map(|a| norm(&a.name)).collect();
+    // Few songs by artists like this one: add their best-known songs.
+    let near = picks.iter().filter(|p| close.contains(&artist_key(&p.track))).count();
+    let mut extra = vec![];
+    if near < 20 {
+        let ids: Vec<String> = similar.iter().take(12).map(|a| a.id.clone()).collect();
+        extra = deezer::top_songs_of(&ids, 2).into_iter().map(|track| Pick { track, video: None }).collect();
     }
-    tidy(seed, picks, avoid)
+    // Still little to go on: Deezer's radio for the artist.
+    if picks.len() + extra.len() < 12 {
+        extra.extend(deezer_radio(seed).into_iter().map(|track| Pick { track, video: None }));
+    }
+    tidy(seed, close_first(picks, extra, &close, &artist_key(seed)), avoid)
+}
+
+/// Artists whose fans also play the seed's artist, most alike first.
+fn similar_artists(seed: &Track) -> Vec<deezer::ArtistInfo> {
+    let id = if seed.has_artist_page() { Some(seed.artist.id.clone()) } else { deezer::find_artist(&seed.artist.name).ok().flatten() };
+    id.map(|id| deezer::related_artists(&id, 20)).unwrap_or_default()
+}
+
+/// The order of play, six songs at a time: four by artists like the one you picked
+/// (`close`: the radio's own picks taking turns with `extra`, their best-known songs), one by
+/// the artist you picked (`seed_artist`), and one from further afield in the radio. Whatever
+/// runs out, the others fill its places.
+fn close_first(radio: Vec<Pick>, extra: Vec<Pick>, close: &HashSet<String>, seed_artist: &str) -> Vec<Pick> {
+    let (own, rest): (Vec<Pick>, Vec<Pick>) = radio.into_iter().partition(|p| artist_key(&p.track) == seed_artist);
+    let (near, far): (Vec<Pick>, Vec<Pick>) = rest.into_iter().partition(|p| close.contains(&artist_key(&p.track)));
+    let (mut near, mut extra, mut own, mut far) = (near.into_iter(), extra.into_iter(), own.into_iter(), far.into_iter());
+    let mut out = vec![];
+    for turn in 0.. {
+        let first = match turn % 6 {
+            2 => own.next(),
+            5 => far.next(),
+            1 | 4 => extra.next().or_else(|| near.next()),
+            _ => near.next().or_else(|| extra.next()),
+        };
+        match first.or_else(|| near.next()).or_else(|| extra.next()).or_else(|| own.next()).or_else(|| far.next()) {
+            Some(p) => out.push(p),
+            None => break,
+        }
+    }
+    out
 }
 
 // ---------------------------------------------------------------- YouTube Music's radio
 
-/// The songs YouTube Music plays after this video (its "radio" for the song), in order.
-pub fn youtube_radio(video: &str) -> Result<Vec<RadioItem>, String> {
-    let body = serde_json::json!({
-        "context": { "client": { "clientName": "WEB_REMIX", "clientVersion": "1.20241106.01.00", "hl": "en" } },
-        "videoId": video,
-        "playlistId": format!("RDAMVM{video}"),
-        "isAudioOnly": true,
-    });
-    let mut resp = crate::net::api()
-        .post("https://music.youtube.com/youtubei/v1/next?prettyPrint=false")
-        .header("Origin", "https://music.youtube.com")
-        .send_json(&body)
-        .map_err(crate::net::friendly_error)?;
-    let reply: serde_json::Value =
-        resp.body_mut().with_config().limit(8 * 1024 * 1024).read_json().map_err(|e| format!("Unexpected YouTube Music reply ({e})"))?;
-    Ok(radio_items(&reply))
+/// The songs YouTube Music plays after this video (its "radio" for the song), in order:
+/// up to `pages` pages of about 50 (later pages hold mostly new songs).
+pub fn youtube_radio(video: &str, pages: usize) -> Result<Vec<RadioItem>, String> {
+    let context = serde_json::json!({ "client": { "clientName": "WEB_REMIX", "clientVersion": "1.20241106.01.00", "hl": "en" } });
+    let mut body = serde_json::json!({ "context": context.clone(), "videoId": video, "playlistId": format!("RDAMVM{video}"), "isAudioOnly": true });
+    let mut out: Vec<RadioItem> = vec![];
+    for page in 0..pages.max(1) {
+        let mut resp = match crate::net::api().post("https://music.youtube.com/youtubei/v1/next?prettyPrint=false").header("Origin", "https://music.youtube.com").send_json(&body) {
+            Ok(r) => r,
+            Err(e) if page == 0 => return Err(crate::net::friendly_error(e)),
+            Err(_) => break, // the first page is enough
+        };
+        let Ok(reply) = resp.body_mut().with_config().limit(8 * 1024 * 1024).read_json::<serde_json::Value>() else { break };
+        for item in radio_items(&reply) {
+            if !out.iter().any(|o| o.video == item.video) {
+                out.push(item);
+            }
+        }
+        let Some(more) = continuation(&reply) else { break };
+        body = serde_json::json!({ "context": context.clone(), "continuation": more });
+    }
+    Ok(out)
+}
+
+/// The key for the radio's next page.
+fn continuation(v: &serde_json::Value) -> Option<String> {
+    match v {
+        serde_json::Value::Object(m) => {
+            if let Some(c) = m.get("nextRadioContinuationData").and_then(|d| d["continuation"].as_str()) {
+                return Some(c.to_string());
+            }
+            m.values().find_map(continuation)
+        }
+        serde_json::Value::Array(a) => a.iter().find_map(continuation),
+        _ => None,
+    }
 }
 
 /// Reads the songs out of YouTube Music's "up next" reply.
@@ -224,8 +291,8 @@ fn match_one(item: &RadioItem) -> Option<Pick> {
 /// similar artists.
 pub fn deezer_radio(seed: &Track) -> Vec<Track> {
     let radio = deezer::similar_to(seed).unwrap_or_default();
-    let artist_id = if seed.has_artist_page() { Some(seed.artist.id.clone()) } else { radio.iter().find(|t| norm(&t.artist.name) == norm(&seed.artist.name)).map(|t| t.artist.id.clone()) };
-    let related = artist_id.map(|id| deezer::related_top_songs(&id, 6, 3)).unwrap_or_default();
+    let ids: Vec<String> = similar_artists(seed).into_iter().take(6).map(|a| a.id).collect();
+    let related = deezer::top_songs_of(&ids, 3);
     // Two from the radio, then one from a similar artist, and so on.
     let mut out = vec![];
     let (mut a, mut b) = (radio.into_iter(), related.into_iter());
@@ -264,8 +331,9 @@ pub fn tidy(seed: &Track, picks: Vec<Pick>, avoid: &Avoid) -> Vec<Pick> {
                 && seen_songs.insert(key)
         })
         .collect();
-    // A few songs per artist: more of the artist you picked than of anyone else.
-    let seed_cap = (kept.len() / 6).max(3);
+    // A few songs per artist. The artist you picked comes back now and then (about one song
+    // in eight), but autoplay is for hearing other artists like them.
+    let seed_cap = (kept.len() / 8).clamp(2, 4);
     let kept: Vec<Pick> = kept
         .into_iter()
         .filter(|p| {
@@ -286,32 +354,45 @@ fn mashup(title: &str) -> bool {
     w.contains(" x ") || w.contains(" mashup ") || w.contains(" aftermix ")
 }
 
-/// Reorders as little as possible so no artist plays twice in a row (the first song isn't
-/// by `after`'s artist either, as that's who just played). A song that has to wait goes in
-/// as soon as it can.
-fn spread_out(picks: Vec<Pick>, after: &str) -> Vec<Pick> {
+/// Songs between two by the artist you picked (and before the first of them).
+const SEED_ARTIST_GAP: usize = 4;
+
+/// Reorders as little as possible so that no artist plays twice in a row, and the artist
+/// you picked (`seed_artist`, who just played) waits: not in the first three songs, then at
+/// most one song in four. A song that has to wait goes in as soon as it can; one that never
+/// fits is left out.
+fn spread_out(picks: Vec<Pick>, seed_artist: &str) -> Vec<Pick> {
     let mut out: Vec<Pick> = Vec::with_capacity(picks.len());
     let mut waiting: Vec<Pick> = vec![];
-    let mut last = after.to_string();
-    for p in picks {
-        // Something that had to wait can go now?
-        if let Some(i) = waiting.iter().position(|w| artist_key(&w.track) != last) {
-            let w = waiting.remove(i);
-            last = artist_key(&w.track);
-            out.push(w);
+    let mut last = seed_artist.to_string();
+    // Where the artist you picked last played: the song itself, just before the list.
+    let mut last_seed: isize = -1;
+    let fits = |p: &Pick, out_len: usize, last: &str, last_seed: isize| {
+        let a = artist_key(&p.track);
+        a != last && (a != seed_artist || out_len as isize - last_seed >= SEED_ARTIST_GAP as isize)
+    };
+    let place = |p: Pick, out: &mut Vec<Pick>, last: &mut String, last_seed: &mut isize| {
+        *last = artist_key(&p.track);
+        if *last == seed_artist {
+            *last_seed = out.len() as isize;
         }
-        if artist_key(&p.track) == last {
-            waiting.push(p);
+        out.push(p);
+    };
+    for p in picks {
+        // Songs that had to wait go in first, as soon as they fit.
+        while let Some(i) = waiting.iter().position(|w| fits(w, out.len(), &last, last_seed)) {
+            let w = waiting.remove(i);
+            place(w, &mut out, &mut last, &mut last_seed);
+        }
+        if fits(&p, out.len(), &last, last_seed) {
+            place(p, &mut out, &mut last, &mut last_seed);
         } else {
-            last = artist_key(&p.track);
-            out.push(p);
+            waiting.push(p);
         }
     }
-    // The rest, wherever they fit; one that can't go anywhere is dropped.
-    while let Some(i) = waiting.iter().position(|w| artist_key(&w.track) != last) {
+    while let Some(i) = waiting.iter().position(|w| fits(w, out.len(), &last, last_seed)) {
         let w = waiting.remove(i);
-        last = artist_key(&w.track);
-        out.push(w);
+        place(w, &mut out, &mut last, &mut last_seed);
     }
     out
 }
@@ -411,12 +492,46 @@ mod tests {
             &Avoid::default(),
         );
         let who = artists(&out);
-        assert_ne!(who[0], "Frank Ocean", "the song you picked was Frank Ocean's: someone else first");
         assert!(who.windows(2).all(|w| w[0] != w[1]), "{who:?}");
         assert_eq!(who.iter().filter(|a| *a == "Daniel Caesar").count(), 2, "{who:?}");
-        assert_eq!(who.iter().filter(|a| *a == "Frank Ocean").count(), 2, "{who:?}");
-        // The radio's order is kept as far as it can be.
-        assert_eq!(who[..3], ["Daniel Caesar", "Frank Ocean", "Daniel Caesar"]);
+        // You picked a Frank Ocean song: other artists first, then Frank Ocean now and then.
+        assert!(!who[..3].contains(&"Frank Ocean".to_string()), "{who:?}");
+        assert_eq!(who.iter().filter(|a| *a == "Frank Ocean").count(), 1, "{who:?}");
+        assert_eq!(who, ["Daniel Caesar", "Steve Lacy", "Daniel Caesar", "Frank Ocean", "Khalid"]);
+    }
+
+    #[test]
+    fn the_artist_you_picked_is_one_song_in_four_at_most() {
+        let seed = song("dz:0", "Pink + White", "Frank Ocean");
+        // A radio that's half Frank Ocean.
+        let list: Vec<(String, String, String)> = (0..40)
+            .map(|i| if i % 2 == 0 { (format!("f{i}"), format!("Frank song {i}"), "Frank Ocean".to_string()) } else { (format!("o{i}"), format!("Other song {i}"), format!("Artist {}", i / 2)) })
+            .collect();
+        let refs: Vec<(&str, &str, &str)> = list.iter().map(|(a, b, c)| (a.as_str(), b.as_str(), c.as_str())).collect();
+        let out = tidy(&seed, picks(&refs), &Avoid::default());
+        let frank: Vec<usize> = out.iter().enumerate().filter(|(_, p)| p.track.artist.name == "Frank Ocean").map(|(i, _)| i).collect();
+        assert!(frank.len() <= 4 && !frank.is_empty(), "{frank:?}");
+        assert!(frank[0] >= 3, "not in the first three: {frank:?}");
+        assert!(frank.windows(2).all(|w| w[1] - w[0] >= SEED_ARTIST_GAP), "spaced out: {frank:?}");
+        assert!(out.len() >= 20, "the other artists all stay: {}", out.len());
+    }
+
+    #[test]
+    fn artists_like_yours_first_and_others_now_and_then() {
+        // You picked a song by S. A, B and E are like S; X and Y aren't.
+        let close: HashSet<String> = ["a", "b", "e"].iter().map(|s| s.to_string()).collect();
+        let radio = picks(&[("x1", "Pop hit", "X"), ("a1", "Song a", "A"), ("s1", "Song s", "S"), ("y1", "Other hit", "Y"), ("b1", "Song b", "B"), ("x2", "Pop hit 2", "X")]);
+        let extra = picks(&[("e1", "Song e1", "E"), ("e2", "Song e2", "E")]);
+        let order: Vec<String> = close_first(radio, extra, &close, "s").into_iter().map(|p| p.track.id).collect();
+        // Like-S, like-S, S, like-S, like-S, then one from further afield; the rest after.
+        assert_eq!(order, ["a1", "e1", "s1", "b1", "e2", "x1", "y1", "x2"]);
+    }
+
+    #[test]
+    fn finds_the_next_page_of_the_radio() {
+        let reply = serde_json::json!({ "contents": [{ "x": { "continuations": [{ "nextRadioContinuationData": { "continuation": "abc" } }] } }] });
+        assert_eq!(continuation(&reply).as_deref(), Some("abc"));
+        assert_eq!(continuation(&serde_json::json!({ "a": 1 })), None);
     }
 
     #[test]
