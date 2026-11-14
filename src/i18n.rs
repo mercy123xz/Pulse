@@ -54,6 +54,7 @@ const STRINGS: &[(&str, [&str; 4])] = &[
     ("Forward", ["Adelante", "Avançar", "Suivant", "Vorwärts"]),
     ("Settings", ["Configuración", "Configurações", "Paramètres", "Einstellungen"]),
     ("Search songs, artists, playlists", ["Busca canciones, artistas, playlists", "Busque músicas, artistas, playlists", "Rechercher des titres, artistes, playlists", "Songs, Künstler, Playlists suchen"]),
+    ("What do you want to listen to?", ["¿Qué quieres escuchar?", "O que você quer ouvir?", "Qu'avez-vous envie d'écouter ?", "Was möchtest du hören?"]),
     ("Music info by Deezer", ["Información musical de Deezer", "Informações musicais do Deezer", "Infos musicales par Deezer", "Musikinfos von Deezer"]),
     ("Switch to dark mode", ["Cambiar a modo oscuro", "Mudar para modo escuro", "Passer en mode sombre", "Zum dunklen Modus wechseln"]),
     ("Switch to light mode", ["Cambiar a modo claro", "Mudar para modo claro", "Passer en mode clair", "Zum hellen Modus wechseln"]),

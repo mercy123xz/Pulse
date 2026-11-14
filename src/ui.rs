@@ -337,8 +337,10 @@ fn sidebar(app: &mut App, ui: &mut Ui) {
     // Blossom-style themes: a big cover of the current song at the bottom of the sidebar.
     let big_art = !compact && layout().now_playing_art == crate::theme::NowPlayingArt::SidebarLarge && app.current.is_some();
     let art_h = if big_art { ui.available_width() + 12.0 } else { 0.0 };
+    // Room at the very bottom for the "Music info by Deezer" credit.
+    let credit_h = if compact { 44.0 } else { 52.0 };
 
-    egui::ScrollArea::vertical().id_salt("sidebar_playlists").auto_shrink([false, true]).max_height((ui.available_height() - art_h).max(40.0)).show(ui, |ui| {
+    egui::ScrollArea::vertical().id_salt("sidebar_playlists").auto_shrink([false, true]).max_height((ui.available_height() - art_h - credit_h).max(40.0)).show(ui, |ui| {
         if app.saved.playlists.is_empty() && !compact {
             ui.add_space(4.0);
             ui.horizontal(|ui| {
@@ -369,8 +371,41 @@ fn sidebar(app: &mut App, ui: &mut Ui) {
             });
         }
     });
-    if big_art && let Some(t) = app.current.clone() {
-        ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
+    ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
+        // Where the song info comes from: a footer row under a thin line, lined up with the
+        // rows above it (it used to sit in the top bar).
+        let tip = format!("{}\n{}", tr("Music info by Deezer"), "Song info, artwork and charts from Deezer. Audio from YouTube.");
+        let (row, resp) = ui.allocate_exact_size(vec2(ui.available_width(), if compact { 36.0 } else { 34.0 }), Sense::click());
+        a11y(ui, &resp, egui::WidgetType::Link, || tr("Music info by Deezer").to_owned());
+        let hot = resp.hovered();
+        if hot {
+            ui.painter().rect_filled(row, r_md(), pal().surface_hover);
+        }
+        if compact {
+            paint_icon(ui.painter(), row.center(), icon::INFO, regular(17.0), if hot { pal().text } else { pal().text_faint });
+        } else {
+            paint_icon(ui.painter(), pos2(row.left() + 22.0, row.center().y), icon::INFO, regular(16.0), if hot { pal().text_muted } else { pal().text_faint });
+            // "Music info by" quietly, "Deezer" a step brighter, like a credit.
+            let mut job = egui::text::LayoutJob::default();
+            let by = tr("Music info by Deezer");
+            let (lead, name) = by.rsplit_once(' ').unwrap_or(("", by));
+            job.append(&format!("{lead} "), 0.0, egui::TextFormat::simple(med(12.0), if hot { pal().text_muted } else { pal().text_faint }));
+            job.append(name, 0.0, egui::TextFormat::simple(semi(12.0), if hot { pal().text } else { pal().text_muted }));
+            let g = ui.painter().layout_job(job);
+            ui.painter().galley(pos2(row.left() + 44.0, row.center().y - g.size().y / 2.0), g, pal().text);
+            if hot {
+                paint_icon(ui.painter(), pos2(row.right() - 16.0, row.center().y), icon::ARROW_UP_RIGHT, regular(13.0), pal().text_muted);
+            }
+        }
+        // A thin line above it, like the edge of a footer.
+        ui.add_space(8.0);
+        let (line, _) = ui.allocate_exact_size(vec2(ui.available_width(), 1.0), Sense::hover());
+        ui.painter().hline(line.x_range().shrink(6.0), line.center().y, Stroke::new(1.0, pal().border));
+        if resp.on_hover_text(tip).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+            ui.ctx().open_url(egui::OpenUrl::new_tab("https://www.deezer.com"));
+        }
+        if big_art && let Some(t) = app.current.clone() {
+            ui.add_space(8.0);
             let w = ui.available_width();
             let (r, resp) = ui.allocate_exact_size(Vec2::splat(w), Sense::click());
             artwork(ui, r, t.art_big(), r_lg());
@@ -378,8 +413,8 @@ fn sidebar(app: &mut App, ui: &mut Ui) {
             if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                 app.navigate(Route::Queue, &ctx);
             }
-        });
-    }
+        }
+    });
 }
 
 fn vgradient_rounded(ui: &Ui, r: Rect, top: Color32, bottom: Color32) {
@@ -742,29 +777,32 @@ fn top_bar(app: &mut App, ui: &mut Ui) {
         }
         ui.add_space(10.0);
 
-        // Search pill
-        // Leave room for the labeled buttons on the right.
-        let w = (ui.available_width() - 500.0).clamp(200.0, 440.0);
-        let (rect, _) = ui.allocate_exact_size(vec2(w, 38.0), Sense::hover());
+        // Search: a wide pill (the buttons on the right are icons, so there's room). Pointing
+        // at it lifts it a little; while you type it has an accent ring and a soft glow.
+        let w = (ui.available_width() - 200.0).clamp(240.0, 560.0);
+        let (rect, pill) = ui.allocate_exact_size(vec2(w, 40.0), Sense::click());
         let id = egui::Id::new("search_box");
         let focused = ui.memory(|m| m.has_focus(id));
-        ui.painter().rect(
-            rect,
-            CornerRadius::same(19),
-            pal().surface,
-            Stroke::new(1.0, if focused { pal().accent.gamma_multiply(0.8) } else { pal().border }),
-            egui::StrokeKind::Inside,
-        );
-        paint_icon(ui.painter(), pos2(rect.left() + 18.0, rect.center().y), icon::MAGNIFYING_GLASS, regular(15.0), pal().text_muted);
+        let hot = focused || ui.rect_contains_pointer(rect);
+        if focused {
+            ui.painter().add(egui::Shadow { offset: [0, 0], blur: 16, spread: 1, color: pal().accent.gamma_multiply(0.30) }.as_shape(rect, CornerRadius::same(20)));
+        }
+        let stroke = if focused { Stroke::new(1.5, pal().accent_soft) } else { Stroke::new(1.0, if hot { pal().text_faint } else { pal().border }) };
+        ui.painter().rect(rect, CornerRadius::same(20), if hot { pal().surface_hover } else { pal().surface }, stroke, egui::StrokeKind::Inside);
+        paint_icon(ui.painter(), pos2(rect.left() + 21.0, rect.center().y), icon::MAGNIFYING_GLASS, regular(17.0), if focused { pal().text } else { pal().text_muted });
+        // A click anywhere on the pill (the icon, the padding) starts typing.
+        if pill.on_hover_cursor(egui::CursorIcon::Text).clicked() {
+            ui.memory_mut(|m| m.request_focus(id));
+        }
 
-        let edit_rect = Rect::from_min_max(pos2(rect.left() + 34.0, rect.top()), pos2(rect.right() - 60.0, rect.bottom()));
+        let edit_rect = Rect::from_min_max(pos2(rect.left() + 42.0, rect.top()), pos2(rect.right() - 64.0, rect.bottom()));
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(edit_rect).layout(Layout::left_to_right(Align::Center)));
         let resp = child.add(
             egui::TextEdit::singleline(&mut app.search_text)
                 .id(id)
                 .frame(Frame::NONE)
-                .hint_text(RichText::new(tr("Search songs, artists, playlists")).color(pal().text_faint))
-                .font(regular(13.5))
+                .hint_text(RichText::new(tr("What do you want to listen to?")).color(pal().text_faint))
+                .font(regular(14.0))
                 .desired_width(edit_rect.width())
                 .vertical_align(Align::Center),
         );
@@ -782,20 +820,25 @@ fn top_bar(app: &mut App, ui: &mut Ui) {
             app.remember_search(&q);
             app.submit_search(&ctx);
         }
-        // Clear button or Ctrl K hint
+        // Clear button, or the Ctrl K shortcut as a little key cap.
         let right = pos2(rect.right() - 14.0, rect.center().y);
         if !app.search_text.is_empty() {
-            let r = Rect::from_center_size(right - vec2(8.0, 0.0), Vec2::splat(22.0));
+            let r = Rect::from_center_size(right - vec2(10.0, 0.0), Vec2::splat(26.0));
             let c = ui.interact(r, id.with("clear"), Sense::click());
             a11y(ui, &c, egui::WidgetType::Button, || "Clear search".to_owned());
-            paint_icon(ui.painter(), r.center(), icon::X, regular(14.0), if c.hovered() { pal().text } else { pal().text_muted });
-            if c.clicked() {
-                app.search_text.clear();
+            if c.hovered() {
+                ui.painter().circle_filled(r.center(), 13.0, pal().surface_active);
             }
-        } else {
-            let hint = Rect::from_min_max(pos2(right.x - 42.0, right.y - 10.0), pos2(right.x, right.y + 10.0));
-            ui.painter().rect(hint, CornerRadius::same(5), pal().surface_hover, Stroke::new(1.0, pal().border), egui::StrokeKind::Inside);
-            paint_icon(ui.painter(), hint.center(), "Ctrl K", med(10.5), pal().text_muted);
+            paint_icon(ui.painter(), r.center(), icon::X, regular(14.0), if c.hovered() { pal().text } else { pal().text_muted });
+            if c.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                app.search_text.clear();
+                ui.memory_mut(|m| m.request_focus(id));
+            }
+        } else if !focused {
+            let keycap = Rect::from_min_max(pos2(right.x - 44.0, right.y - 11.0), pos2(right.x, right.y + 11.0));
+            ui.painter().rect(keycap, CornerRadius::same(6), pal().surface_active, Stroke::new(1.0, pal().border), egui::StrokeKind::Inside);
+            ui.painter().hline(keycap.x_range().shrink(4.0), keycap.bottom() - 1.5, Stroke::new(1.0, pal().border));
+            paint_icon(ui.painter(), keycap.center() - vec2(0.0, 0.5), "Ctrl K", med(10.5), pal().text_muted);
         }
 
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -815,55 +858,49 @@ fn top_bar(app: &mut App, ui: &mut Ui) {
                     app.navigate(Route::Profile, &ctx);
                 }
             }
-            ui.add_space(4.0);
-            // Labeled, so each button says what it does (narrow windows keep just the icons).
-            let roomy = ui.available_width() > 420.0;
+            ui.add_space(6.0);
+            // Icons only (the tooltips say what each does), so the search box has the room.
             let on_settings = app.route == Route::Settings;
-            let settings = if roomy {
-                labeled_button(ui, icon::GEAR_SIX, tr("Settings"), on_settings)
-            } else {
-                icon_button(ui, icon::GEAR_SIX, 18.0, if on_settings { pal().accent_soft } else { pal().text_muted }, tr("Settings"))
-            };
-            if settings.clicked() {
+            if top_icon(ui, icon::GEAR_SIX, on_settings, tr("Settings")).clicked() {
                 app.navigate(Route::Settings, &ctx);
             }
             // Gaming Mode: one click on or off; the tooltip says what's paused.
             let mode = crate::perf::mode();
             let gaming = mode != crate::perf::Mode::Normal;
-            let label = if mode == crate::perf::Mode::UltraLow { tr("Ultra-low") } else { tr("Gaming") };
-            let g = if roomy {
-                labeled_button(ui, icon::GAME_CONTROLLER, label, gaming)
-            } else {
-                icon_button(ui, icon::GAME_CONTROLLER, 18.0, if gaming { pal().accent_soft } else { pal().text_muted }, label)
-            };
             let tip = if gaming {
                 let off: Vec<&str> = crate::perf::switched_off().into_iter().map(|e| tr(e.label())).collect();
                 format!("{} (Ctrl+G)\n{}\n• {}", tr(mode.label()), tr("Paused while it's on (music plays the same):"), off.join("\n• "))
             } else {
                 format!("{} (Ctrl+G)", tr("Gaming Mode: pause the extras while you play"))
             };
-            if g.on_hover_text(tip).clicked() {
+            if top_icon(ui, icon::GAME_CONTROLLER, gaming, &tip).clicked() {
                 app.toggle_gaming(&ctx);
             }
             if app.theme_has_light_and_dark() {
-                let (glyph, label, tip) =
-                    if app.saved.light_mode { (icon::MOON, "Dark", "Switch to dark mode") } else { (icon::SUN, "Light", "Switch to light mode") };
-                let r = if roomy {
-                    labeled_button(ui, glyph, tr(label), false).on_hover_text(tr(tip))
-                } else {
-                    icon_button(ui, glyph, 17.0, pal().text_muted, tr(tip))
-                };
-                if r.clicked() {
+                let (glyph, tip) = if app.saved.light_mode { (icon::MOON, "Switch to dark mode") } else { (icon::SUN, "Switch to light mode") };
+                if top_icon(ui, glyph, false, tr(tip)).clicked() {
                     app.toggle_theme(&ctx);
                 }
             }
-            ui.add_space(6.0);
-            let r = ui.add(egui::Label::new(RichText::new(tr("Music info by Deezer")).font(med(11.5)).color(pal().text_faint)).sense(Sense::click()));
-            if r.on_hover_text("Song info, artwork and charts from Deezer. Audio from YouTube.").on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
-                ui.ctx().open_url(egui::OpenUrl::new_tab("https://www.deezer.com"));
-            }
         });
     });
+}
+
+/// A round icon button for the top bar. It stays lit while its mode is on; the tooltip (its
+/// screen-reader name too) says what it does.
+fn top_icon(ui: &mut Ui, glyph: &str, on: bool, tip: &str) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(Vec2::splat(38.0), Sense::click());
+    a11y(ui, &resp, egui::WidgetType::Button, || tip.lines().next().unwrap_or(tip).to_owned());
+    let hovered = resp.hovered();
+    let h = ui.ctx().animate_bool(resp.id.with("hover_fade"), hovered);
+    if on {
+        ui.painter().circle_filled(rect.center(), 19.0, pal().surface_active);
+    } else if h > 0.0 {
+        ui.painter().circle_filled(rect.center(), 15.0 + 4.0 * h, pal().surface_hover.gamma_multiply(h));
+    }
+    let col = if on { pal().accent_soft } else { pal().text_muted.lerp_to_gamma(pal().text, h) };
+    paint_icon(ui.painter(), rect.center(), glyph, regular(19.0), col);
+    resp.on_hover_text(tip).on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
 // ---------------------------------------------------------------------------
