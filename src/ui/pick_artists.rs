@@ -162,15 +162,28 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
         ui.add_space(14.0);
 
         // Artists.
-        egui::ScrollArea::vertical().max_height(grid_h).min_scrolled_height(grid_h).auto_shrink([false, false]).show(ui, |ui| {
+        egui::ScrollArea::vertical().scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible).max_height(grid_h).min_scrolled_height(grid_h).auto_shrink([false, false]).show(ui, |ui| {
             if let Some(e) = &p.error {
                 ui.add_space(30.0);
                 ui.vertical_centered(|ui| ui.label(RichText::new(tr(e)).font(regular(13.5)).color(pal().text_muted)));
                 return;
             }
-            if p.loading && p.shown.is_empty() {
+            if p.loading {
                 ui.add_space(40.0);
-                ui.vertical_centered(|ui| ui.spinner());
+                ui.vertical_centered(|ui| {
+                    ui.spinner();
+                    ui.add_space(8.0);
+                    ui.label(RichText::new(tr("Loading artists…")).font(regular(13.5)).color(pal().text_muted));
+                });
+                return;
+            }
+            if p.shown.is_empty() {
+                ui.add_space(40.0);
+                ui.vertical_centered(|ui| {
+                    ui.label(RichText::new(tr("No artists found")).font(semi(16.0)).color(pal().text));
+                    ui.add_space(6.0);
+                    ui.label(RichText::new(tr("Try another name or genre.")).font(regular(13.5)).color(pal().text_muted));
+                });
                 return;
             }
             // As many columns as fit, then widened to fill the row.
