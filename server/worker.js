@@ -307,6 +307,33 @@ const ownUser = (u, c) => ({ ...publicUser(u, c), email: u.email || "" });
 
 // ---------------------------------------------------------------- accounts
 
+// Accounts are for people 13 and older. The birthday is only checked, never stored.
+// Apps from before this send none: they're let through until REQUIRE_BIRTHDATE is "1"
+// (set it in the Worker's variables once the app that asks for it is out).
+const MIN_AGE = 13;
+function checkAge(c, b) {
+  if (!("birthdate" in b)) {
+    if (String(c.env.REQUIRE_BIRTHDATE || "") === "1") fail(400, "Update Pulse to make an account.");
+    return;
+  }
+  const age = ageOn(str(b.birthdate, 10), new Date(c.now * 1000));
+  if (age === null) fail(400, "Enter your birthday.");
+  if (age < MIN_AGE) fail(403, "You need to be at least 13 to make a Pulse account.");
+}
+
+// Whole years between a "YYYY-MM-DD" birthday and `today` (UTC), or null if it isn't a real date
+// (or is in the future, or more than 120 years ago).
+function ageOn(birth, today) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(birth);
+  if (!m) return null;
+  const [y, mo, d] = [+m[1], +m[2], +m[3]];
+  const date = new Date(Date.UTC(y, mo - 1, d));
+  if (date.getUTCFullYear() !== y || date.getUTCMonth() !== mo - 1 || date.getUTCDate() !== d || date > today) return null;
+  let age = today.getUTCFullYear() - y;
+  if (today.getUTCMonth() + 1 < mo || (today.getUTCMonth() + 1 === mo && today.getUTCDate() < d)) age--;
+  return age > 120 ? null : age;
+}
+
 async function signup(c) {
   // New accounts are made in the app (a sign-up form on the open web would mostly invite bots).
   if (c.web) fail(403, "Create your account in the Pulse app: Settings → Account.");
@@ -318,6 +345,7 @@ async function signup(c) {
   // Pulse 1.1 asks for it when it opens. Newer versions always send it.
   const email = "email" in b ? str(b.email, 300).toLowerCase() : null;
   if (email !== null) checkEmail(email);
+  checkAge(c, b);
   if (await overLimit(c, "signup", c.ip, SIGNUPS_PER_IP_PER_HOUR, 3600)) fail(429, "Too many new accounts from here. Please try again later.");
   const taken = await c.env.DB.prepare("SELECT 1 FROM users WHERE username = ?").bind(username).first();
   if (taken) fail(409, "That username is taken.");

@@ -26,6 +26,15 @@ fn month_year(unix: u64) -> String {
 }
 
 /// A labelled text box with an outline, like the import window's.
+/// English writes the month first (4/25/2010); the other languages the day first.
+pub fn month_first() -> bool {
+    crate::i18n::language() == crate::settings::Language::English
+}
+
+pub fn birthday_hint() -> &'static str {
+    if month_first() { "MM/DD/YYYY" } else { tr("DD/MM/YYYY") }
+}
+
 fn field(ui: &mut Ui, label: &str, text: &mut String, password: bool, id: &str, hint: &str) -> egui::Response {
     ui.label(RichText::new(tr(label)).font(semi(12.5)).color(pal().text_muted));
     ui.add_space(6.0);
@@ -128,6 +137,7 @@ pub fn account_dialog(app: &mut App, ctx: &egui::Context) {
                 ui.add_space(14.0);
             }
             AccountMode::SignUp => {
+                field(ui, "Birthday", &mut d.birthday, false, "birthday", birthday_hint());
                 field(ui, "Email", &mut d.email, false, "email", "Only for resetting your password. Never shown.");
                 field(ui, "Password", &mut d.password, true, "pass", "At least 8 characters");
                 let r = field(ui, "Password again", &mut d.password2, true, "pass2", "");
@@ -263,6 +273,17 @@ fn submit_dialog(app: &mut App, ctx: &egui::Context) {
     let (user, pass, pass2, bio) = (d.username.trim().to_lowercase(), d.password.clone(), d.password2.clone(), d.bio.trim().to_string());
     let (email, code) = (d.email.trim().to_lowercase(), d.code.clone());
     d.note = None;
+    let birthdate = if d.mode == AccountMode::SignUp {
+        match account::check_birthday(&d.birthday, month_first()) {
+            Ok(b) => b,
+            Err(e) => {
+                d.error = Some(e.to_string());
+                return;
+            }
+        }
+    } else {
+        String::new()
+    };
     // Checks the server would make anyway, said straight away.
     let local_error = match d.mode {
         AccountMode::SignIn if user.is_empty() || pass.is_empty() => Some("Enter your username or email, and your password."),
@@ -289,7 +310,7 @@ fn submit_dialog(app: &mut App, ctx: &egui::Context) {
     let reload = account::session().map(|s| format!("user:{}", s.username));
     match d.mode {
         AccountMode::SignIn => app.account_job(ctx, move || account::sign_in(&user, &pass).map(AccountDone::SignedIn)),
-        AccountMode::SignUp => app.account_job(ctx, move || account::sign_up(&user, &email, &pass).map(AccountDone::SignedIn)),
+        AccountMode::SignUp => app.account_job(ctx, move || account::sign_up(&user, &email, &pass, &birthdate).map(AccountDone::SignedIn)),
         AccountMode::Forgot => app.account_job(ctx, move || account::reset_start(&user).map(AccountDone::CodeSent)),
         AccountMode::Reset => app.account_job(ctx, move || account::reset_finish(&user, &code, &pass).map(AccountDone::SignedIn)),
         AccountMode::Email => {

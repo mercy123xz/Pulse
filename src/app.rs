@@ -614,6 +614,8 @@ pub struct AccountDialog {
     pub email: String,
     /// The code from a password-reset email.
     pub code: String,
+    /// SignUp: the birthday as typed (accounts are for 13 and older).
+    pub birthday: String,
     pub error: Option<String>,
     /// A message that isn't an error (the code was sent).
     pub note: Option<String>,
@@ -640,6 +642,7 @@ impl AccountDialog {
             bio: String::new(),
             email: String::new(),
             code: String::new(),
+            birthday: String::new(),
             error: None,
             note: None,
             required: false,

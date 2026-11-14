@@ -48,6 +48,7 @@ pub struct Setup {
     username: String,
     password: String,
     password2: String,
+    birthday: String,
     busy: bool,
     error: Option<String>,
     rx: Option<Receiver<Result<crate::account::Session, String>>>,
@@ -67,6 +68,7 @@ impl Setup {
             username: String::new(),
             password: String::new(),
             password2: String::new(),
+            birthday: String::new(),
             busy: false,
             error: None,
             rx: None,
@@ -311,6 +313,7 @@ fn account_step(ui: &mut Ui, s: &mut Setup) {
     ui.add_space(20.0);
     let mut enter = false;
     if !s.log_in {
+        enter |= field(ui, &format!("{} ({})", tr("Birthday"), super::online::birthday_hint()), &mut s.birthday, false, "setup_birthday").lost_focus();
         enter |= field(ui, "Email", &mut s.email, false, "setup_email").lost_focus();
     }
     enter |= field(ui, "Username", &mut s.username, false, "setup_user").lost_focus();
@@ -350,7 +353,15 @@ fn account_step(ui: &mut Ui, s: &mut Setup) {
             s.error = Some("Usernames are 3–20 letters, numbers or _.".into());
             return;
         }
+        let mut birthdate = String::new();
         if !s.log_in {
+            match crate::account::check_birthday(&s.birthday, super::online::month_first()) {
+                Ok(b) => birthdate = b,
+                Err(e) => {
+                    s.error = Some(e.into());
+                    return;
+                }
+            }
             if !s.email.contains('@') {
                 s.error = Some("Enter your email address.".into());
                 return;
@@ -366,7 +377,7 @@ fn account_step(ui: &mut Ui, s: &mut Setup) {
         s.rx = Some(rx);
         let (log_in, email, ctx) = (s.log_in, s.email.trim().to_string(), ui.ctx().clone());
         std::thread::spawn(move || {
-            let r = if log_in { crate::account::sign_in(&user, &pass) } else { crate::account::sign_up(&user, &email, &pass) };
+            let r = if log_in { crate::account::sign_in(&user, &pass) } else { crate::account::sign_up(&user, &email, &pass, &birthdate) };
             let _ = tx.send(r);
             ctx.request_repaint();
         });

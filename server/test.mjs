@@ -24,6 +24,20 @@ r = await call("POST", "/signup", { username: "oldapp2", password: "correct hors
 r = await call("GET", "/me", undefined, { token: r.data.token }); ok(r.data.user.email === "", "and the app is told it has none");
 ip = "1.1.1.1";
 r = await call("POST", "/signup", { username: "nomail", password: "correct horse", email: "not-an-email" }); ok(r.status === 400, "email checked");
+// age: 13 and older only; the birthday isn't stored
+{
+  const now = new Date();
+  const ymd = (yearsAgo, dayShift = 0) => { const d = new Date(Date.UTC(now.getUTCFullYear() - yearsAgo, now.getUTCMonth(), now.getUTCDate() + dayShift)); return d.toISOString().slice(0, 10); };
+  r = await call("POST", "/signup", { username: "kid12", password: "correct horse", email: "kid12@example.com", birthdate: ymd(13, 1) }); ok(r.status === 403 && /13/.test(r.data.error), "12 (13 tomorrow) is refused");
+  r = await call("POST", "/signup", { username: "teen13", password: "correct horse", email: "teen13@example.com", birthdate: ymd(13) }); ok(r.status === 201, "13 today is fine");
+  r = await call("POST", "/signup", { username: "baddate", password: "correct horse", email: "bad@example.com", birthdate: "2001-02-30" }); ok(r.status === 400, "not a real date");
+  r = await call("POST", "/signup", { username: "future", password: "correct horse", email: "fut@example.com", birthdate: ymd(-1) }); ok(r.status === 400, "a future birthday");
+  const row = await env.DB.prepare("SELECT * FROM users WHERE username = 'teen13'").first();
+  ok(!Object.keys(row).some((k) => /birth/.test(k)) && !Object.values(row).includes(ymd(13)), "birthday not stored");
+  const strict = { ...env, REQUIRE_BIRTHDATE: "1" };
+  const res = await worker.fetch(new Request("https://acc.example/signup", { method: "POST", body: JSON.stringify({ username: "oldapp3", password: "correct horse", email: "o3@example.com" }) }), strict);
+  ok(res.status === 400 && /Update/.test((await res.json()).error), "with REQUIRE_BIRTHDATE, apps that don't ask are told to update");
+}
 r = await call("POST", "/signup", { username: "Mercy_1", password: "correct horse", email: " Mercy@Example.com " }); ok(r.status === 201 && /^[0-9a-f]{64}$/.test(r.data.token) && r.data.user.username === "mercy_1" && r.data.user.email === "mercy@example.com", "signup ok, lowercased");
 const tok = r.data.token;
 r = await call("POST", "/signup", { username: "mercy_1", password: "another one", email: "x@example.com" }); ok(r.status === 409, "taken");
