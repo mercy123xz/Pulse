@@ -55,7 +55,11 @@
           if (r.status === 401 && j.error === "Please sign in again.") { setSession(null); signIn("You were signed out. Please sign in again."); }
           throw new Error(j.error || "Something went wrong (" + r.status + ").");
         });
-      }, function () { throw new Error("Couldn't reach Pulse. Check your connection and try again."); });
+      }, function () {
+        // A local copy of the site: the real server only answers Pulse's own website.
+        if (/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) throw new Error("This is a local copy of the site, so the real Pulse server won't answer it. Everything up to here works.");
+        throw new Error("Couldn't reach Pulse. Check your connection and try again.");
+      });
   }
   function field(label, id, type, extra) {
     var input = el("input", Object.assign({ id: id, name: id, type: type || "text" }, extra || {}));
@@ -117,6 +121,15 @@
     }
     return turnstileLoading;
   }
+  // Whole years from a "YYYY-MM-DD" birthday to today, or null for a date in the future.
+  function ageOn(birth) {
+    var p = birth.split("-").map(Number), now = new Date();
+    var y = now.getFullYear(), m = now.getMonth() + 1, d = now.getDate();
+    if (p[0] > y || (p[0] === y && (p[1] > m || (p[1] === m && p[2] > d)))) return null;
+    var age = y - p[0];
+    if (m < p[1] || (m === p[1] && d < p[2])) age--;
+    return age > 120 ? null : age;
+  }
   function blocked() { try { return localStorage.getItem(NO_SIGNUP) === "1"; } catch (e) { return false; } }
   var tooYoung = "You need to be at least 13 to make a Pulse account.";
 
@@ -173,9 +186,13 @@
       el("p", { text: "Pulse accounts are for people 13 and older. We only use your birthday to check that; it isn't saved." }),
       el("div", { class: "card" }, [
         form(field("Birthday", "birth", "date", { autocomplete: "bday", max: max, min: "1900-01-01" })
-          .concat([el("label", { class: "check", for: "agree" }, [agree, " I agree to the ", el("a", { href: "../terms/", target: "_blank", text: "Terms of Service" }), " and the ", el("a", { href: "../privacy/", target: "_blank", text: "Privacy Policy" }), "."])]), "Create account", function (f) {
+          .concat([el("label", { class: "check", for: "agree" }, [agree, el("span", {}, ["I agree to the ", el("a", { href: "../terms/", target: "_blank", text: "Terms of Service" }), " and the ", el("a", { href: "../privacy/", target: "_blank", text: "Privacy Policy" }), "."])])]), "Create account", function (f) {
           var birth = v(f, "birth");
           need(/^\d{4}-\d{2}-\d{2}$/.test(birth), "Enter your birthday.");
+          var age = ageOn(birth);
+          need(age !== null, "Enter your birthday.");
+          // Checked here first (the server checks again): under 13 can't sign up in this browser.
+          if (age < 13) { try { localStorage.setItem(NO_SIGNUP, "1"); } catch (e) {} signUp(); return; }
           need(agree.checked, "Please agree to the Terms of Service and Privacy Policy.");
           return api("POST", "/signup", Object.assign({ birthdate: birth, agree: true }, acct)).then(signedIn, function (err) {
             if (/13/.test(err.message)) { try { localStorage.setItem(NO_SIGNUP, "1"); } catch (e) {} signUp(); return; }
