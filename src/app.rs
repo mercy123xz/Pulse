@@ -891,7 +891,7 @@ impl App {
 
         // A damaged save file (cut off by a crash or power cut) is recovered from the spare
         // copy or the newest backup, rather than starting over with an empty library.
-        let main_file = eframe::storage_dir("pulse-player").map(|d| d.join("app.ron"));
+        let main_file = crate::settings::library_file();
         let (saved, load_note) = crate::backup::load(cc.storage.and_then(|s| s.get_string(STORAGE_KEY)), main_file.as_deref());
         let themes = crate::themes::list();
         crate::i18n::set_language(saved.settings.language);

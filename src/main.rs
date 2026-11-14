@@ -38,18 +38,23 @@ mod youtube;
 fn main() -> eframe::Result {
     // A crash leaves a report (on this PC only) that Pulse offers to copy next time.
     crash::install();
-    // Already open: that window comes to the front instead.
-    if !single::claim() {
+    // Already open: that window comes to the front instead. A separate profile
+    // (PULSE_DATA_DIR) is a second Pulse of its own, so it opens alongside.
+    let separate = settings::separate_profile().is_some();
+    if !separate && !single::claim() {
         return Ok(());
     }
     #[allow(unused_mut)]
     let mut options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_title("Pulse")
+            .with_title(if separate { "Pulse (separate profile)" } else { "Pulse" })
             .with_app_id("pulse-player")
             .with_inner_size([1280.0, std::env::var("PULSE_DEBUG_HEIGHT").ok().and_then(|h| h.parse().ok()).unwrap_or(800.0)])
             .with_min_inner_size([980.0, 620.0])
             .with_icon(app_icon()),
+        // eframe otherwise keeps the library in %APPDATA%\pulse-player\data whatever
+        // PULSE_DATA_DIR says, so a test copy would read and overwrite the real one.
+        persistence_path: if separate { settings::library_file() } else { None },
         ..Default::default()
     };
     #[cfg(windows)]
