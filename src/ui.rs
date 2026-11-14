@@ -1339,38 +1339,13 @@ fn search(app: &mut App, ui: &mut Ui, q: &str) {
         ui.data_mut(|d| d.insert_temp(id, filter));
         let all = filter == 0;
 
-        // Top result: the best-ranked artist (popular and matching what you typed: "tyler" is
-        // Tyler, The Creator, not a small artist called just "Tyler"), else the best song.
-        if all {
-            let artist = r.artists.first().filter(|a| crate::deezer::name_match(&a.name, &query) >= 2);
-            match (artist, r.tracks.first()) {
-                (Some(a), _) => {
-                    section_title(ui, "Top result", None);
-                    artist_grid(app, ui, std::slice::from_ref(a), Some(1));
-                }
-                (None, Some(t)) => {
-                    section_title(ui, "Top result", None);
-                    let names = app.playlist_names();
-                    let mut ev = vec![];
-                    track_table(ui, "search_top", std::slice::from_ref(t), &table_ctx(app, &names), &mut ev);
-                    app.handle_events(ev, std::slice::from_ref(t), &ctx);
-                }
-                _ => {}
-            }
-        }
+        // Keep the best-matching artist in the artist row so results do not repeat it
+        // in a separate, mostly empty section above the songs.
         if (all || filter == 2) && !r.artists.is_empty() {
-            // On "All": one row of the top artists, with "See all" for the rest.
             if section_title(ui, if all { "Top artists" } else { "Artists" }, all.then_some("See all")) {
                 ui.data_mut(|d| d.insert_temp(id, 2u8));
             }
             artist_grid(app, ui, &r.artists, if all { Some(1) } else { None });
-        }
-        // Searched for an artist: who their listeners also play.
-        if let Some((name, related, _)) = &r.around
-            && (all || filter == 2)
-            && !related.is_empty()
-        {
-            suggestion_row(app, ui, "search_also", &crate::deezer::Suggestion::AlsoListen(name.clone(), related.clone()));
         }
         // The top songs start loading once the results have stayed up for a moment
         // (not for every letter while you type), so the one you press plays at once.
@@ -1388,6 +1363,13 @@ fn search(app: &mut App, ui: &mut Ui, q: &str) {
             section_title(ui, "Songs", None);
             let shown = if all { &r.tracks[..r.tracks.len().min(10)] } else { &r.tracks[..] };
             tracks_block(app, ui, "search_tracks", shown);
+        }
+        // Searched for an artist: who their listeners also play.
+        if let Some((name, related, _)) = &r.around
+            && (all || filter == 2)
+            && !related.is_empty()
+        {
+            suggestion_row(app, ui, "search_also", &crate::deezer::Suggestion::AlsoListen(name.clone(), related.clone()));
         }
         // ...and songs by others that sound like theirs.
         if let Some((name, _, songs)) = &r.around
