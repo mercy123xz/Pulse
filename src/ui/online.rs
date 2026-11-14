@@ -401,7 +401,7 @@ pub fn public_page(app: &mut App, ui: &mut Ui) {
             }
             if !mine {
                 let id = p.id.clone();
-                let r = icon_button(ui, icon::DOTS_THREE, 18.0, pal().text_muted, tr("More"));
+                let r = more_button(ui, 20.0, tr("More"));
                 egui::Popup::menu(&r).show(|ui| {
                     menu_begin(ui);
                     if menu_item(ui, icon::FLAG, "Report playlist") {

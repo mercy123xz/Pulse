@@ -301,6 +301,7 @@ const STRINGS: &[(&str, [&str; 4])] = &[
     ("Reduce motion", ["Reducir movimiento", "Reduzir movimento", "Réduire les animations", "Bewegung reduzieren"]),
     ("Turns off moving backgrounds and menu fades.", ["Desactiva los fondos en movimiento y los fundidos de los menús.", "Desliga fundos animados e o esmaecimento dos menus.", "Désactive les fonds animés et les fondus des menus.", "Schaltet bewegte Hintergründe und Menü-Überblendungen aus."]),
     ("More options", ["Más opciones", "Mais opções", "Plus d'options", "Weitere Optionen"]),
+    ("More options for", ["Más opciones para", "Mais opções para", "Plus d'options pour", "Weitere Optionen für"]),
     ("Move to top", ["Mover arriba del todo", "Mover para o topo", "Placer en premier", "An den Anfang"]),
     ("Move up", ["Subir", "Mover para cima", "Monter", "Nach oben"]),
     ("Move down", ["Bajar", "Mover para baixo", "Descendre", "Nach unten"]),

@@ -687,7 +687,8 @@ fn columns(row: Rect, with_date: bool, with_views: bool) -> Cols {
     let x0 = row.left();
     let col = |a: f32, b: f32| Rect::from_x_y_ranges(a..=b, row.y_range());
     let num = col(x0, x0 + 44.0);
-    let time = col(row.right() - 64.0, row.right() - 12.0);
+    let more = more_slot(row);
+    let time = col(more.left() - 52.0, more.left() - 2.0);
     let like = col(time.left() - 40.0, time.left());
     let date = (with_date && w > 900.0).then(|| col(like.left() - 150.0, like.left() - 12.0));
     let after_views = date.map(|d| d.left()).unwrap_or(like.left());
@@ -698,6 +699,11 @@ fn columns(row: Rect, with_date: bool, with_views: bool) -> Cols {
     let album = wide.then(|| col(album_right - album_w, album_right));
     let title_right = album.map(|a| a.left()).unwrap_or(like.left()) - 16.0;
     Cols { num, title: col(num.right() + 4.0, title_right), album, views, date, like, time }
+}
+
+/// Where a song row's "more options" button goes: the end of the row.
+fn more_slot(row: Rect) -> Rect {
+    Rect::from_x_y_ranges(row.right() - 40.0..=row.right() - 4.0, row.y_range())
 }
 
 /// 5003515 → "5,003,515".
@@ -893,9 +899,13 @@ fn track_row(ui: &mut Ui, id: egui::Id, list: &str, i: usize, t: &Track, tracks:
         return;
     }
     let is_current = cx.now_playing == Some(t.id.as_str());
+    // "More options": the same menu as a right-click, for anyone who doesn't right-click.
+    let more = ui.interact(Rect::from_center_size(more_slot(rect).center(), Vec2::splat(30.0)), id.with("more"), Sense::click());
+    a11y(ui, &more, WidgetType::Button, || format!("{} {}", tr("More options for"), t.title));
+    let more_open = egui::Popup::menu(&more).is_open();
     // The heart, artist and album links sit on top of the row, so "the row is hovered"
     // is "the mouse is anywhere over it" (else the heart vanishes when you point at it).
-    let hovered = resp.hovered() || resp.context_menu_opened() || resp.has_focus() || ui.rect_contains_pointer(rect);
+    let hovered = resp.hovered() || resp.context_menu_opened() || more_open || resp.has_focus() || ui.rect_contains_pointer(rect);
     // Resting on a row for a moment: get the song ready (most clicks come right after).
     if hovered && !is_current {
         let key = egui::Id::new("row_hover_since");
@@ -1008,6 +1018,14 @@ fn track_row(ui: &mut Ui, id: egui::Id, list: &str, i: usize, t: &Track, tracks:
     if length > 0 {
         ui.painter().text(c.time.right_center(), Align2::RIGHT_CENTER, fmt_duration(length), regular(12.5), pal().text_muted);
     }
+    if hovered || more.has_focus() {
+        let hot = more.hovered() || more_open;
+        if hot {
+            ui.painter().circle_filled(more.rect.center(), 15.0, pal().surface_hover);
+        }
+        paint_more_dots(ui.painter(), more.rect.center(), 22.0, if hot { pal().text } else { pal().text_muted });
+    }
+    let more = more.on_hover_text(tr("More options")).on_hover_cursor(egui::CursorIcon::PointingHand);
 
     // Interactions
     // Resting on the title (which opens the song's album or page) loads that page ahead.
@@ -1068,7 +1086,8 @@ fn track_row(ui: &mut Ui, id: egui::Id, list: &str, i: usize, t: &Track, tracks:
     } else {
         vec![]
     };
-    resp.context_menu(|ui| {
+    // One menu, opened by a right-click on the row or by its "more options" button.
+    let mut menu = |ui: &mut Ui| {
         if !group.is_empty() {
             group_menu(ui, &group, tracks, cx, ev);
             return;
@@ -1082,7 +1101,9 @@ fn track_row(ui: &mut Ui, id: egui::Id, list: &str, i: usize, t: &Track, tracks:
             downloaded: cx.downloads.contains_key(&t.id),
         };
         track_menu(ui, t, &mcx, ev);
-    });
+    };
+    resp.context_menu(|ui| menu(ui));
+    egui::Popup::menu(&more).align(egui::RectAlign::BOTTOM_END).show(|ui| menu(ui));
 }
 
 fn pointer_in(ui: &Ui, r: Rect) -> bool {
@@ -1101,8 +1122,10 @@ pub fn resp_selected(ui: &Ui, resp: &Response, on: bool, label: &str) {
 
 /// Call first inside every menu: tightens the spacing and fades the menu in.
 pub fn menu_begin(ui: &mut Ui) {
-    ui.spacing_mut().item_spacing.y = 1.0;
-    ui.set_min_width(210.0);
+    ui.spacing_mut().item_spacing.y = 0.0;
+    // Compact: as wide as its longest item, within reason.
+    ui.set_min_width(170.0);
+    ui.set_max_width(250.0);
     let id = ui.id().with("menu_fade");
     let now = ui.input(|i| i.time);
     let frame = ui.ctx().cumulative_frame_nr();
@@ -1126,11 +1149,11 @@ fn is_danger(label: &str) -> bool {
 fn menu_row(ui: &mut Ui, glyph: &str, label: &str, trailing: Option<&str>, open: bool) -> Response {
     let danger = is_danger(label);
     let label = tr(label);
-    let font = med(13.0);
-    let g = one_line(ui, label, font, pal().text, 360.0);
-    let min_w = 44.0 + g.size().x + if trailing.is_some() { 36.0 } else { 18.0 };
+    let font = med(12.5);
+    let g = one_line(ui, label, font, pal().text, 190.0);
+    let min_w = 36.0 + g.size().x + if trailing.is_some() { 30.0 } else { 14.0 };
     // In menus (justified), this fills the menu's width.
-    let resp = ui.allocate_response(vec2(min_w, 32.0), Sense::click());
+    let resp = ui.allocate_response(vec2(min_w, 27.0), Sense::click());
     let rect = resp.rect;
     a11y(ui, &resp, WidgetType::Button, || label.to_owned());
     let hot = resp.hovered() || resp.has_focus() || open;
@@ -1142,11 +1165,11 @@ fn menu_row(ui: &mut Ui, glyph: &str, label: &str, trailing: Option<&str>, open:
     let base = if danger { Color32::from_rgb(235, 105, 105) } else { pal().text };
     let icon_col = if danger { base } else if hot { pal().accent_soft } else { pal().text_muted };
     // Icons sit in a fixed column, centered by their box, so they line up row to row.
-    paint_icon(ui.painter(), pos2(rect.left() + 20.0, rect.center().y), glyph, regular(16.0), icon_col);
+    paint_icon(ui.painter(), pos2(rect.left() + 16.0, rect.center().y), glyph, regular(14.5), icon_col);
     let text_col = if hot || danger { base } else { pal().text.gamma_multiply(0.92) };
-    ui.painter().galley(pos2(rect.left() + 40.0, rect.center().y - g.size().y / 2.0), g, text_col);
+    ui.painter().galley(pos2(rect.left() + 33.0, rect.center().y - g.size().y / 2.0), g, text_col);
     if let Some(tr_glyph) = trailing {
-        paint_icon(ui.painter(), pos2(rect.right() - 14.0, rect.center().y), tr_glyph, regular(12.0), pal().text_muted);
+        paint_icon(ui.painter(), pos2(rect.right() - 12.0, rect.center().y), tr_glyph, regular(11.0), pal().text_muted);
     }
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
@@ -1172,10 +1195,11 @@ pub fn submenu(ui: &mut Ui, glyph: &str, label: &str, add: impl FnOnce(&mut Ui))
 
 /// A thin divider between groups of menu items.
 pub fn menu_separator(ui: &mut Ui) {
-    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width().max(1.0), 9.0), Sense::hover());
-    let w = ui.min_rect().width().max(rect.width());
-    let x = ui.min_rect().left();
-    ui.painter().hline(x + 8.0..=x + w - 8.0, rect.center().y, Stroke::new(1.0, pal().border));
+    // Takes no width of its own (taking "all there is" made menus as wide as the screen
+    // allowed); the line spans the menu as wide as its items make it.
+    let (rect, _) = ui.allocate_exact_size(vec2(1.0, 7.0), Sense::hover());
+    let x = ui.max_rect().x_range();
+    ui.painter().hline(x.min + 6.0..=x.max - 6.0, rect.center().y, Stroke::new(1.0, pal().border));
 }
 
 /// A small heading at the top of a menu.
@@ -1188,9 +1212,31 @@ pub fn menu_header(ui: &mut Ui, text: &str) {
     ui.add_space(2.0);
 }
 
-/// The "…" button that opens a menu below it.
+/// The "more options" icon (Material's "more_horiz"): three round dots in a row, drawn
+/// rather than taken from a font so they stay crisp and evenly spaced at any size.
+/// `size` is the icon's box; Material draws it on 24.
+pub fn paint_more_dots(p: &egui::Painter, center: egui::Pos2, size: f32, color: Color32) {
+    let s = size / 24.0;
+    for dx in [-6.0, 0.0, 6.0] {
+        p.circle_filled(center + vec2(dx * s, 0.0), 2.0 * s, color);
+    }
+}
+
+/// A round "more options" button; `tip` is its tooltip and screen-reader name.
+pub fn more_button(ui: &mut Ui, size: f32, tip: &str) -> Response {
+    let (rect, resp) = ui.allocate_exact_size(Vec2::splat(size + 12.0), Sense::click());
+    a11y(ui, &resp, WidgetType::Button, || tip.to_owned());
+    let hot = resp.hovered();
+    if hot {
+        ui.painter().circle_filled(rect.center(), rect.width() / 2.0, pal().surface_hover);
+    }
+    paint_more_dots(ui.painter(), rect.center(), size, if hot { pal().text } else { pal().text_muted });
+    resp.on_hover_text(tip).on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+/// The "more options" button that opens a menu below it.
 pub fn dots_menu(ui: &mut Ui, size: f32, tip: &str, add: impl FnOnce(&mut Ui)) {
-    let resp = icon_button(ui, icon::DOTS_THREE, size, pal().text_muted, tip);
+    let resp = more_button(ui, size, tip);
     egui::Popup::menu(&resp).show(|ui| {
         menu_begin(ui);
         add(ui);
