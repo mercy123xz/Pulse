@@ -60,6 +60,11 @@ impl Extra {
 }
 
 impl Mode {
+    /// How much a mode saves: Normal 0, Gaming 1, Ultra-low 2.
+    pub fn level(self) -> u8 {
+        self as u8
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             Mode::Normal => "Off",
@@ -68,6 +73,22 @@ impl Mode {
         }
     }
 }
+
+/// Hands memory Pulse isn't using back to Windows (what Task Manager shows drops). Pages
+/// Pulse touches again come back on their own, so nothing breaks; it's only done when a
+/// mode that saves memory goes on, not repeatedly.
+#[cfg(windows)]
+pub fn give_back_memory() {
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GetCurrentProcess() -> isize;
+        fn K32EmptyWorkingSet(process: isize) -> i32;
+    }
+    // SAFETY: our own process; failing (it can't on supported Windows) changes nothing.
+    unsafe { K32EmptyWorkingSet(GetCurrentProcess()) };
+}
+#[cfg(not(windows))]
+pub fn give_back_memory() {}
 
 /// Bits of the extras switched off right now.
 static OFF: AtomicU8 = AtomicU8::new(0);
@@ -156,5 +177,10 @@ mod tests {
         assert!(!on(Extra::Animations) && on(Extra::ListArtwork));
         set_software(false);
         assert!(on(Extra::Animations));
+    }
+
+    #[test]
+    fn levels_go_up_with_savings() {
+        assert!(Mode::Normal.level() < Mode::Gaming.level() && Mode::Gaming.level() < Mode::UltraLow.level());
     }
 }

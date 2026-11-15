@@ -14,6 +14,9 @@ on:
 
 permissions:
   contents: write
+  # For the build provenance below.
+  id-token: write
+  attestations: write
 
 jobs:
   windows:
@@ -48,6 +51,33 @@ jobs:
           $default = [System.Drawing.SystemIcons]::Application
           if ($icon.ToBitmap().GetPixel(16, 16) -eq $default.ToBitmap().GetPixel(16, 16)) { Write-Warning "pulse.exe may be missing its icon" }
 
+      # Authenticode signature on pulse.exe, with installer/Sign-Pulse.ps1 and the
+      # CODESIGN_PFX_BASE64 / CODESIGN_PFX_PASSWORD secrets.
+      - name: Code-sign pulse.exe
+        shell: pwsh
+        env:
+          CODESIGN_PFX_BASE64: ${{ secrets.CODESIGN_PFX_BASE64 }}
+          CODESIGN_PFX_PASSWORD: ${{ secrets.CODESIGN_PFX_PASSWORD }}
+        run: |
+          if (-not $env:CODESIGN_PFX_BASE64 -or -not $env:CODESIGN_PFX_PASSWORD) {
+            Write-Host "::warning::CODESIGN_PFX_BASE64 / CODESIGN_PFX_PASSWORD aren't set: not code-signed."
+            exit 0
+          }
+          $dir = "$env:RUNNER_TEMP\codesign"
+          New-Item -ItemType Directory -Force -Path $dir, target\codesign | Out-Null
+          [IO.File]::WriteAllBytes("$dir\pulse-codesign.pfx", [Convert]::FromBase64String($env:CODESIGN_PFX_BASE64))
+          $pw = ConvertTo-SecureString $env:CODESIGN_PFX_PASSWORD -AsPlainText -Force
+          # Sign-Pulse.ps1 only accepts a signature this machine trusts, and the certificate
+          # is self-made, so trust it on this build machine (not on users' PCs).
+          $cert = (Get-PfxData -FilePath "$dir\pulse-codesign.pfx" -Password $pw).EndEntityCertificates[0]
+          foreach ($store in "Root", "TrustedPublisher") {
+            $s = [Security.Cryptography.X509Certificates.X509Store]::new($store, "LocalMachine")
+            $s.Open("ReadWrite"); $s.Add($cert); $s.Close()
+          }
+          $exe = "target\release\pulse.exe"
+          & installer\Sign-Pulse.ps1 -ExePath $exe -CertDir $dir -PublicCerOut target\codesign\pulse-public.cer -Password $pw
+          if ($LASTEXITCODE) { throw "Code signing failed" }
+
       # Installer (PulseSetup-x.y.z.exe) made with Inno Setup.
       - name: Build installer
         shell: pwsh
@@ -60,6 +90,33 @@ jobs:
           & $iscc "/DAppVersion=$version" installer\pulse.iss
           if ($LASTEXITCODE -ne 0) { throw "Installer build failed" }
           Get-ChildItem target\installer
+
+      # Authenticode signature on the installer too. It must come before the release-key
+      # signature below, which covers the installer's exact bytes.
+      - name: Code-sign installer
+        shell: pwsh
+        env:
+          CODESIGN_PFX_BASE64: ${{ secrets.CODESIGN_PFX_BASE64 }}
+          CODESIGN_PFX_PASSWORD: ${{ secrets.CODESIGN_PFX_PASSWORD }}
+        run: |
+          if (-not $env:CODESIGN_PFX_BASE64 -or -not $env:CODESIGN_PFX_PASSWORD) {
+            Write-Host "::warning::CODESIGN_PFX_BASE64 / CODESIGN_PFX_PASSWORD aren't set: not code-signed."
+            exit 0
+          }
+          $dir = "$env:RUNNER_TEMP\codesign"
+          New-Item -ItemType Directory -Force -Path $dir, target\codesign | Out-Null
+          [IO.File]::WriteAllBytes("$dir\pulse-codesign.pfx", [Convert]::FromBase64String($env:CODESIGN_PFX_BASE64))
+          $pw = ConvertTo-SecureString $env:CODESIGN_PFX_PASSWORD -AsPlainText -Force
+          # Sign-Pulse.ps1 only accepts a signature this machine trusts, and the certificate
+          # is self-made, so trust it on this build machine (not on users' PCs).
+          $cert = (Get-PfxData -FilePath "$dir\pulse-codesign.pfx" -Password $pw).EndEntityCertificates[0]
+          foreach ($store in "Root", "TrustedPublisher") {
+            $s = [Security.Cryptography.X509Certificates.X509Store]::new($store, "LocalMachine")
+            $s.Open("ReadWrite"); $s.Add($cert); $s.Close()
+          }
+          $exe = (Get-ChildItem target\installer\PulseSetup-*.exe | Select-Object -First 1).FullName
+          & installer\Sign-Pulse.ps1 -ExePath $exe -CertDir $dir -PublicCerOut target\codesign\pulse-public.cer -Password $pw
+          if ($LASTEXITCODE) { throw "Code signing failed" }
 
       # Signs the installer with Pulse's release key, so Pulse can check an update
       # before running it. The key is the PULSE_SIGNING_KEY secret (an Ed25519 key in
@@ -89,6 +146,17 @@ jobs:
           # The signature must check out with the key Pulse has, or nothing is published.
           "$openssl" pkeyutl -verify -pubin -inkey installer/update-key.pub.pem -rawin -in "$setup" -sigfile "$RUNNER_TEMP/setup.sig"
           base64 -w0 "$RUNNER_TEMP/setup.sig" > target/installer/signature.b64
+
+      # Proof, signed by GitHub, that these exact files were built here from this commit
+      # of the public source. Anyone can check a download with:
+      #   gh attestation verify PulseSetup-X.Y.Z.exe -R mercy123xz/Pulse
+      - name: Record build provenance
+        if: github.ref == 'refs/heads/main' || github.event_name == 'release'
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            target/release/pulse.exe
+            target/installer/PulseSetup-*.exe
 
       - uses: actions/upload-artifact@v4
         with:

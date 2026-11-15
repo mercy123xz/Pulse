@@ -15,7 +15,7 @@ use std::sync::Mutex;
 const ACCOUNTS_URL: &str = "https://pulse-accounts.y0hyotuube.workers.dev";
 
 /// Where public links point: the website's page for a playlist or a profile.
-pub const SITE: &str = "https://mercy123xz.github.io/Pulse/";
+pub const SITE: &str = "https://listen2pulse.github.io/";
 
 pub(crate) fn base() -> String {
     // Developer check: PULSE_DEBUG_ACCOUNTS points Pulse at a test server.
@@ -210,6 +210,52 @@ pub fn song_fixes(ids: &[String]) -> Result<std::collections::HashMap<String, cr
     parse(v.get("fixes").cloned().unwrap_or(Value::Null))
 }
 
+/// What Pulse's server knows about an artist page Deezer gets wrong: songs and releases
+/// added or hidden by hand ("track:<Deezer number>", "album:<Deezer number>"), and the same
+/// artist's songs (ISRC) and releases (UPC) on TIDAL. See server/README.md.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(default)]
+pub struct ArtistExtra {
+    pub add: Vec<String>,
+    pub hide: Vec<String>,
+    pub tracks: Vec<ExtraTrack>,
+    pub albums: Vec<ExtraAlbum>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(default)]
+pub struct ExtraTrack {
+    pub isrc: String,
+    pub title: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(default)]
+pub struct ExtraAlbum {
+    pub upc: String,
+    pub title: String,
+}
+
+/// `titles`: the songs and releases Deezer shows on the page, so the server can tell which
+/// artist of that name on TIDAL is this one.
+pub fn artist_extra(artist_id: &str, name: &str, titles: &[String]) -> Result<ArtistExtra, String> {
+    if cfg!(test) {
+        return Ok(ArtistExtra::default());
+    }
+    let mut t = String::new();
+    for title in titles.iter().map(|s| s.replace('|', " ")) {
+        if t.len() + title.len() > 1500 {
+            break;
+        }
+        if !t.is_empty() {
+            t.push('|');
+        }
+        t.push_str(&title);
+    }
+    let path = format!("/artist-extra?artist={}&name={}&t={}", crate::net::encode(artist_id), crate::net::encode(name), crate::net::encode(&t));
+    parse(call("GET", &path, None, false)?)
+}
+
 fn parse<T: for<'de> Deserialize<'de>>(v: Value) -> Result<T, String> {
     serde_json::from_value(v).map_err(|_| "The accounts server sent something Pulse couldn't read.".to_string())
 }
@@ -224,9 +270,90 @@ fn signed_in_as(v: &Value) -> Result<Session, String> {
     Ok(s)
 }
 
-pub fn sign_up(username: &str, email: &str, password: &str) -> Result<Session, String> {
-    let v = call("POST", "/signup", Some(json!({ "username": username.trim(), "email": email.trim(), "password": password })), false)?;
+/// `birthdate` is "YYYY-MM-DD" (see `parse_birthday`). The server checks the age too, and
+/// doesn't keep the birthday.
+pub fn sign_up(username: &str, email: &str, password: &str, birthdate: &str) -> Result<Session, String> {
+    let v = call("POST", "/signup", Some(json!({ "username": username.trim(), "email": email.trim(), "password": password, "birthdate": birthdate })), false)?;
     signed_in_as(&v)
+}
+
+// ---------------------------------------------------------------- age
+
+/// Accounts are for people 13 and older.
+pub const MIN_AGE: u32 = 13;
+pub const TOO_YOUNG: &str = "You need to be at least 13 to make a Pulse account.";
+
+/// A birthday as typed: day, month and year with `/`, `.`, `-` or spaces between, month first
+/// if `month_first` (English: 4/25/2010), otherwise day first (25/4/2010). "2010-04-25" works
+/// either way. Returns (year, month, day) if it's a real date.
+pub fn parse_birthday(text: &str, month_first: bool) -> Option<(i32, u32, u32)> {
+    let parts: Vec<u32> = text.split(|c: char| matches!(c, '/' | '.' | '-' | ' ')).filter(|p| !p.is_empty()).map(|p| p.parse().ok()).collect::<Option<_>>()?;
+    let [a, b, c] = parts[..] else { return None };
+    let (y, m, d) = if a > 999 { (a, b, c) } else if month_first { (c, a, b) } else { (c, b, a) };
+    let y = i32::try_from(y).ok().filter(|y| *y > 999)?;
+    (1..=12).contains(&m).then_some(())?;
+    (1..=days_in_month(y, m)).contains(&d).then_some((y, m, d))
+}
+
+fn days_in_month(y: i32, m: u32) -> u32 {
+    match m {
+        2 if (y % 4 == 0 && y % 100 != 0) || y % 400 == 0 => 29,
+        2 => 28,
+        4 | 6 | 9 | 11 => 30,
+        _ => 31,
+    }
+}
+
+/// Whole years from `birth` to `today`. None for a birthday in the future or over 120 years ago.
+pub fn age_on(birth: (i32, u32, u32), today: (i32, u32, u32)) -> Option<u32> {
+    if birth > today {
+        return None;
+    }
+    let mut age = today.0 - birth.0;
+    if (today.1, today.2) < (birth.1, birth.2) {
+        age -= 1;
+    }
+    u32::try_from(age).ok().filter(|a| *a <= 120)
+}
+
+/// Today's date (UTC), as (year, month, day).
+pub fn today() -> (i32, u32, u32) {
+    let days = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() / 86_400).unwrap_or(0) as i64;
+    // Days since 1970-01-01 to a calendar date (Howard Hinnant's civil_from_days).
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+    ((yoe + era * 400 + i64::from(m <= 2)) as i32, m, d)
+}
+
+/// Someone said they're under 13 on this computer: sign-up stays closed here, so trying again
+/// with an older birthday doesn't work.
+fn no_signup_file() -> std::path::PathBuf {
+    crate::settings::data_dir().join("no-signup")
+}
+pub fn signup_blocked() -> bool {
+    no_signup_file().exists()
+}
+
+/// Checks a typed birthday before signing up. Ok: "YYYY-MM-DD" for the server.
+pub fn check_birthday(text: &str, month_first: bool) -> Result<String, &'static str> {
+    if signup_blocked() {
+        return Err(TOO_YOUNG);
+    }
+    let Some(birth) = parse_birthday(text, month_first) else { return Err("Enter your birthday.") };
+    match age_on(birth, today()) {
+        None => Err("Enter your birthday."),
+        Some(age) if age < MIN_AGE => {
+            let _ = std::fs::write(no_signup_file(), "");
+            Err(TOO_YOUNG)
+        }
+        Some(_) => Ok(format!("{:04}-{:02}-{:02}", birth.0, birth.1, birth.2)),
+    }
 }
 
 /// `username` can also be the account's email address.
@@ -404,7 +531,8 @@ pub enum Link {
 /// Reads a Pulse playlist or profile link ("…/Pulse/p.html?id=AbCdEfGh23", "…/u.html?name=mercy").
 pub fn read_link(text: &str) -> Option<Link> {
     let t = text.trim();
-    if !t.contains("/Pulse/") && !t.contains("pulse.is-a.software") {
+    // Today's site, the old one (mercy123xz.github.io/Pulse/, still shared around) and the old test domain.
+    if !t.contains("listen2pulse.github.io") && !t.contains("/Pulse/") && !t.contains("pulse.is-a.software") {
         return None;
     }
     let query = t.split_once('?')?.1.split('#').next().unwrap_or("");
@@ -426,6 +554,7 @@ mod tests {
     fn reads_pulse_links() {
         assert_eq!(read_link("https://mercy123xz.github.io/Pulse/p.html?id=AbCdEfGh23"), Some(Link::Playlist("AbCdEfGh23".into())));
         assert_eq!(read_link(" https://mercy123xz.github.io/Pulse/u.html?name=Mercy_1#x "), Some(Link::Profile("mercy_1".into())));
+        assert_eq!(read_link("https://listen2pulse.github.io/u.html?name=Mercy_1"), Some(Link::Profile("mercy_1".into())));
         assert_eq!(read_link(&playlist_link("Zz23456789")), Some(Link::Playlist("Zz23456789".into())));
         assert_eq!(read_link(&profile_link("joe")), Some(Link::Profile("joe".into())));
         assert_eq!(read_link("https://mercy123xz.github.io/Pulse/p.html?id=short"), None);
@@ -452,8 +581,8 @@ mod tests {
         unsafe { std::env::set_var("PULSE_DATA_DIR", &dir) };
         let name = format!("t{}", std::process::id());
         let mail = format!("{name}@example.com");
-        assert!(sign_up(&name, "", "a good password").unwrap_err().contains("email"));
-        let s = sign_up(&name, &format!("  {}  ", mail.to_uppercase()), "a good password").unwrap();
+        assert!(sign_up(&name, "", "a good password", "2000-01-01").unwrap_err().contains("email"));
+        let s = sign_up(&name, &format!("  {}  ", mail.to_uppercase()), "a good password", "2000-01-01").unwrap();
         assert_eq!((s.username.as_str(), s.email.as_str()), (name.as_str(), mail.as_str()));
         assert_eq!(session().unwrap(), s, "kept for next time");
         assert!(dir.join("account.json").is_file());
@@ -477,7 +606,7 @@ mod tests {
         assert_eq!((prof.user.bio.as_str(), prof.playlists.len(), prof.playlists[0].name.as_str()), ("hi", 1, "Rage 2"));
         assert!(search(&name[..3]).iter().any(|u| u.username == name));
         assert_eq!(sign_in(&name, "wrong password").unwrap_err(), "Wrong username or password.");
-        assert_eq!(sign_up(&name, "x@example.com", "a good password").unwrap_err(), "That username is taken.");
+        assert_eq!(sign_up(&name, "x@example.com", "a good password", "2000-01-01").unwrap_err(), "That username is taken.");
         assert_eq!(sign_in(&mail, "a good password").unwrap().username, name, "sign in with email");
         let mail2 = format!("{name}.2@example.com");
         assert_eq!(set_email(&mail2, "wrong password").unwrap_err(), "That password is wrong.");
@@ -500,5 +629,21 @@ mod tests {
         assert!(session().is_none() && !dir.join("account.json").exists(), "signed out and forgotten");
         assert_eq!(profile(&name).unwrap_err(), "There's no one called that.");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn birthdays_and_ages() {
+        assert_eq!(parse_birthday("4/25/2010", true), Some((2010, 4, 25)));
+        assert_eq!(parse_birthday("25.4.2010", false), Some((2010, 4, 25)));
+        assert_eq!(parse_birthday("2010-04-25", false), Some((2010, 4, 25)));
+        assert_eq!(parse_birthday("2/30/2010", true), None);
+        assert_eq!(parse_birthday("2/29/2012", true), Some((2012, 2, 29)));
+        assert_eq!(parse_birthday("25/4/2010", true), None);
+        assert_eq!(parse_birthday("hello", true), None);
+        assert_eq!(age_on((2010, 4, 25), (2023, 4, 24)), Some(12));
+        assert_eq!(age_on((2010, 4, 25), (2023, 4, 25)), Some(13));
+        assert_eq!(age_on((2030, 1, 1), (2023, 4, 25)), None);
+        let (y, m, d) = today();
+        assert!(y >= 2026 && (1..=12).contains(&m) && (1..=31).contains(&d));
     }
 }

@@ -31,6 +31,7 @@ const RESET_CHECKS_PER_IP_PER_15_MIN = 20;
 const MAX_AVATAR = 200_000; // bytes; the app sends a 256×256 JPEG of about 20–40 KB
 const AVATAR_CHANGES_PER_HOUR = 10;
 const TIDAL_LOOKUPS_PER_HOUR = 600; // per IP; about one per song played that Deezer doesn't have
+const ARTIST_CHECKS_PER_HOUR = 300; // per IP; one per artist page opened (cached for a day)
 
 // Pictures may only come from the music services Pulse uses, so a published playlist
 // can't make other people's Pulse load pictures from (and reveal them to) any server.
@@ -114,6 +115,7 @@ async function route(c, method, path) {
   if (method === "GET" && path === "/fixes") return songFixes(c);
   if (method === "GET" && path === "/supporters") return supporters(c);
   if (method === "GET" && path === "/tidal/search") return tidalSearch(c);
+  if (method === "GET" && path === "/artist-extra") return artistExtra(c);
   fail(404, "Not found.");
 }
 
@@ -806,4 +808,124 @@ async function tidalSearch(c) {
   const text = JSON.stringify({ tracks });
   if (cache) await cache.put(cacheKey, new Response(text, { headers: { "Content-Type": "application/json", "Cache-Control": "public, max-age=86400" } }));
   return new Response(text, { headers: { ...c.cors, "Content-Type": "application/json", "Cache-Control": "no-store" } });
+}
+
+// ---------------------------------------------------------------- artist pages
+
+// Deezer sometimes files an artist's songs under a different artist with the same name
+// (the real "che" and a pile of other "Che"s). For an artist page, this returns:
+//  - the hand-made fixes for that Deezer artist (artist_fixes): releases and songs to add
+//    or hide, and whether to skip the TIDAL check;
+//  - the songs (ISRC) and releases (UPC barcode) of the same artist on TIDAL, which keeps
+//    namesakes apart. The app looks those up on Deezer and adds any the page is missing.
+// The TIDAL artist is the one with the same name whose songs share the most titles with
+// what Deezer shows on the page (`t`): a namesake with no shared titles is never used.
+const normTitle = (s) =>
+  String(s || "")
+    .toLowerCase()
+    .replace(/\s*[([](feat|ft|with|prod)\b[^)\]]*[)\]]/g, "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\$/g, "s")
+    .replace(/ø/g, "o")
+    .replace(/[^\p{L}\p{N}]/gu, "");
+
+async function artistExtra(c) {
+  const url = new URL(c.request.url);
+  const artist = url.searchParams.get("artist") || "";
+  if (!/^\d{1,15}$/.test(artist)) fail(400, "Which artist?");
+  const name = (url.searchParams.get("name") || "").trim().slice(0, 100);
+  const country = /^[A-Z]{2}$/.test(url.searchParams.get("country") || "") ? url.searchParams.get("country") : "US";
+  const titles = new Set(
+    (url.searchParams.get("t") || "")
+      .split("|")
+      .slice(0, 60)
+      .map(normTitle)
+      .filter(Boolean),
+  );
+
+  // The hand-made fixes: always read, never cached, so a new one shows up at once.
+  const out = { add: [], hide: [], tidal: null, tracks: [], albums: [] };
+  let skipTidal = false;
+  const rows = await c.env.DB.prepare("SELECT item, action FROM artist_fixes WHERE artist = ?").bind(artist).all();
+  for (const r of rows.results || []) {
+    if (r.action === "notidal") skipTidal = true;
+    else if (/^(track|album):\d{1,15}$/.test(r.item || "") && (r.action === "add" || r.action === "hide")) out[r.action].push(r.item);
+  }
+  if (skipTidal || !name || !titles.size || !c.env.TIDAL_CLIENT_ID) return c.reply(200, out);
+
+  // The TIDAL part is the same for everyone, so it's kept for a day.
+  const cacheKey = new Request(`https://pulse-cache/artist-extra/v3/${country}/${artist}`);
+  const cache = typeof caches !== "undefined" ? caches.default : null;
+  const hit = cache && (await cache.match(cacheKey));
+  if (hit) return c.reply(200, { ...out, ...(await hit.json()) });
+  if (await overLimit(c, "artist-extra", c.ip, ARTIST_CHECKS_PER_HOUR, 3600)) return c.reply(200, out);
+  await note(c, "artist-extra", c.ip);
+
+  let found = { tidal: null, tracks: [], albums: [] };
+  try {
+    found = await tidalArtistMatch(c.env, name, titles, country);
+  } catch (e) {
+    // TIDAL being down or slow shouldn't break artist pages: they show Deezer's list.
+    if (!(e instanceof Reply)) console.error("artist-extra", e);
+    return c.reply(200, out);
+  }
+  // A match is kept for a day; "no match" only for an hour, so it's soon asked again.
+  const keep = found.tidal ? 86400 : 3600;
+  if (cache) await cache.put(cacheKey, new Response(JSON.stringify(found), { headers: { "Content-Type": "application/json", "Cache-Control": `public, max-age=${keep}` } }));
+  return c.reply(200, { ...out, ...found });
+}
+
+async function tidalArtistMatch(env, name, titles, country) {
+  // `why`: when nothing matched, the reason (handy when checking an artist by hand).
+  const none = (why) => ({ tidal: null, tracks: [], albums: [], why });
+  const search = await tidalGet(env, `/searchResults?filter[query]=${encodeURIComponent(name)}&countryCode=${country}&include=artists`);
+  const result = Array.isArray(search.data) ? search.data[0] : search.data;
+  const ids = (result?.relationships?.artists?.data || []).map((d) => d.id).slice(0, 10);
+  if (!ids.length) return none("TIDAL found no artists for that name");
+  // Names: from the search reply when it has them, else asked for.
+  let named = (search.included || []).filter((x) => x.type === "artists");
+  if (!named.length) named = (await tidalGet(env, `/artists?countryCode=${country}&${ids.map((id) => `filter[id]=${encodeURIComponent(id)}`).join("&")}`)).data || [];
+  const want = normTitle(name);
+  const candidates = ids.filter((id) => named.some((a) => a.id === id && normTitle(a.attributes?.name) === want)).slice(0, 5);
+  if (!candidates.length) return none(`no TIDAL artist named exactly "${name}"`);
+  const popularity = (id) => named.find((a) => a.id === id)?.attributes?.popularity || 0;
+
+  let best = null;
+  for (const id of candidates) {
+    // The first page of each is enough to tell namesakes apart.
+    const [tracks, albums] = await Promise.all([tidalArtistItems(env, id, "tracks", country), tidalArtistItems(env, id, "albums", country)]);
+    const shared = new Set([...tracks, ...albums].map((x) => normTitle(x.title)).filter((t) => titles.has(t))).size;
+    // Most shared titles wins. Equal: TIDAL often lists one artist twice, so the more
+    // popular entry is used (a namesake sharing as many titles is very unlikely).
+    if (shared > 0 && (!best || shared > best.shared || (shared === best.shared && popularity(id) > popularity(best.id)))) best = { id, shared, tracks, albums };
+  }
+  if (!best) return none(`${candidates.length} TIDAL artist(s) named "${name}", but none shares a title with the Deezer page`);
+  // More of the one that matched, so older releases count too.
+  [best.tracks, best.albums] = await Promise.all([tidalArtistItems(env, best.id, "tracks", country, 2), tidalArtistItems(env, best.id, "albums", country, 3)]);
+  return {
+    tidal: best.id,
+    tracks: best.tracks.filter((t) => /^[A-Z]{2}[A-Z0-9]{3}\d{7}$/.test(t.isrc)).map(({ isrc, title }) => ({ isrc, title })).slice(0, 60),
+    albums: best.albums.filter((a) => /^\d{8,14}$/.test(a.upc)).map(({ upc, title }) => ({ upc, title })).slice(0, 100),
+  };
+}
+
+// An artist's songs or releases, with their codes: the first `pages` pages (TIDAL's size).
+async function tidalArtistItems(env, id, kind, country, pages = 1) {
+  const extra = kind === "tracks" ? "&collapseBy=FINGERPRINT" : "";
+  let path = `/artists/${encodeURIComponent(id)}/relationships/${kind}?countryCode=${country}&include=${kind}${extra}`;
+  const out = [];
+  for (let page = 0; page < pages && path; page++) {
+    const doc = await tidalGet(env, path);
+    const byId = new Map((doc.included || []).filter((x) => x.type === kind).map((x) => [x.id, x.attributes || {}]));
+    for (const d of doc.data || []) {
+      const a = byId.get(d.id);
+      if (a) out.push({ title: a.title || "", isrc: a.isrc || "", upc: String(a.barcodeId || "") });
+    }
+    // The next page's link: "/artists/…" or a full address.
+    const next = doc.links?.next || "";
+    path = next ? next.replace(/^https?:\/\/[^/]+(\/v2)?/, "") : "";
+    if (path && !path.startsWith("/")) path = "";
+  }
+  return out;
 }

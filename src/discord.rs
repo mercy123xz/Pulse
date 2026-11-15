@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 /// Pulse's application on Discord (it's public: it only names the app).
 const APP_ID: &str = "1569481347553038476";
 /// Shown when a song has no cover Discord can load (local files), and as the small badge.
-const LOGO: &str = "https://mercy123xz.github.io/Pulse/img/apple-touch-icon.png";
+const LOGO: &str = "https://listen2pulse.github.io/img/apple-touch-icon.png";
 
 fn app_id() -> String {
     // Developer check: PULSE_DEBUG_DISCORD_ID=<id> tries another application.
@@ -289,7 +289,7 @@ fn clip(s: &str) -> String {
 }
 
 /// Where the status's "Get Pulse" button goes.
-const GET_PULSE: &str = "https://mercy123xz.github.io/Pulse/";
+const GET_PULSE: &str = "https://listen2pulse.github.io/";
 
 fn activity(s: &Song) -> Value {
     let mut a = json!({

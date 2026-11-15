@@ -218,6 +218,52 @@ fn icon_button_impl(ui: &mut Ui, glyph: &str, size: f32, color: Color32, tip: &s
 }
 
 /// Small dot-indicator used under active toggle buttons (shuffle / repeat).
+/// An on/off switch. The knob slides across with a little overshoot, stretches while
+/// it's pressed, and carries a check mark when on. `on_color` is the track color when on.
+pub fn toggle_switch(ui: &mut Ui, on: &mut bool, label: &str, on_color: Color32, off_color: Color32) -> Response {
+    let size = vec2(42.0, 24.0);
+    let (rect, mut resp) = ui.allocate_exact_size(size, Sense::click());
+    if resp.clicked() {
+        *on = !*on;
+        resp.mark_changed();
+    }
+    resp.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, true, *on, label));
+    focus_ring(ui, &resp);
+    if ui.is_rect_visible(rect) {
+        let ctx = ui.ctx();
+        let t = ctx.animate_bool_with_time(resp.id, *on, 0.22);
+        // Ease out with a small overshoot, like a spring settling.
+        let slide = {
+            let c = 1.6;
+            let x = t - 1.0;
+            if *on { 1.0 + (c + 1.0) * x.powi(3) + c * x.powi(2) } else { t * t * (3.0 - 2.0 * t) }
+        };
+        let pressed = resp.is_pointer_button_down_on();
+        let stretch = ctx.animate_bool_with_time(resp.id.with("press"), pressed, 0.1);
+        let p = ui.painter();
+        let track = lerp_color(off_color, on_color, t);
+        p.rect_filled(rect, CornerRadius::same(12), track);
+        let pad = 3.0;
+        let d = rect.height() - pad * 2.0;
+        let w = d + 4.0 * stretch;
+        let x0 = egui::lerp(rect.left() + pad..=rect.right() - pad - w, slide.clamp(-0.1, 1.1));
+        let knob = Rect::from_min_size(pos2(x0, rect.top() + pad), vec2(w, d));
+        p.rect_filled(knob.translate(vec2(0.0, 1.0)), CornerRadius::same((d / 2.0) as u8), Color32::from_black_alpha(40));
+        p.rect_filled(knob, CornerRadius::same((d / 2.0) as u8), Color32::WHITE);
+        if t > 0.5 {
+            let a = ((t - 0.5) * 2.0).clamp(0.0, 1.0);
+            paint_icon(p, knob.center(), icon::CHECK, FontId::proportional(11.0), on_color.gamma_multiply(a));
+        }
+    }
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+fn lerp_color(a: Color32, b: Color32, t: f32) -> Color32 {
+    let l = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * t).round() as u8;
+    // Color32 stores premultiplied values, so mixing them straight is correct.
+    Color32::from_rgba_premultiplied(l(a.r(), b.r()), l(a.g(), b.g()), l(a.b(), b.b()), l(a.a(), b.a()))
+}
+
 pub fn active_dot(ui: &Ui, resp: &Response) {
     ui.painter().circle_filled(pos2(resp.rect.center().x, resp.rect.bottom() - 1.0), 2.0, pal().accent_soft);
 }
@@ -422,8 +468,15 @@ pub fn artist_monogram(ui: &Ui, rect: Rect, name: &str, radius: CornerRadius) {
 pub fn card(ui: &mut Ui, w: f32, info: &CardInfo) -> CardClick {
     let h = w + 66.0;
     let (rect, resp) = ui.allocate_exact_size(vec2(w, h), Sense::click());
+    // The same album can be on screen twice (Jump back in and Recents, say). Mixing in
+    // where this card sits keeps each copy's hover and play button its own: with one id
+    // the second copy, not hovered, cancelled the first one's hover every frame.
+    let id = ui.id().with(info.id);
     a11y(ui, &resp, WidgetType::Button, || format!("{}, {}", info.title, info.subtitle));
-    let hovered = resp.hovered();
+    // Also counts as hovered while the pointer is on the play button: that button sits on
+    // top of the card, so egui gives it the hover and `resp.hovered()` turns false. Going by
+    // that alone, the button hid itself as soon as it was pointed at, then came back.
+    let hovered = resp.hovered() || ui.rect_contains_pointer(rect);
     let style = &parts().card;
     let radius = style.radius.map(CornerRadius::same).unwrap_or(r_lg());
     if hovered {
@@ -458,21 +511,28 @@ pub fn card(ui: &mut Ui, w: f32, info: &CardInfo) -> CardClick {
     // Floating play button appears on hover.
     let mut out = if resp.clicked() {
         CardClick::Open
-    } else if hover_intent(ui, info.id, hovered) {
+    } else if hover_intent(ui, id, hovered) {
         CardClick::Preview
     } else {
         CardClick::None
     };
-    let t = ui.ctx().animate_bool(info.id.with("hover"), hovered);
+    let t = ui.ctx().animate_bool(id.with("hover"), hovered);
     if t > 0.0 && !info.round {
         let c = pos2(art_rect.right() - 26.0, art_rect.bottom() - 26.0 + (1.0 - t) * 8.0);
         let btn = Rect::from_center_size(c, Vec2::splat(42.0));
-        let b = ui.interact(btn, info.id.with("play"), Sense::click());
+        let b = ui.interact(btn, id.with("play"), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
         a11y(ui, &b, WidgetType::Button, || format!("Play {}", info.title));
-        let grow = if b.hovered() { 1.06 } else { 1.0 };
-        ui.painter().circle_filled(c + vec2(0.0, 3.0), 22.0, Color32::from_black_alpha((90.0 * t) as u8));
+        // Pointing at it: it grows a little and its glow gets stronger.
+        let over = ui.ctx().animate_bool_with_time(id.with("play_hover"), b.hovered(), crate::theme::motion(0.12));
+        let r = 21.0 * (1.0 + 0.06 * over);
         let pb = &parts().play_button;
-        ui.painter().circle_filled(c, 21.0 * grow, pb.fill.unwrap_or(pal().accent).gamma_multiply(t));
+        let fill = pb.fill.unwrap_or(pal().accent);
+        let disc = Rect::from_center_size(c, Vec2::splat(r * 2.0));
+        let round = CornerRadius::same(r.round() as u8);
+        // A soft shadow under it, then a small glow in its own colour around it.
+        ui.painter().add(egui::Shadow { offset: [0, 4], blur: 12, spread: 0, color: Color32::from_black_alpha((110.0 * t) as u8) }.as_shape(disc, round));
+        ui.painter().add(egui::Shadow { offset: [0, 0], blur: 14, spread: (2.0 * over).round() as u8, color: fill.gamma_multiply((0.22 + 0.28 * over) * t) }.as_shape(disc, round));
+        ui.painter().circle_filled(c, r, fill.gamma_multiply(t));
         paint_icon(ui.painter(), c, icon::PLAY, filled_icon(17.0), pb.color.unwrap_or(Color32::WHITE).gamma_multiply(t));
         if b.clicked() {
             out = CardClick::Play;

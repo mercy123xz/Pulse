@@ -14,6 +14,7 @@ pub mod mini;
 mod online;
 mod personal;
 pub mod pick_artists;
+pub mod setup;
 mod settings_page;
 mod song_page;
 
@@ -90,6 +91,7 @@ pub fn draw(app: &mut App, ui: &mut Ui) {
 
     dialogs(app, &ctx);
     toast(app, &ctx);
+    setup::show(app, &ctx);
     intro::show(app, &ctx);
 }
 
@@ -1379,6 +1381,15 @@ fn album_grid_visits(app: &mut App, ui: &mut Ui, items: &[crate::app::Visit], ro
 
 fn artist_grid(app: &mut App, ui: &mut Ui, artists: &[ArtistInfo], rows: Option<usize>) {
     let ctx = ui.ctx().clone();
+    // Small copies of an artist's page (Deezer lists some artists twice) aren't shown once
+    // Pulse knows about them: opening one opens the main page anyway.
+    let kept: Vec<ArtistInfo>;
+    let artists = if artists.iter().any(|a| app.artist_alias.contains_key(&a.id)) {
+        kept = artists.iter().filter(|a| !app.artist_alias.contains_key(&a.id)).cloned().collect();
+        &kept[..]
+    } else {
+        artists
+    };
     let mut open = None;
     let mut radio = None;
     let mut preview = None;
@@ -1485,7 +1496,7 @@ fn search_top_card(app: &mut App, ui: &mut Ui, artist: Option<&ArtistInfo>, trac
     // Play: in the corner, a little bigger when you point at the card.
     let grow = ui.ctx().animate_bool(response.id.with("grow"), hot);
     let button = Rect::from_center_size(pos2(rect.right() - 44.0, rect.bottom() - 44.0), Vec2::splat(48.0));
-    let play = ui.interact(button, response.id.with("play"), Sense::click());
+    let play = ui.interact(button, response.id.with("play"), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
     ui.painter().add(egui::Shadow { offset: [0, 4], blur: 12, spread: 0, color: Color32::from_black_alpha(80) }.as_shape(button, CornerRadius::same(24)));
     ui.painter().circle_filled(button.center(), 24.0 + 2.0 * grow, parts().play_button.fill.unwrap_or(pal().accent));
     paint_icon(ui.painter(), button.center(), icon::PLAY, filled_icon(20.0), parts().play_button.color.unwrap_or(Color32::WHITE));

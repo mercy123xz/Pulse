@@ -395,7 +395,6 @@ pub fn norm(s: &str) -> String {
 
 /// The song title without "(feat. …)" / "(with …)" and similar extras.
 pub fn core_title(title: &str) -> String {
-    // Match ASCII markers without changing the original title's byte offsets.
     let lower = title.to_ascii_lowercase();
     let cut = ["(feat", "(ft.", "(with ", "[feat", " feat.", " ft. "].iter().filter_map(|m| lower.find(m)).min();
     match cut {

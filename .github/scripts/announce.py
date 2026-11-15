@@ -135,6 +135,10 @@ def check() -> int:
 
 
 def main() -> int:
+    # Windows' console text is cp1252, which can't print the 🎉 in the post: the post was
+    # made, then printing it failed and looked like the post had.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     if sys.argv[1:] == ["--check"]:
         return check()
     version, tag = sys.argv[1], sys.argv[2]

@@ -1,6 +1,45 @@
 **Download `PulseSetup` below and run it** to install Pulse (no administrator password needed).
 Works on any 64-bit Windows 10 or 11 PC.
 
+## Pulse 1.3
+<!-- x: A new look, a guided first-time setup, smarter autoplay, cleaner search, artist pages that find songs Deezer filed in the wrong place, and far less memory. Music also keeps playing while Pulse is minimized. -->
+
+**A fresh look**
+- A new first-time setup walks you through your account, the artists you like, your settings and a theme.
+- Geist, the website's font, throughout the app.
+- A cleaner top bar with a bigger search box, and a title bar that matches your theme instead of staying white.
+- Gentle animations throughout (none in Gaming mode).
+- Shorter page headers, so more songs fit on screen.
+- Play buttons on albums and playlists have a soft shadow and glow, and stay put when you point at them.
+
+**Search**
+- A clean song list beside the top result.
+- Recent searches redone, with an × to forget one.
+- A clear message when an artist search finds nothing.
+
+**Artist pages**
+- Songs and releases Deezer files under another artist with the same name now show on the right page.
+- New releases show up straight away, even before they have many fans.
+- When Deezer lists an artist twice, Pulse opens the main page.
+
+**Autoplay**
+- Plays songs like the one you picked, mostly by other artists in its genre.
+- A song you queue yourself stays in your queue.
+
+**Lighter and faster**
+- Pulse uses far less memory, and Gaming and Ultra-low modes give even more back while you play.
+- Music keeps going to the next song while Pulse is minimized or behind a full-screen game.
+- Downloaded songs start without waiting, and big libraries and playlists sort faster.
+- Every song has a **more options** button.
+
+**Imports**
+- Imports can't freeze partway, and songs with names like "İrem" keep their titles and credits.
+
+**Accounts**
+- Signing up asks for your birthday: Pulse accounts are for people 13 and older. Your birthday isn't stored.
+
+Thanks to Lachlan for a big part of this update.
+
 ## Pulse 1.2.7
 <!-- x: quiet -->
 

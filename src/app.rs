@@ -418,6 +418,8 @@ pub struct Saved {
     pub artists_picked: bool,
     /// The first-launch intro played; later launches say "Welcome back".
     pub intro_seen: bool,
+    /// First-time setup was finished (or wasn't needed: Pulse was in use before it existed).
+    pub setup_done: bool,
     /// Artist pages found by name for songs that didn't know them (name → Deezer artist id).
     pub artist_ids: HashMap<String, String>,
     /// What you searched for lately, newest first.
@@ -471,6 +473,7 @@ impl Default for Saved {
             followed_artists: vec![],
             artists_picked: false,
             intro_seen: false,
+            setup_done: false,
             artist_ids: HashMap::new(),
             recent_searches: vec![],
             last_queue: vec![],
@@ -638,6 +641,8 @@ pub struct AccountDialog {
     pub email: String,
     /// The code from a password-reset email.
     pub code: String,
+    /// SignUp: the birthday as typed (accounts are for 13 and older).
+    pub birthday: String,
     pub error: Option<String>,
     /// A message that isn't an error (the code was sent).
     pub note: Option<String>,
@@ -664,6 +669,7 @@ impl AccountDialog {
             bio: String::new(),
             email: String::new(),
             code: String::new(),
+            birthday: String::new(),
             error: None,
             note: None,
             required: false,
@@ -873,6 +879,8 @@ pub struct App {
     cache_used: HashMap<String, Instant>,
     /// Size of the cache folders, measured when Settings opens.
     pub cache_size: Option<u64>,
+    /// When to hand unused memory back to Windows, after a mode that saves memory went on.
+    trim_memory_at: Option<Instant>,
     /// The song last given to the audio engine as "next" (None = not told yet).
     told_next: Option<Option<String>>,
 
@@ -904,8 +912,13 @@ pub struct App {
     pub profile_editing: Option<crate::ui::ProfileForm>,
     /// The first-launch intro, or "Welcome back", while it shows.
     pub intro: Option<crate::ui::intro::Intro>,
+    /// Artist pages that are a small copy of another (Deezer lists some artists twice):
+    /// copy's Deezer id → main page's. Opening the copy opens the main page.
+    pub artist_alias: HashMap<String, String>,
     /// "Pick artists you like", while it's open.
     pub picker: Option<crate::ui::pick_artists::Picker>,
+    /// First-time setup, while it's open (the first time Pulse opens on a computer).
+    pub setup: Option<crate::ui::setup::Setup>,
 
     // YouTube view counts
     views_queue: std::collections::VecDeque<Track>,
@@ -1002,6 +1015,7 @@ impl App {
             credits: None,
             credits_rx: None,
             cache_size: None,
+            trim_memory_at: None,
             highlight: None,
             backdrop: Default::default(),
             swept_at: 0.0,
@@ -1064,7 +1078,9 @@ impl App {
             views_rx,
             genre_rx: None,
             intro: None,
+            artist_alias: HashMap::new(),
             picker: None,
+            setup: None,
             genre_failed: HashSet::new(),
             startup_note: None,
             genre_pending: HashSet::new(),
@@ -1112,8 +1128,20 @@ impl App {
         }
         app.apply_theme(&cc.egui_ctx);
         app.startup_note = load_note;
+        // The first time Pulse opens on a computer: first-time setup, then the intro.
+        // Anyone who used Pulse before setup existed doesn't get it.
+        let fresh = !app.saved.intro_seen && app.saved.profile.created == 0 && app.saved.followed_artists.is_empty();
+        if !app.saved.setup_done && fresh {
+            app.setup = Some(crate::ui::setup::Setup::new());
+            // Setup covers the account and "Pick artists you like" windows.
+            app.saved.account_asked = true;
+            app.saved.artists_picked = true;
+            app.saved.profile.skipped = true;
+        } else {
+            app.saved.setup_done = true;
+        }
         // The intro every time Pulse opens, followed by "Welcome back" after the first time.
-        {
+        if app.setup.is_none() {
             let name = match crate::account::session() {
                 Some(s) => format!("@{}", s.username),
                 None => app.saved.profile.name.trim().to_string(),
@@ -1127,7 +1155,9 @@ impl App {
         }
         // The first time Pulse opens (and once after updating): offer an account. The local
         // profile window comes after, if you choose "Not now".
-        if crate::account::available() && crate::account::session().is_none() && !app.saved.account_asked {
+        if app.setup.is_some() {
+            // First-time setup asks about the account itself.
+        } else if crate::account::available() && crate::account::session().is_none() && !app.saved.account_asked {
             app.saved.account_asked = true;
             let mut d = AccountDialog::new(AccountMode::SignUp);
             d.welcome = true;
@@ -1263,6 +1293,7 @@ impl App {
         // Your own public profile is part of your profile page (one page, not two).
         let route = match route {
             Route::User(name) if crate::account::session().is_some_and(|s| s.username == name) => Route::Profile,
+            Route::Artist(id) if self.artist_alias.contains_key(&id) => Route::Artist(self.artist_alias[&id].clone()),
             r => r,
         };
         if route == self.route {
@@ -1593,6 +1624,7 @@ impl App {
             }
         }
 
+        self.follow_artist_alias(ctx);
         if let Some(id) = self.audio.take_advanced() {
             self.advanced_to(&id, ctx);
         }
@@ -1655,6 +1687,19 @@ impl App {
         {
             self.toast = None;
         }
+    }
+
+    /// The artist page just loaded is a small copy of another (see `deezer::main_copy`):
+    /// show the main page in its place. The copy isn't kept in the history, so Back goes to
+    /// where you came from, not to the copy (which would open the main page again).
+    fn follow_artist_alias(&mut self, ctx: &egui::Context) {
+        let Route::Artist(id) = &self.route else { return };
+        let Some(Remote::Ready(page)) = self.cache.get(&format!("artist:{id}")) else { return };
+        let Page::Artist(p) = page.as_ref() else { return };
+        let Some(main) = p.same_as.clone().filter(|m| m != id) else { return };
+        self.artist_alias.insert(id.clone(), main.clone());
+        self.route = Route::Artist(main);
+        self.ensure_loaded(ctx);
     }
 
     pub fn submit_search(&mut self, ctx: &egui::Context) {
@@ -2140,12 +2185,27 @@ impl App {
         self.apply_settings(&before, ctx);
     }
 
+    /// Gaming Mode or Ultra-low went on: let go of memory Pulse can do without. Loaded
+    /// pictures are dropped (they load again, from the disk cache, when shown) and old pages
+    /// are trimmed; then Windows gets the unused memory back. The music isn't touched: the
+    /// song playing, its buffer and the next songs' audio stay as they are.
+    fn free_memory(&mut self, ctx: &egui::Context) {
+        ctx.forget_all_images();
+        self.trim_page_cache();
+        // A moment later, once the pictures' graphics memory has gone too.
+        self.trim_memory_at = Some(Instant::now() + Duration::from_millis(1500));
+        ctx.request_repaint_after(Duration::from_millis(1600));
+    }
+
     /// Puts changed settings into effect. `before` is how they were.
     pub fn apply_settings(&mut self, before: &crate::settings::Settings, ctx: &egui::Context) {
         let s = self.saved.settings.clone();
         crate::i18n::set_language(s.language);
         crate::deezer::set_prefer_explicit(s.explicit);
         self.apply_perf(ctx);
+        if s.perf_mode.level() > before.perf_mode.level() {
+            self.free_memory(ctx);
+        }
         if s.perf_mode != before.perf_mode {
             let msg = match s.perf_mode {
                 crate::perf::Mode::Normal => "Gaming Mode off",
@@ -2606,7 +2666,10 @@ impl App {
                     }
                 })
             };
-            let r = crate::import::run(&url, &p, &c);
+            // A failure inside the import ends it with a message instead of leaving it
+            // stuck partway forever.
+            let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| crate::import::run(&url, &p, &c)))
+                .unwrap_or_else(|_| Err("The import hit a problem partway through. Please try again; if it keeps happening, send a bug report.".into()));
             let _ = tx.send(r);
             c.store(true, std::sync::atomic::Ordering::Relaxed);
             let _ = ticker.join();
@@ -2626,8 +2689,10 @@ impl App {
         let Some(job) = &self.import_running else {
             return;
         };
-        let Ok(result) = job.rx.try_recv() else {
-            return;
+        let result = match job.rx.try_recv() {
+            Ok(r) => r,
+            Err(std::sync::mpsc::TryRecvError::Empty) => return,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => Err("The import stopped unexpectedly. Please try again.".into()),
         };
         self.import_running = None;
         match result {
@@ -2836,7 +2901,7 @@ impl App {
         }
     }
 
-    fn account_done(&mut self, done: AccountDone, ctx: &egui::Context) {
+    pub(crate) fn account_done(&mut self, done: AccountDone, ctx: &egui::Context) {
         use crate::i18n::tr;
         match done {
             AccountDone::Checked(s) => {
@@ -3633,14 +3698,35 @@ impl App {
 }
 
 impl eframe::App for App {
+    /// Everything that isn't drawing: moving on to the next song, autoplay, downloads,
+    /// update checks, Discord, saving. eframe calls this before every `ui`, and also while
+    /// the window is minimized or hidden behind a full-screen game, when it doesn't call
+    /// `ui` at all. Keeping this work in `ui` stopped the music at the end of the song.
+    fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        if self.trim_memory_at.is_some_and(|t| Instant::now() >= t) {
+            self.trim_memory_at = None;
+            crate::perf::give_back_memory();
+        }
+        self.updates(ctx);
+        self.discord_status(ctx);
+        self.tick(ctx);
+        if let Some(note) = self.startup_note.take() {
+            self.toast(crate::i18n::tr(&note), ctx);
+        }
+        if std::mem::take(&mut self.save_now)
+            && let Some(storage) = frame.storage_mut()
+        {
+            App::save(self, storage);
+            storage.flush();
+        }
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         if self.diag.gpu.is_none() {
             self.diag.gpu = Some(crate::diag::gpu(frame));
             crate::perf::set_software(crate::diag::software(frame));
         }
-        self.updates(&ctx);
-        self.discord_status(&ctx);
         // The title bar in the theme's colours (Windows draws it white otherwise).
         crate::titlebar::match_theme(frame, &ctx);
         // Developer check: PULSE_DEBUG_REPAINT=1 prints what asked for each redraw.
@@ -3648,15 +3734,12 @@ impl eframe::App for App {
         if *DEBUG_REPAINT.get_or_init(|| std::env::var_os("PULSE_DEBUG_REPAINT").is_some()) {
             eprintln!("frame {} causes {:?}", ctx.cumulative_frame_nr(), ctx.repaint_causes());
         }
-        self.tick(&ctx);
-        if let Some(note) = self.startup_note.take() {
-            self.toast(crate::i18n::tr(&note), &ctx);
-        }
         // Minimized: nothing to draw (the music and the mini player carry on).
         if !ctx.input(|i| i.viewport().minimized.unwrap_or(false)) {
             crate::ui::draw(self, ui);
         }
         crate::ui::mini::show(self, &ctx);
+        // Clicking in the window can ask for a save too.
         if std::mem::take(&mut self.save_now)
             && let Some(storage) = frame.storage_mut()
         {

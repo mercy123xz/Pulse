@@ -206,6 +206,50 @@ env.DB.raw.exec("INSERT INTO song_fixes (id, duration, video, note) VALUES ('dz:
 r = await call("GET", "/fixes?ids=dz:1,dz:2,dz:3,dz:4,bad id,dz:1");
 ok(r.status === 200 && r.data.fixes["dz:1"].duration === 227 && r.data.fixes["dz:2"].video === "abcDEF12345" && !r.data.fixes["dz:3"] && !r.data.fixes["dz:4"], "song fixes");
 r = await call("GET", "/fixes"); ok(r.status === 200 && Object.keys(r.data.fixes).length === 0, "no ids, no fixes");
+// artist pages: hand-made fixes, and the same artist on TIDAL
+{
+  env.DB.raw.exec("INSERT INTO artist_fixes (artist, item, action, note) VALUES ('111', 'track:5', 'add', 'x'), ('111', 'album:6', 'hide', 'x'), ('111', 'bad', 'add', 'x'), ('222', '*', 'notidal', 'x')");
+  r = await call("GET", "/artist-extra?artist=111&name=che&t=Matches");
+  ok(r.status === 200 && r.data.add.join() === "track:5" && r.data.hide.join() === "album:6" && r.data.tidal === null, "artist fixes, without TIDAL set up");
+  r = await call("GET", "/artist-extra?artist=abc"); ok(r.status === 400, "artist must be a Deezer number");
+  // A TIDAL with two artists called "che": one shares titles with the Deezer page.
+  env.TIDAL_CLIENT_ID = "id"; env.TIDAL_CLIENT_SECRET = "secret";
+  const realFetch = globalThis.fetch;
+  let calls = 0;
+  const art = (id, name) => ({ id, type: "artists", attributes: { name } });
+  const tracksOf = { t1: [["Matches (feat. Tezzus)", "USAAA2600001"], ["Gourmet", "USAAA2600002"], ["KickAss (Pull Up Pls)", "USAAA2600003"]], t2: [["Some Polka", "DEBBB9900001"]] };
+  const albumsOf = { t1: [["RichPhønks", "198000000001"], ["KickAss (Pull Up Pls)", "198000000002"]], t2: [["Polka Hits", "400000000001"]] };
+  globalThis.fetch = async (url) => {
+    const u = String(url); calls++;
+    const json = (o) => new Response(JSON.stringify(o));
+    if (u.includes("auth.tidal.com")) return json({ access_token: "tok", expires_in: 3600 });
+    if (u.includes("/searchResults")) return json({ data: [{ relationships: { artists: { data: [{ id: "t2" }, { id: "t1" }, { id: "t3" }] } } }], included: [art("t1", "che"), art("t2", "Che"), art("t3", "Cheeky")] });
+    const m = u.match(/\/artists\/(\w+)\/relationships\/(tracks|albums)/);
+    if (m) {
+      // Two items a page, with a link to the next page, like TIDAL.
+      const all = (m[2] === "tracks" ? tracksOf : albumsOf)[m[1]] || [];
+      const from = +(u.match(/page\[cursor\]=(\d+)/)?.[1] || 0);
+      const list = all.slice(from, from + 2);
+      const next = from + 2 < all.length ? `/artists/${m[1]}/relationships/${m[2]}?countryCode=US&include=${m[2]}&page[cursor]=${from + 2}` : undefined;
+      return json({ data: list.map((_, i) => ({ id: `${m[1]}${m[2]}${from + i}` })), included: list.map(([title, code], i) => ({ id: `${m[1]}${m[2]}${from + i}`, type: m[2], attributes: m[2] === "tracks" ? { title, isrc: code } : { title, barcodeId: code } })), links: { next } });
+    }
+    return new Response("{}", { status: 404 });
+  };
+  r = await call("GET", "/artist-extra?artist=333&name=che&t=" + encodeURIComponent("KickAss (Pull Up Pls)|Something Else"));
+  ok(r.status === 200 && r.data.tidal === "t1" && r.data.tracks.map((t) => t.isrc).includes("USAAA2600001") && r.data.albums.some((a) => a.upc === "198000000001"), "picks the che who shares titles, and returns their songs and releases");
+  ok(!r.data.tracks.some((t) => t.isrc.startsWith("DE")), "never the namesake's songs");
+  ok(r.data.tracks.some((t) => t.isrc === "USAAA2600003") && r.data.albums.length === 2, "follows TIDAL's next pages");
+  r = await call("GET", "/artist-extra?artist=444&name=che&t=Nothing%20In%20Common");
+  ok(r.status === 200 && r.data.tidal === null && r.data.tracks.length === 0 && /none shares a title/.test(r.data.why), "no shared titles: nothing added, and says why");
+  const before = calls;
+  r = await call("GET", "/artist-extra?artist=222&name=che&t=Matches");
+  ok(r.data.tidal === null && calls === before, "notidal skips the TIDAL check");
+  globalThis.fetch = async () => new Response("down", { status: 500 });
+  r = await call("GET", "/artist-extra?artist=555&name=che&t=Matches");
+  ok(r.status === 200 && r.data.tidal === null, "TIDAL down: the page still works");
+  globalThis.fetch = realFetch;
+  delete env.TIDAL_CLIENT_ID; delete env.TIDAL_CLIENT_SECRET;
+}
 // junk
 r = await worker.fetch(new Request("https://acc.example/signup", { method: "POST", body: "{nope" }), env); ok(r.status === 400, "bad json");
 r = await call("GET", "/nothing"); ok(r.status === 404, "404");

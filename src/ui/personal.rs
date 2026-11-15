@@ -192,7 +192,8 @@ fn quick_tile(ui: &mut Ui, w: f32, art: Option<&str>, glyph: &str, title: &str, 
     let (rect, resp) = ui.allocate_exact_size(vec2(w, 56.0), Sense::click());
     a11y(ui, &resp, egui::WidgetType::Button, || title.to_owned());
     focus_ring(ui, &resp);
-    let hovered = resp.hovered();
+    // Pointing at the play button on top still counts (see `widgets::card`).
+    let hovered = resp.hovered() || ui.rect_contains_pointer(rect);
     let fill = if hovered { pal().surface_active } else { pal().surface_hover };
     ui.painter().rect_filled(rect, r_md(), fill);
     let art_rect = Rect::from_min_size(rect.min, Vec2::splat(56.0));
@@ -216,7 +217,7 @@ fn quick_tile(ui: &mut Ui, w: f32, art: Option<&str>, glyph: &str, title: &str, 
     let t = ui.ctx().animate_bool(id.with("hover"), hovered);
     if t > 0.0 {
         let c = pos2(rect.right() - 26.0, rect.center().y);
-        let b = ui.interact(Rect::from_center_size(c, Vec2::splat(36.0)), id.with("play"), Sense::click());
+        let b = ui.interact(Rect::from_center_size(c, Vec2::splat(36.0)), id.with("play"), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
         a11y(ui, &b, egui::WidgetType::Button, || format!("Play {title}"));
         let pb = &parts().play_button;
         ui.painter().circle_filled(c, 17.0, pb.fill.unwrap_or(pal().accent).gamma_multiply(t));

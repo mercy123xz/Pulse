@@ -135,3 +135,30 @@ INSERT OR REPLACE INTO song_fixes (id, duration, video, note) VALUES ('dz:123', 
 
 A song's id is its Deezer number with `dz:` in front (deezer.com/track/3892384211 → `dz:3892384211`). The live match test (`Match test` in Actions)
 prints the rows for every clip-only song it finds.
+
+## Artist fixes
+
+Deezer sometimes files an artist's songs under a different artist with the same name (the
+real "che" and a pile of other "Che"s). Artist pages fix most of this by themselves:
+`GET /artist-extra` finds the same artist on TIDAL (the one whose songs share titles with
+the Deezer page) and returns their songs and releases, which the app adds to the page if
+Deezer filed them elsewhere. That part is cached for a day.
+
+For anything it gets wrong, `artist_fixes` lists songs and releases to add to or hide from
+an artist page. Run `add-artist-fixes.sql` once to make the table, then add fixes in
+Cloudflare (D1 → pulse-accounts → Console):
+
+```sql
+-- Show a song on an artist's page (deezer.com/artist/123456, deezer.com/track/3135556).
+INSERT OR REPLACE INTO artist_fixes (artist, item, action, note) VALUES ('123456', 'track:3135556', 'add', 'Matches: filed under the other Che');
+-- Show a release (deezer.com/album/987654).
+INSERT OR REPLACE INTO artist_fixes (artist, item, action, note) VALUES ('123456', 'album:987654', 'add', 'RichPhonks');
+-- Hide a song or release from an artist's page.
+INSERT OR REPLACE INTO artist_fixes (artist, item, action, note) VALUES ('555555', 'track:3135556', 'hide', 'not this Che');
+-- Turn the TIDAL check off for one artist.
+INSERT OR REPLACE INTO artist_fixes (artist, item, action, note) VALUES ('123456', '*', 'notidal', 'TIDAL mixes them up too');
+```
+
+Fixes show up the next time the artist page is opened (the app keeps an open page for a while;
+restarting Pulse is the sure way). Removing a row undoes it:
+`DELETE FROM artist_fixes WHERE artist = '123456' AND item = 'track:3135556';`

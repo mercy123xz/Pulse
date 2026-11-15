@@ -24,3 +24,12 @@ CREATE TABLE IF NOT EXISTS avatars (
   data TEXT NOT NULL,
   updated INTEGER NOT NULL
 );
+
+-- Artist pages Deezer gets wrong, fixed by hand (see README: "Artist fixes").
+CREATE TABLE IF NOT EXISTS artist_fixes (
+  artist TEXT NOT NULL,      -- the Deezer artist number, e.g. "123456" (deezer.com/artist/123456)
+  item TEXT NOT NULL,        -- "track:<Deezer number>" or "album:<Deezer number>" ("*" for notidal)
+  action TEXT NOT NULL,      -- "add" (show it on this artist), "hide" (don't), or "notidal"
+  note TEXT,                 -- why, for you
+  PRIMARY KEY (artist, item)
+);
