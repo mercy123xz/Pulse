@@ -945,23 +945,79 @@ fn clear_match(track: &Track, e: &SearchEntry) -> bool {
     topic && (s >= 95 || (e.duration.is_none() && s >= 55))
 }
 
+/// Whether a video's title names the song at all ("Enter Sandman" in "Metallica - Enter
+/// Sandman (Official Music Video)"). Extras after the song's name ("(Remastered 2021)",
+/// " - Live") don't need to be in it. True when there's nothing to compare.
+pub fn names_the_song(track: &Track, video_title: &str) -> bool {
+    let title = core_title(&track.title);
+    let name = title.split(['(', '[']).next().unwrap_or_default().split(" - ").next().unwrap_or_default();
+    let want = norm(name);
+    want.is_empty() || video_title.trim().is_empty() || norm(video_title).contains(&want)
+}
+
+/// Whether `channel` is the song's own artist's: their channel ("Tyla", "AC/DC",
+/// "TaylorSwiftVEVO") or their album audio ("Tyla - Topic"). Re-upload channels ("Minimal
+/// Sounds", "7clouds R&B", "Clean That Ish!") aren't: they post lyric videos, clean
+/// edits, sped-up, slowed and other versions. True for a song with no artist named.
+pub fn artists_own(track: &Track, channel: &str) -> bool {
+    let lower = channel.trim().to_lowercase();
+    let name = norm(lower.strip_suffix(" - topic").unwrap_or(&lower));
+    let artists: Vec<String> = std::iter::once(&track.artist).chain(track.featured.iter()).map(|a| norm(&a.name)).filter(|a| !a.is_empty()).collect();
+    artists.is_empty() || (!name.is_empty() && artists.iter().any(|a| name.contains(a.as_str()) || (name.len() >= 4 && a.contains(&name))))
+}
+
+/// A recording other than the song's album audio, by its video's title: the versions
+/// Pulse never picks (`UNWANTED`: live, cover, sped up…), and the artist's own music
+/// videos (often an intro, skits or another edit), sessions and performances. Lyric videos
+/// and visualizers carry the album audio, so they're fine. Not when the song's own title
+/// says it ("Song (Acoustic)").
+pub fn other_recording(track: &Track, video_title: &str) -> bool {
+    const EDITS: [&str; 9] = ["official video", "music video", "official mv", "dance practice", "performance", "session", "songline", "acoustic", "unplugged"];
+    let (video, song) = (words(video_title), words(&track.title));
+    unwanted_version(&track.title, video_title) || EDITS.iter().any(|m| video.contains(&format!(" {m} ")) && !song.contains(&format!(" {m} ")))
+}
+
+/// Only a video that is certainly the song: the artist's own upload of its album audio,
+/// named after it and the right length. Enough to play it later without searching. (A
+/// view count can come from a looser match: a wrong count is harmless, a wrong video isn't.)
+pub fn sure_match(track: &Track, e: &SearchEntry) -> bool {
+    let right_length = track.duration >= 60 && e.duration.is_some_and(|d| (d - track.duration as f64).abs() <= 8.0);
+    let channel = e.channel.as_deref().or(e.uploader.as_deref()).unwrap_or("");
+    right_length
+        && artists_own(track, channel)
+        && !norm(&core_title(&track.title)).is_empty()
+        && names_the_song(track, &e.title)
+        && !other_recording(track, &e.title)
+        && score(track, e) >= 60
+}
+
 /// True once yt-dlp is installed (view counts don't start the first-time setup).
 pub fn tools_ready() -> bool {
     let dir = tools_dir();
     dir.join(YTDLP.save_as).is_file() && dir.join(DENO.save_as).is_file()
 }
 
-/// The YouTube video Pulse would play for `track`, and its view count. A direct search, so
-/// a page full of songs no longer starts a yt-dlp for each one (they used to run three at
-/// a time for a minute or more, slowing the song you'd just pressed).
-pub fn views(track: &Track) -> Result<Option<(String, u64)>, String> {
+/// The song's YouTube view count, and its video when that's certainly the song (see
+/// `sure_match`; only then may playing it skip the search). A direct search, so a page
+/// full of songs no longer starts a yt-dlp for each one.
+pub fn views(track: &Track) -> Result<Option<(Option<String>, u64)>, String> {
     if !tools_ready() {
         return Ok(None);
     }
     let tools = installed_tools();
     let [_, plain] = queries(track);
     let entries = web_search(Some(&tools), &plain, 6)?;
-    Ok(rank(track, &entries).into_iter().find_map(|e| e.view_count.map(|v| (e.id.clone(), v))))
+    Ok(views_in(track, &entries))
+}
+
+/// The count from the best match with one, and its video if that's surely the song.
+fn views_in(track: &Track, entries: &[SearchEntry]) -> Option<(Option<String>, u64)> {
+    let ranked = rank(track, entries);
+    let sure = ranked.iter().find(|e| e.view_count.is_some() && sure_match(track, e));
+    match sure {
+        Some(e) => Some((Some(e.id.clone()), e.view_count?)),
+        None => ranked.iter().find_map(|e| e.view_count.map(|v| (None, v))),
+    }
 }
 
 /// The videos in a YouTube (or YouTube Music) playlist: its title and entries.
@@ -1288,8 +1344,32 @@ fn link_args(tools: &Tools, quality: Quality) -> Vec<String> {
     args
 }
 
+/// What yt-dlp says a video is.
+#[derive(Deserialize, Default, Debug)]
+#[serde(default)]
+struct About {
+    title: String,
+    channel: String,
+    uploader: String,
+}
+
+impl About {
+    /// Whether a video Pulse remembered for `track` may not be its own audio: its title
+    /// doesn't name the song or names another recording (a music video, a live session),
+    /// or someone other than the artist uploaded it (see `views`).
+    fn doubtful_for(&self, track: &Track) -> bool {
+        let channel = if self.channel.is_empty() { &self.uploader } else { &self.channel };
+        !names_the_song(track, &self.title) || other_recording(track, &self.title) || (!channel.trim().is_empty() && !artists_own(track, channel))
+    }
+}
+
 /// Asks yt-dlp for the direct audio link of a YouTube video.
 pub fn audio_source(tools: &Tools, video_id: &str, quality: Quality) -> Result<StreamSource, String> {
+    audio_source_about(tools, video_id, quality).map(|(src, _)| src)
+}
+
+/// `audio_source`, plus what the video is (to check a remembered video is the song's).
+fn audio_source_about(tools: &Tools, video_id: &str, quality: Quality) -> Result<(StreamSource, About), String> {
     let args = link_args(tools, quality);
     let url = format!("https://www.youtube.com/watch?v={video_id}");
     let t = Instant::now();
@@ -1310,9 +1390,11 @@ pub fn audio_source(tools: &Tools, video_id: &str, quality: Quality) -> Result<S
         }
     };
     crate::audio::trace(&format!("yt-dlp: audio link for {video_id}: {} in {} ms", if out.is_ok() { "ok" } else { "failed" }, t.elapsed().as_millis()));
-    let src = source_from_info(&out?)?;
+    let out = out?;
+    let src = source_from_info(&out)?;
+    let about = serde_json::from_str::<About>(&out).unwrap_or_default();
     experiment_after(tools, video_id, quality);
-    Ok(src)
+    Ok((src, about))
 }
 
 /// Everything needed to play `track` from YouTube. `known_video` skips the search
@@ -1320,15 +1402,30 @@ pub fn audio_source(tools: &Tools, video_id: &str, quality: Quality) -> Result<S
 pub fn resolve(track: &Track, known_video: Option<String>, quality: Quality, status: &dyn Fn(&str)) -> Result<(StreamSource, String), String> {
     let tools = ensure_tools(status)?;
     let attempt = |status: &dyn Fn(&str)| -> Result<(StreamSource, String), String> {
+        // A remembered video that may not be the song's own audio (Pulse 1.4 and older
+        // remembered a re-upload, lyric video or clean edit from view-count lookups): played
+        // only if the search picks it too, or finds nothing better.
+        let mut doubtful = None;
         if let Some(id) = &known_video {
             status("Loading audio…");
-            if let Ok(src) = audio_source(&tools, id, quality) {
-                return Ok((src, id.clone()));
+            match audio_source_about(&tools, id, quality) {
+                Ok((src, about)) if !about.doubtful_for(track) => return Ok((src, id.clone())),
+                Ok((src, about)) => {
+                    crate::audio::trace(&format!("link: remembered video {id} (\"{}\" by {}) may not be the song's own audio, searching", about.title, about.channel));
+                    doubtful = Some((src, id.clone()));
+                }
+                // The saved video may be gone: search again.
+                Err(_) => {}
             }
-            // The saved video may be gone: search again.
         }
         status("Finding song on YouTube…");
-        let ids = find_videos(&tools, track)?;
+        let ids = match find_videos(&tools, track) {
+            Ok(ids) => ids,
+            Err(e) => return doubtful.ok_or(e),
+        };
+        if ids.first().is_some_and(|best| doubtful.as_ref().is_some_and(|(_, id)| id == best)) {
+            return Ok(doubtful.unwrap());
+        }
         status("Loading audio…");
         // If the best video won't play (removed, age-gated, region-locked), try the next ones.
         let mut first_error = None;
@@ -1340,7 +1437,7 @@ pub fn resolve(track: &Track, known_video: Option<String>, quality: Quality, sta
                 }
             }
         }
-        Err(first_error.unwrap_or_else(|| "Couldn't find this song on YouTube.".into()))
+        doubtful.ok_or_else(|| first_error.unwrap_or_else(|| "Couldn't find this song on YouTube.".into()))
     };
     match attempt(status) {
         Ok(v) => Ok(v),
@@ -1386,6 +1483,123 @@ mod tests {
 
     fn entry(id: &str, title: &str, secs: f64, channel: &str) -> SearchEntry {
         SearchEntry { id: id.into(), title: title.into(), duration: Some(secs), channel: Some(channel.into()), ..Default::default() }
+    }
+
+    /// The bug: a page's view-count lookup remembered another song by the same artist
+    /// (their channel, the same length) as the song's video, and playing the song then
+    /// skipped the search and played that other song.
+    #[test]
+    fn a_view_count_only_remembers_a_video_that_is_surely_the_song() {
+        let t = song("Frank Ocean", "Pink + White", 184);
+        let counted = |id: &str, title: &str, secs: f64, views: u64| SearchEntry { view_count: Some(views), ..entry(id, title, secs, "Frank Ocean") };
+        let other = counted("other", "Frank Ocean - Ivy", 186.0, 9);
+        let right = counted("right", "Frank Ocean - Pink + White", 185.0, 5);
+        let video = counted("video", "Frank Ocean - Pink + White (Official Video)", 200.0, 7);
+        assert!(!rank(&t, std::slice::from_ref(&other)).is_empty(), "the other song does look like a match to the ranking");
+        assert_eq!(views_in(&t, std::slice::from_ref(&other)), Some((None, 9)), "a count, but not its video");
+        assert_eq!(views_in(&t, &[other.clone(), right.clone()]), Some((Some("right".into()), 5)));
+        assert_eq!(views_in(&t, &[video.clone()]), Some((None, 7)), "too long to be sure it's the song");
+        assert_eq!(views_in(&t, &[video, right.clone(), other]), Some((Some("right".into()), 5)));
+        // Found in the 1.4 chart check: re-uploads with the right title and length, often
+        // lyric videos, clean edits or slowed versions. A count, but not their video.
+        for channel in ["Minimal Sounds", "Clean That Ish!", "7clouds R&B", "Underrated Vibes"] {
+            let reupload = SearchEntry { channel: Some(channel.into()), ..counted("reupload", "Frank Ocean - Pink + White", 184.0, 3) };
+            assert_eq!(views_in(&t, &[reupload.clone()]), Some((None, 3)), "{channel}");
+            assert_eq!(views_in(&t, &[reupload, right.clone()]), Some((Some("right".into()), 5)), "{channel}");
+        }
+        let topic = SearchEntry { channel: Some("Frank Ocean - Topic".into()), ..counted("topic", "Pink + White", 184.0, 4) };
+        assert_eq!(views_in(&t, &[topic]), Some((Some("topic".into()), 4)), "the album audio is fine");
+    }
+
+    #[test]
+    fn a_remembered_video_is_doubtful_unless_it_is_the_artists_own_upload_of_the_song() {
+        let t = Track { featured: vec![ArtistRef { name: "Kendrick Lamar".into(), ..Default::default() }], ..song("Jhené Aiko", "So Good", 237) };
+        let about = |title: &str, channel: &str| About { title: title.into(), channel: channel.into(), uploader: String::new() };
+        for (title, channel) in [
+            ("So Good (feat. Kendrick Lamar)", "Jhené Aiko - Topic"),
+            ("Jhené Aiko - So Good feat. Kendrick Lamar (Official Audio)", "Jhené Aiko"),
+            ("So Good", "JheneAikoVEVO"),
+            ("So Good", "Kendrick Lamar"),
+            ("So Good", ""),
+        ] {
+            assert!(!about(title, channel).doubtful_for(&t), "{title} by {channel}");
+        }
+        for (title, channel) in [
+            ("Jhené Aiko - So Good (Lyrics)", "7clouds R&B"),
+            ("Jhené Aiko - Sativa", "Jhené Aiko"),
+            ("So Good (sped up)", "Somber Sounds"),
+            ("Jhené Aiko - So Good (Official Video)", "Jhené Aiko"),
+            ("Jhené Aiko - So Good (Live)", "Jhené Aiko"),
+        ] {
+            assert!(about(title, channel).doubtful_for(&t), "{title} by {channel}");
+        }
+        // The uploader stands in when yt-dlp gives no channel.
+        assert!(About { title: "So Good".into(), channel: String::new(), uploader: "Minimal Sounds".into() }.doubtful_for(&t));
+    }
+
+    /// Live (network and yt-dlp): a song whose remembered video is another song searches
+    /// again and plays its own video; that one, once remembered, plays straight away.
+    /// `PULSE_TOOLS_DIR=<tools> cargo test remembered_video_of_another_song -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn a_remembered_video_of_another_song_is_not_played_live() {
+        let ivy_song = song("Frank Ocean", "Ivy", 249);
+        let pink = song("Frank Ocean", "Pink + White", 184);
+        let ivy = web_search(None, "Frank Ocean - Ivy", 8).unwrap().into_iter().find(|e| names_the_song(&ivy_song, &e.title) && !names_the_song(&pink, &e.title)).expect("Ivy").id;
+        // Another song, then videos 1.4 remembered from view counts in a chart check: a
+        // re-upload, a clean edit (Clean That Ish!) and a re-upload channel's copy.
+        for (artist, title, wrong) in [
+            ("Frank Ocean", "Pink + White", ivy.as_str()),
+            ("Joyce Wrice", "Dangerous", "4H68OPXyik0"),
+            ("Snoh Aalegra", "I Love You", "axSdGKyCenY"),
+            ("Coldplay", "Yellow", "tdVAqxNLXiw"),
+        ] {
+            let t = crate::deezer::find_track(artist, title, 0).unwrap().expect("on Deezer");
+            let started = Instant::now();
+            let (_, video) = resolve(&t, Some(wrong.into()), Quality::Auto, &|_| {}).expect("a link");
+            let searched = started.elapsed().as_secs_f64();
+            let started = Instant::now();
+            let (_, again) = resolve(&t, Some(video.clone()), Quality::Auto, &|_| {}).expect("a link");
+            println!("{artist} - {title}: remembered {wrong}, played {video} ({searched:.2} s); then {again} ({:.2} s)", started.elapsed().as_secs_f64());
+            assert_ne!(video, wrong, "{title}: played the remembered video");
+            assert_eq!(again, video, "{title}: the right video is kept, without searching");
+        }
+    }
+
+    /// Seen in 1.4's remembered videos: a live session, music videos, a dance practice.
+    #[test]
+    fn music_videos_and_sessions_are_other_recordings_lyric_videos_are_not() {
+        let other = |title: &str, video: &str| other_recording(&song("Artist", title, 200), video);
+        assert!(other("stupid song", "Olivia Rodrigo - stupid song (Amazon Music Songline)"));
+        assert!(other("N.E.M.", "Las Aves - N.E.M. [Official Video]"));
+        assert!(other("LEMONADE", "aespa - 'LEMONADE' Dance Practice [MIRRORED]"));
+        assert!(other("Yellow", "Coldplay - Yellow (Live at Glastonbury)"));
+        assert!(other("Housewife", "Tate McRae - Housewife (sped up)"));
+        for (title, video) in [
+            ("Housewife", "Tate McRae - Housewife (Lyric Video)"),
+            ("Housewife", "Tate McRae - Housewife (Official Lyric Video)"),
+            ("oh yeah?", "Steve Lacy - oh yeah? (Visualizer)"),
+            ("Buzzcut Season", "Lorde - Buzzcut Season (Audio)"),
+            ("Heal Tomorrow", "Heal Tomorrow"),
+            ("Song (Acoustic)", "Artist - Song (Acoustic)"),
+        ] {
+            assert!(!other(title, video), "{video}");
+        }
+    }
+
+    #[test]
+    fn a_video_title_names_the_song_or_not() {
+        let names = |artist: &str, title: &str, video: &str| names_the_song(&song(artist, title, 200), video);
+        assert!(names("Metallica", "Enter Sandman (Remastered 2021)", "Metallica - Enter Sandman (Official Music Video)"));
+        assert!(names("Bad Bunny", "DÁKITI", "Bad Bunny x Jhay Cortez - Dákiti (Video Oficial)"));
+        assert!(names("Calvin Harris", "This Is What You Came For (feat. Rihanna)", "Calvin Harris - This Is What You Came For (Official Video) ft. Rihanna"));
+        assert!(names("Frank Ocean", "Pink + White", "Pink + White"));
+        assert!(names("The Beatles", "Let It Be - Remastered 2009", "The Beatles - Let It Be"));
+        assert!(!names("Frank Ocean", "Pink + White", "Frank Ocean - Ivy"));
+        assert!(!names("SZA", "Kill Bill", "SZA - Snooze (Official Video)"));
+        // Nothing to compare: not treated as another song.
+        assert!(names("The Rolling Stones", "(I Can't Get No) Satisfaction", "anything"));
+        assert!(names("SZA", "Kill Bill", ""));
     }
 
     #[test]

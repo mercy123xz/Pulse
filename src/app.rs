@@ -1108,8 +1108,8 @@ pub struct App {
     views_pending: HashSet<String>,
     /// Songs whose lookup found nothing this session (not asked again until restart).
     views_failed: HashSet<String>,
-    views_tx: Sender<(String, Option<(String, u64)>)>,
-    views_rx: Receiver<(String, Option<(String, u64)>)>,
+    views_tx: Sender<(String, Option<(Option<String>, u64)>)>,
+    views_rx: Receiver<(String, Option<(Option<String>, u64)>)>,
     genre_rx: Option<Receiver<(String, Option<Vec<String>>)>>,
     /// Albums whose genres couldn't be looked up this time (offline, Deezer busy).
     genre_failed: HashSet<String>,
@@ -1283,6 +1283,7 @@ impl App {
         crate::single::listen(cc.egui_ctx.clone());
         app.apply_perf(&cc.egui_ctx);
         crate::artcache::set_limit_mb(app.saved.settings.art_cache_mb);
+        crate::audiocache::forget_songs_kept_before_once();
         crate::audiocache::set_limit_mb(app.saved.settings.replay_cache_mb);
         std::thread::spawn(crate::artcache::trim_disk);
         // Signed in with a profile picture your public profile doesn't have yet (made before
@@ -2840,16 +2841,19 @@ impl App {
             }
             if let Some((video, n)) = found {
                 self.saved.views.insert(id.clone(), (n, now_unix()));
-                // Songs without any cover get their video's picture.
-                let thumb = crate::import::youtube_thumb(&video);
-                self.update_track(&id, |t| {
-                    if t.cover_small.is_none() {
-                        t.cover_small = Some(thumb.clone());
-                        t.cover_big = Some(thumb.clone());
-                    }
-                });
-                // Remember the video too, so playing the song skips the search.
-                self.youtube_ids.lock().unwrap().entry(id).or_insert(video);
+                // Only a video that's certainly the song (see `youtube::views`).
+                if let Some(video) = video {
+                    // Songs without any cover get their video's picture.
+                    let thumb = crate::import::youtube_thumb(&video);
+                    self.update_track(&id, |t| {
+                        if t.cover_small.is_none() {
+                            t.cover_small = Some(thumb.clone());
+                            t.cover_big = Some(thumb.clone());
+                        }
+                    });
+                    // Remember the video too, so playing the song skips the search.
+                    self.youtube_ids.lock().unwrap().entry(id).or_insert(video);
+                }
             }
         }
         let running = self.views_pending.len() - self.views_queue.len();

@@ -24,6 +24,22 @@ pub fn dir() -> PathBuf {
     crate::settings::data_dir().join("cache").join("audio")
 }
 
+/// Pulse 1.4 and older could play (and keep) someone's re-upload, a clean edit or even
+/// another song for a song (see `youtube::views`). Songs kept before that was fixed are
+/// let go once, so each one plays from its own audio again. Runs once per data folder.
+pub fn forget_songs_kept_before_once() {
+    let marker = crate::settings::data_dir().join("cache").join("kept-songs-checked");
+    if marker.exists() {
+        return;
+    }
+    let _ = std::fs::remove_dir_all(dir());
+    if let Some(folder) = marker.parent()
+        && std::fs::create_dir_all(folder).is_ok()
+    {
+        let _ = std::fs::write(&marker, b"");
+    }
+}
+
 /// Where song `id`'s audio is kept ("dz:123" → "dz_123.m4a").
 pub fn path_for(id: &str, ext: &str) -> PathBuf {
     path_in(&dir(), id, ext)
