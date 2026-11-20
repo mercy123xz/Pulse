@@ -47,6 +47,18 @@ pub fn file_uri(path: &std::path::Path) -> String {
     format!("file:///{}", p.trim_start_matches('/'))
 }
 
+/// Opens a folder in the file manager. (A file:// link goes to the web browser on Windows,
+/// which doesn't open folders.)
+pub fn open_folder(ctx: &egui::Context, dir: &std::path::Path) {
+    #[cfg(windows)]
+    {
+        let _ = ctx;
+        let _ = std::process::Command::new("explorer").arg(dir).spawn();
+    }
+    #[cfg(not(windows))]
+    ctx.open_url(egui::OpenUrl::new_tab(format!("file://{}", dir.display())));
+}
+
 /// Where downloaded songs go unless the user picks another folder.
 pub fn default_offline_dir() -> PathBuf {
     data_dir().join("offline")

@@ -114,7 +114,7 @@ pub fn diagnostics_page(app: &mut App, ui: &mut Ui) {
     ui.add_space(10.0);
     ui.horizontal_wrapped(|ui| {
         if ghost_button(ui, icon::FOLDER_OPEN, "Open data folder").clicked() {
-            ctx.open_url(egui::OpenUrl::new_tab(crate::settings::file_uri(&crate::settings::data_dir())));
+            crate::settings::open_folder(&ctx, &crate::settings::data_dir());
         }
         ui.label(RichText::new(tr("Clear the cache from Settings › Storage.")).font(regular(12.5)).color(pal().text_faint));
     });
@@ -142,7 +142,7 @@ pub fn diagnostics_page(app: &mut App, ui: &mut Ui) {
         };
         ui.label(RichText::new(text).color(pal().text_muted));
         if reports > 0 && ghost_button(ui, icon::FOLDER_OPEN, "Open folder").clicked() {
-            ctx.open_url(egui::OpenUrl::new_tab(crate::settings::file_uri(&crate::crash::dir())));
+            crate::settings::open_folder(&ctx, &crate::crash::dir());
         }
     });
     ui.add_space(30.0);

@@ -414,7 +414,7 @@ fn your_data_section(app: &mut App, ui: &mut Ui, ctx: &egui::Context) {
         }
         if ghost_button(ui, icon::FOLDER_OPEN, "Open folder").clicked() {
             let _ = std::fs::create_dir_all(crate::backup::dir());
-            ctx.open_url(egui::OpenUrl::new_tab(crate::settings::file_uri(&crate::backup::dir())));
+            crate::settings::open_folder(ctx, &crate::backup::dir());
         }
     });
     // The backups, read in the background when Settings opens (and after making one).
@@ -535,11 +535,11 @@ fn themes_section(app: &mut App, ui: &mut Ui) {
     row(ui, tr("Theme files"), &format!("{} {}", tr("Add your own themes here. Pulse reloads a theme as soon as you save it:"), dir.display()), |ui| {
         if ui.button(tr("Open themes folder")).clicked() {
             let _ = std::fs::create_dir_all(&dir);
-            open_folder(ui.ctx(), &dir);
+            crate::settings::open_folder(ui.ctx(), &dir);
         }
         if t.builtin && ui.button(tr("Make a copy")).on_hover_text(tr("Copies this theme into the themes folder so you can edit it.")).clicked() {
             match crate::themes::copy_builtin(&t.name) {
-                Ok(copy) => open_folder(ui.ctx(), &copy),
+                Ok(copy) => crate::settings::open_folder(ui.ctx(), &copy),
                 Err(e) => {
                     ui.ctx().copy_text(e);
                 }
@@ -583,16 +583,6 @@ pub(crate) fn swatch(ui: &Ui, r: Rect, p: &crate::theme::Palette) {
     painter.rect_filled(Rect::from_min_size(row.min + vec2(4.0, 4.5), vec2(row.width() * 0.6, 5.0)), CornerRadius::same(2), p.text);
     painter.rect_filled(Rect::from_min_size(pos2(row.left() + 4.0, row.bottom() + 8.0), vec2(row.width() * 0.45, 5.0)), CornerRadius::same(2), p.text_muted);
     painter.circle_filled(pos2(r.right() - 16.0, card.bottom() - 6.0), 9.0, p.accent);
-}
-
-fn open_folder(ctx: &egui::Context, dir: &std::path::Path) {
-    #[cfg(windows)]
-    {
-        let _ = ctx;
-        let _ = std::process::Command::new("explorer").arg(dir).spawn();
-    }
-    #[cfg(not(windows))]
-    ctx.open_url(egui::OpenUrl::new_tab(format!("file://{}", dir.display())));
 }
 
 fn section(ui: &mut Ui, title: &str) {
