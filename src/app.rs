@@ -2436,7 +2436,7 @@ impl App {
             crate::settings::set_hardware_acceleration(s.hardware_acceleration);
             self.toast(crate::i18n::tr("Restart Pulse to apply this change."), ctx);
         }
-        if s.stream_quality != before.stream_quality || s.prefer_soundcloud != before.prefer_soundcloud {
+        if s.stream_quality != before.stream_quality {
             // Links found ahead of time were for the old quality.
             self.prefetched.lock().unwrap().clear();
         }
@@ -4008,7 +4008,6 @@ impl eframe::App for App {
     /// `ui` at all. Keeping this work in `ui` stopped the music at the end of the song.
     fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         crate::winstate::track(ctx);
-        crate::soundcloud::set_first(self.saved.settings.prefer_soundcloud);
         if self.trim_memory_at.is_some_and(|t| Instant::now() >= t) {
             self.trim_memory_at = None;
             crate::perf::give_back_memory();

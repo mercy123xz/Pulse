@@ -11,17 +11,6 @@ use crate::youtube::{self, Tools};
 use serde::Deserialize;
 use std::time::Duration;
 
-static FIRST: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
-
-/// The "Prefer SoundCloud" setting, set by the app so the resolver needn't be passed it.
-pub fn set_first(on: bool) {
-    FIRST.store(on, std::sync::atomic::Ordering::Relaxed);
-}
-
-pub fn first() -> bool {
-    FIRST.load(std::sync::atomic::Ordering::Relaxed)
-}
-
 const PREFIX: &str = "sc:";
 const HOME: &str = "https://soundcloud.com/";
 
@@ -114,12 +103,12 @@ pub fn pick<'a>(track: &Track, entries: &'a [Entry]) -> Option<&'a Entry> {
 
 /// Searches for the song: with the artist, with the artist's name run together (how a
 /// SoundCloud account is often named), then the title alone. The first search that has the song wins.
-pub fn find(tools: &Tools, track: &Track, max_queries: usize) -> Option<String> {
+fn find(tools: &Tools, track: &Track) -> Option<String> {
     let title = youtube::core_title(&track.title);
     let artist = track.artist.name.as_str();
     let mut queries = vec![format!("{artist} {title}"), format!("{} {title}", artist.split_whitespace().collect::<String>()), title];
     queries.dedup();
-    for q in queries.into_iter().take(max_queries) {
+    for q in queries {
         match search(tools, &q, 8) {
             Ok(entries) => {
                 if let Some(e) = pick(track, &entries) {
@@ -231,7 +220,7 @@ fn prune(dir: &std::path::Path) {
 
 /// Looks for the song on SoundCloud and opens it. Returns the audio and the id to save.
 pub fn find_and_open(tools: &Tools, track: &Track) -> Result<(StreamSource, String), String> {
-    let url = find(tools, track, 3).ok_or("Couldn't find this song on SoundCloud.")?;
+    let url = find(tools, track).ok_or("Couldn't find this song on SoundCloud.")?;
     let src = open(tools, &url, track)?;
     Ok((src, id_for(&url)))
 }

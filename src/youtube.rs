@@ -1427,23 +1427,9 @@ pub fn resolve(track: &Track, known_video: Option<String>, quality: Quality, sta
             }
             // The saved video may be gone: search again.
         }
-        // With "Prefer SoundCloud" the SoundCloud search runs at the same time as YouTube's,
-        // so a song that isn't on SoundCloud costs no extra waiting.
-        let on_soundcloud = crate::soundcloud::first().then(|| {
-            let (t, tr) = (tools.clone(), track.clone());
-            std::thread::spawn(move || crate::soundcloud::find(&t, &tr, 2))
-        });
-        status("Finding song…");
-        let found = find_videos(&tools, track);
-        if let Some(url) = on_soundcloud.and_then(|h| h.join().ok().flatten()) {
-            status("Loading audio from SoundCloud…");
-            match crate::soundcloud::open(&tools, &url, track) {
-                Ok(src) => return Ok((src, crate::soundcloud::id_for(&url))),
-                Err(e) => crate::audio::trace(&format!("soundcloud: {e}")),
-            }
-        }
+        status("Finding song on YouTube…");
         let from_youtube = || -> Result<(StreamSource, String), String> {
-            let ids = found.clone()?;
+            let ids = find_videos(&tools, track)?;
             status("Loading audio…");
             // If the best video won't play (removed, age-gated, region-locked), try the next ones.
             let mut first_error = None;
@@ -1460,9 +1446,7 @@ pub fn resolve(track: &Track, known_video: Option<String>, quality: Quality, sta
         match from_youtube() {
             // Offline: SoundCloud would only wait and fail too.
             Err(e) if e.starts_with("Couldn't reach") => Err(e),
-            // YouTube has nothing that plays: SoundCloud (unless it was already tried), then
-            // YouTube's own message if that fails too.
-            Err(e) if crate::soundcloud::first() => Err(e),
+            // YouTube has nothing that plays: SoundCloud, then YouTube's own message if that fails too.
             Err(e) => {
                 status("Trying SoundCloud…");
                 crate::soundcloud::find_and_open(&tools, track).map_err(|sc| {
@@ -1737,13 +1721,6 @@ mod tests {
     fn live_soundcloud_wen_we() {
         let tools = Tools { ytdlp: std::env::var("PULSE_YTDLP").unwrap().into(), deno: std::env::var("PULSE_DENO").unwrap().into(), dir: std::env::temp_dir().join("pulse-sc") };
         let t = song("Death To Ricky", "Wen We Fuckin", 153);
-        let t0 = Instant::now();
-        let url = crate::soundcloud::find(&tools, &t, 2).expect("found");
-        let search_ms = t0.elapsed().as_millis();
-        let t1 = Instant::now();
-        let _ = std::fs::remove_dir_all(crate::settings::data_dir().join("cache").join("soundcloud"));
-        crate::soundcloud::open(&tools, &url, &t).expect("opens");
-        println!("TIMING: search {search_ms} ms, download {} ms", t1.elapsed().as_millis());
         let (src, id) = crate::soundcloud::find_and_open(&tools, &t).expect("found on SoundCloud");
         println!("SC id {id}\ncodec {:?} | length {:?} | notice {:?} | file {}", src.codec, src.duration, src.notice, src.url);
         let path = src.url.strip_prefix("file://").unwrap();
