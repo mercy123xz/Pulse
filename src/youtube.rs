@@ -1361,11 +1361,6 @@ fn link_args(tools: &Tools, quality: Quality) -> Vec<String> {
     args
 }
 
-/// Asks yt-dlp for the direct audio link of a YouTube video.
-pub fn audio_source(tools: &Tools, video_id: &str, quality: Quality) -> Result<StreamSource, String> {
-    audio_source_for(tools, video_id, quality, None)
-}
-
 /// Does what yt-dlp found fit the song about to be shown? Different title *and* a different
 /// length means the wrong video (a stale saved link, say): better to look again than to play it.
 pub(crate) fn is_wrong_video(track: &Track, json: &str) -> bool {
@@ -1714,31 +1709,19 @@ mod tests {
     fn live_soundcloud_wen_we() {
         let tools = Tools { ytdlp: std::env::var("PULSE_YTDLP").unwrap().into(), deno: std::env::var("PULSE_DENO").unwrap().into(), dir: std::env::temp_dir().join("pulse-sc") };
         let t = song("Death To Ricky", "Wen We Fuckin", 153);
-        let url = "https://soundcloud.com/deathtoricky/wen-we-fuckn";
-        let mut f = base_args(&tools);
-        f.extend(["-F".into(), url.into()]);
-        println!("FORMATS: {:?}", run(&tools.ytdlp, &f, Duration::from_secs(60)));
-        for sel in ["bestaudio[protocol=https]/bestaudio[protocol=http]", "bestaudio", "http_mp3_128", "bestaudio[ext=mp3]"] {
-            let mut a = base_args(&tools);
-            a.extend(["--no-playlist".into(), "-f".into(), sel.into(), "--print".into(), "%(format_id)s | %(ext)s | %(protocol)s | %(acodec)s | %(filesize)s".into(), url.into()]);
-            println!("SELECTOR {sel}: {:?}", run(&tools.ytdlp, &a, Duration::from_secs(60)));
-        }
         let (src, id) = crate::soundcloud::find_and_open(&tools, &t).expect("found on SoundCloud");
-        println!("SC id {id}\ncodec {:?} | length {:?} | size {:?} | notice {:?}\nurl host {}", src.codec, src.duration, src.content_length, src.notice, src.url.split('/').nth(2).unwrap_or("?"));
-        let (status, head) = {
-            let mut req = crate::net::api().get(&src.url).header("Range", "bytes=0-1023");
-            for (k, v) in &src.headers {
-                req = req.header(k, v);
-            }
-            let mut resp = req.call().expect("audio request");
-            let status = resp.status().as_u16();
-            (status, resp.body_mut().read_to_vec().unwrap_or_default())
-        };
-        println!("range request: HTTP {status}, {} bytes, starts {:02x?}", head.len(), &head[..head.len().min(4)]);
-        assert!(status == 206 || status == 200);
-        assert!(!head.is_empty());
+        println!("SC id {id}\ncodec {:?} | length {:?} | notice {:?} | file {}", src.codec, src.duration, src.notice, src.url);
+        let path = src.url.strip_prefix("file://").unwrap();
+        println!("file size {} bytes", std::fs::metadata(path).unwrap().len());
+        // Decode it the way the player does and measure what comes out.
+        let dec = rodio::Decoder::try_from(std::fs::File::open(path).unwrap()).expect("decoder opens the file");
+        let (ch, rate) = (rodio::Source::channels(&dec).get() as f64, rodio::Source::sample_rate(&dec).get() as f64);
+        let secs = dec.count() as f64 / (ch * rate);
+        println!("decoded {secs:.1} s");
+        assert!((secs - 152.7).abs() < 3.0, "the whole track decodes: {secs:.1} s");
         // Saved id plays again without a search.
         let again = crate::soundcloud::open(&tools, crate::soundcloud::url_of(&id).unwrap(), &t);
+        let again = again.inspect(|s| println!("reopen is {}", if s.url.starts_with("file://") { "from the saved file" } else { "new" }));
         println!("saved id reopens: {}", again.is_ok());
         assert!(again.is_ok());
         // A song that isn't there is not replaced by another.

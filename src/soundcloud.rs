@@ -125,24 +125,97 @@ fn find(tools: &Tools, track: &Track) -> Option<String> {
     None
 }
 
-/// The audio link of one SoundCloud track. Only plain downloadable files: a track that
-/// SoundCloud streams in pieces (HLS) isn't played.
+/// Where downloaded SoundCloud tracks wait (Pulse's temporary files; old ones are cleared).
+fn dir() -> std::path::PathBuf {
+    crate::settings::data_dir().join("cache").join("soundcloud")
+}
+
+/// A file name for a track address.
+fn stem_for(url: &str) -> String {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in url.bytes() {
+        h = (h ^ b as u64).wrapping_mul(0x100_0000_01b3);
+    }
+    format!("sc-{h:016x}")
+}
+
+fn local_source(path: &std::path::Path, duration: Option<f64>) -> Result<StreamSource, String> {
+    let codec = match path.extension().and_then(|e| e.to_str()) {
+        Some("m4a") | Some("mp4") => crate::audio::Codec::Mp4,
+        Some("mp3") => crate::audio::Codec::Mp3,
+        _ => return Err("SoundCloud has this track in a form Pulse can't play.".into()),
+    };
+    Ok(StreamSource {
+        url: format!("file://{}", path.display()),
+        headers: vec![],
+        codec,
+        content_length: None,
+        notice: Some("Playing from SoundCloud".into()),
+        duration: duration.filter(|d| *d > 0.0 && d.is_finite()).map(Duration::from_secs_f64),
+        keep_as: None,
+    })
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct Done {
+    duration: Option<f64>,
+    requested_downloads: Vec<Saved>,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct Saved {
+    filepath: Option<String>,
+}
+
+/// SoundCloud streams most tracks in small pieces (HLS), which Pulse's player can't read
+/// as one link. So the track is downloaded with yt-dlp into one file first, which takes a
+/// few seconds, and played from there. A track downloaded before plays at once.
 pub fn open(tools: &Tools, url: &str, track: &Track) -> Result<StreamSource, String> {
+    let (dir, stem) = (dir(), stem_for(url));
+    if let Some(path) = ["m4a", "mp3"].iter().map(|e| dir.join(format!("{stem}.{e}"))).find(|p| p.is_file()) {
+        return local_source(&path, None);
+    }
+    let _ = std::fs::create_dir_all(&dir);
+    prune(&dir);
     let mut args = youtube::base_args(tools);
-    args.extend(["--no-playlist".into(), "-J".into(), "-f".into(), "bestaudio[protocol=https]/bestaudio[protocol=http]".into(), url.into()]);
-    let json = youtube::run(&tools.ytdlp, &args, Duration::from_secs(60)).map_err(|e| {
+    let template = dir.join(format!("{stem}.%(ext)s"));
+    args.extend([
+        "--no-playlist".into(),
+        "--no-part".into(),
+        "-J".into(),
+        "--no-simulate".into(),
+        "-f".into(),
+        "bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio".into(),
+        "-o".into(),
+        template.display().to_string(),
+        url.into(),
+    ]);
+    let json = youtube::run(&tools.ytdlp, &args, Duration::from_secs(120)).map_err(|e| {
         crate::audio::trace(&format!("soundcloud: {url}: {e}"));
         "This SoundCloud track can't be played right now.".to_string()
     })?;
+    let path = serde_json::from_str::<Done>(&json).ok().and_then(|d| d.requested_downloads.into_iter().next()).and_then(|s| s.filepath).map(std::path::PathBuf::from);
+    let duration = serde_json::from_str::<Done>(&json).ok().and_then(|d| d.duration);
+    let path = path.filter(|p| p.metadata().is_ok_and(|m| m.len() > 0)).ok_or("SoundCloud didn't give a file for this track.")?;
     if youtube::is_wrong_video(track, &json) {
+        let _ = std::fs::remove_file(&path);
         return Err("That SoundCloud track isn't this song.".into());
     }
-    let mut src = youtube::source_from_info(&json).map_err(|e| {
-        crate::audio::trace(&format!("soundcloud: {url}: {e}"));
-        "SoundCloud has this track in a form Pulse can't play.".to_string()
-    })?;
-    src.notice = Some("Playing from SoundCloud".into());
-    Ok(src)
+    local_source(&path, duration).inspect_err(|_| {
+        let _ = std::fs::remove_file(&path);
+    })
+}
+
+/// Removes downloaded tracks older than three days.
+fn prune(dir: &std::path::Path) {
+    let old = Duration::from_secs(3 * 24 * 3600);
+    for f in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        if f.metadata().and_then(|m| m.modified()).is_ok_and(|t| t.elapsed().is_ok_and(|e| e > old)) {
+            let _ = std::fs::remove_file(f.path());
+        }
+    }
 }
 
 /// Looks for the song on SoundCloud and opens it. Returns the audio and the id to save.
@@ -225,14 +298,23 @@ mod tests {
     }
 
     #[test]
-    fn a_progressive_track_becomes_a_source() {
-        let info = r#"{"title":"wen we fuckn (WarSemi)","duration":152.7,"ext":"mp3","url":"https://cf-media.sndcdn.com/a.mp3","http_headers":{"User-Agent":"x"},"filesize":2443000}"#;
-        let src = youtube::source_from_info(info).unwrap();
-        assert_eq!(src.codec, crate::audio::Codec::Mp3);
-        assert!(src.url.starts_with("https://cf-media.sndcdn.com/"));
+    fn a_downloaded_track_becomes_a_local_source() {
+        let dir = std::env::temp_dir().join("pulse-sc-test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("sc-test.m4a");
+        std::fs::write(&file, b"x").unwrap();
+        let src = local_source(&file, Some(152.7)).unwrap();
+        assert_eq!(src.codec, crate::audio::Codec::Mp4);
+        assert!(src.url.starts_with("file://") && src.notice.as_deref() == Some("Playing from SoundCloud"));
+        assert_eq!(src.duration, Some(Duration::from_secs_f64(152.7)));
+        assert!(local_source(&dir.join("x.opus"), None).is_err(), "formats Pulse can't play are refused");
+        let info = format!(r#"{{"title":"wen we fuckn (WarSemi)","duration":152.7,"requested_downloads":[{{"filepath":"{}"}}]}}"#, file.display().to_string().replace('\\', "/"));
+        let done: Done = serde_json::from_str(&info).unwrap();
+        assert_eq!(done.requested_downloads[0].filepath.as_deref(), Some(file.display().to_string().replace('\\', "/").as_str()));
         // The wrong track behind a saved link is refused.
         let t = song("Death To Ricky", "Wen We Fuckin", 153);
-        assert!(!youtube::is_wrong_video(&t, info));
+        assert!(!youtube::is_wrong_video(&t, &info));
         assert!(youtube::is_wrong_video(&t, r#"{"title":"lemon haze","duration":300}"#));
+        assert_ne!(stem_for("https://soundcloud.com/a/b"), stem_for("https://soundcloud.com/a/c"));
     }
 }
