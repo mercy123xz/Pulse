@@ -23,12 +23,13 @@ const CHUNK: u64 = 4 * 1024 * 1024;
 const FIRST_CHUNK: u64 = 1024 * 1024;
 /// Size of the pieces fetched side by side after the first one.
 const PIECE: u64 = 1024 * 1024;
-/// How many pieces download at the same time (kept small: light on the PC and the network).
-const PARALLEL: usize = 4;
+/// How many pieces download at the same time (a few, to beat the per-connection speed limit
+/// without loading the PC or the network).
+const PARALLEL: usize = 6;
 /// The parallel pieces wait until this much of the start of the song has arrived, so on a
 /// slow connection they don't take bandwidth from the part needed to start playing.
 /// (Benchmarked in `bench_startup`; settable there to compare.)
-static HEAD_START: AtomicU64 = AtomicU64::new(256 * 1024);
+static HEAD_START: AtomicU64 = AtomicU64::new(128 * 1024);
 
 // ---------------------------------------------------------------------------
 // TEMPORARY: playback timing log (logs\playback-debug.log in the data folder).
