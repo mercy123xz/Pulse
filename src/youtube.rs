@@ -473,7 +473,7 @@ fn explain_error(stderr: &str) -> String {
     } else if lower.contains("video unavailable") || lower.contains("not available in your country") {
         "This song isn't available on YouTube where you are.".into()
     } else if lower.contains("sign in to confirm your age") {
-        "YouTube only plays this song for signed-in adults.".into()
+        "YouTube only plays this song for signed-in adults, and no other version of it was found.".into()
     } else if lower.contains("unable to download") || lower.contains("timed out") || lower.contains("getaddrinfo") {
         "Couldn't reach YouTube. Check your internet connection.".into()
     } else {
@@ -598,6 +598,47 @@ pub fn words(s: &str) -> String {
     )
 }
 
+/// The title to look for in a result: without "(feat. …)", "(Remastered)" or "- Radio Edit"
+/// style extras, which YouTube's own titles often leave out.
+fn gate_title(title: &str) -> String {
+    let mut plain = String::new();
+    let mut depth = 0;
+    for c in core_title(title).chars() {
+        match c {
+            '(' | '[' => depth += 1,
+            ')' | ']' => depth = (depth - 1).max(0),
+            c if depth == 0 => plain.push(c),
+            _ => {}
+        }
+    }
+    let plain = plain.split(" - ").next().unwrap_or("");
+    norm(plain)
+}
+
+/// Does a result's title name this song? Right length alone isn't enough: another song of
+/// the same length must not win. A censored title ("F***in") still counts when what's
+/// left of it fits the song's title in order.
+pub fn title_matches(song_title: &str, result_title: &str) -> bool {
+    let want = gate_title(song_title);
+    if want.is_empty() {
+        return true;
+    }
+    let got = norm(result_title);
+    if got.contains(&want) {
+        return true;
+    }
+    // The result may be the short form of a longer song title ("Song (Part 2)" -> "Song").
+    let short = gate_title(result_title);
+    if short.len() >= 3 && want.contains(&short) && short.len() * 10 >= want.len() * 7 {
+        return true;
+    }
+    if result_title.contains('*') && short.len() * 10 >= want.len() * 6 {
+        let mut rest = want.chars();
+        return short.chars().all(|c| rest.any(|w| w == c));
+    }
+    false
+}
+
 /// Scores how well a YouTube result matches the song. Higher is better; below 0 it
 /// isn't the song. What counts, strongest first: the right length (a music video or a
 /// 30-second clip is the wrong length), the song's own artist (an "Artist - Topic"
@@ -654,12 +695,16 @@ pub fn score(track: &Track, e: &SearchEntry) -> i32 {
     if !want_title.is_empty() && norm(&title).contains(&want_title) {
         s += 25;
     }
+    // A different song with the right length and artist is still the wrong song.
+    if !title_matches(&track.title, &e.title) {
+        s -= 100;
+    }
     if title.contains("official audio") || (title.contains("audio") && !title.contains("video")) {
         s += 8;
     }
     // The music video: often intros, skits or a different edit. The song itself is better.
-    if ["official video", "music video", "official mv", "(video)", "[video]", "visualizer"].iter().any(|m| title.contains(m)) {
-        s -= 10;
+    if is_video_version(&title) && !is_video_version(&track.title.to_lowercase()) {
+        s -= 25;
     }
     let (t_words, c_words, song) = (words(&e.title), words(&channel), words(&track.title));
     for bad in UNWANTED {
@@ -700,8 +745,15 @@ pub fn rank<'a>(track: &Track, entries: &'a [SearchEntry]) -> Vec<&'a SearchEntr
     let mut seen = std::collections::HashSet::new();
     let mut scored: Vec<(i32, &SearchEntry)> =
         entries.iter().filter(|e| !e.id.is_empty() && seen.insert(e.id.as_str())).map(|e| (score(track, e), e)).filter(|(s, _)| *s >= 0).collect();
-    scored.sort_by_key(|(s, _)| std::cmp::Reverse(*s));
+    // Music-video versions only when no audio version fits: they often have an intro or skit.
+    let video = |e: &SearchEntry| is_video_version(&e.title.to_lowercase()) && !is_video_version(&track.title.to_lowercase());
+    scored.sort_by_key(|(s, e)| (video(e), std::cmp::Reverse(*s)));
     scored.into_iter().map(|(_, e)| e).collect()
+}
+
+/// A music video, visualizer or similar: not the plain audio release.
+fn is_video_version(title_lower: &str) -> bool {
+    ["official video", "music video", "official mv", "(video)", "[video]", "visualizer", "official music video"].iter().any(|m| title_lower.contains(m))
 }
 
 /// Picks the best match, or None if nothing looks like the song.
@@ -1005,6 +1057,7 @@ struct VideoInfo {
     available_at: Option<i64>,
     /// The video's length in seconds.
     duration: Option<f64>,
+    title: Option<String>,
 }
 
 /// How long to wait before a link with `available_at` works. Errors if it's far off.
@@ -1290,6 +1343,19 @@ fn link_args(tools: &Tools, quality: Quality) -> Vec<String> {
 
 /// Asks yt-dlp for the direct audio link of a YouTube video.
 pub fn audio_source(tools: &Tools, video_id: &str, quality: Quality) -> Result<StreamSource, String> {
+    audio_source_for(tools, video_id, quality, None)
+}
+
+/// Does what yt-dlp found fit the song about to be shown? Different title *and* a different
+/// length means the wrong video (a stale saved link, say): better to look again than to play it.
+fn is_wrong_video(track: &Track, json: &str) -> bool {
+    let Ok(info) = serde_json::from_str::<VideoInfo>(json) else { return false };
+    let (Some(title), Some(d)) = (info.title, info.duration) else { return false };
+    track.duration >= 60 && (d - track.duration as f64).abs() > 20.0 && !title_matches(&track.title, &title)
+}
+
+/// Like `audio_source`; with the song, a video that isn't it is refused.
+fn audio_source_for(tools: &Tools, video_id: &str, quality: Quality, track: Option<&Track>) -> Result<StreamSource, String> {
     let args = link_args(tools, quality);
     let url = format!("https://www.youtube.com/watch?v={video_id}");
     let t = Instant::now();
@@ -1310,7 +1376,12 @@ pub fn audio_source(tools: &Tools, video_id: &str, quality: Quality) -> Result<S
         }
     };
     crate::audio::trace(&format!("yt-dlp: audio link for {video_id}: {} in {} ms", if out.is_ok() { "ok" } else { "failed" }, t.elapsed().as_millis()));
-    let src = source_from_info(&out?)?;
+    let out = out?;
+    if track.is_some_and(|t| is_wrong_video(t, &out)) {
+        crate::audio::trace(&format!("yt-dlp: {video_id} is not this song, skipped"));
+        return Err("That video isn't this song.".into());
+    }
+    let src = source_from_info(&out)?;
     experiment_after(tools, video_id, quality);
     Ok(src)
 }
@@ -1319,10 +1390,12 @@ pub fn audio_source(tools: &Tools, video_id: &str, quality: Quality) -> Result<S
 /// when Pulse already knows which video it is. Returns the source and the video id.
 pub fn resolve(track: &Track, known_video: Option<String>, quality: Quality, status: &dyn Fn(&str)) -> Result<(StreamSource, String), String> {
     let tools = ensure_tools(status)?;
+    // A song fix names its video on purpose: that one isn't second-guessed.
+    let checked = crate::fixes::video(&track.id).is_none().then_some(track);
     let attempt = |status: &dyn Fn(&str)| -> Result<(StreamSource, String), String> {
         if let Some(id) = &known_video {
             status("Loading audio…");
-            if let Ok(src) = audio_source(&tools, id, quality) {
+            if let Ok(src) = audio_source_for(&tools, id, quality, checked) {
                 return Ok((src, id.clone()));
             }
             // The saved video may be gone: search again.
@@ -1333,7 +1406,7 @@ pub fn resolve(track: &Track, known_video: Option<String>, quality: Quality, sta
         // If the best video won't play (removed, age-gated, region-locked), try the next ones.
         let mut first_error = None;
         for id in ids.iter().filter(|id| Some(*id) != known_video.as_ref()).take(3) {
-            match audio_source(&tools, id, quality) {
+            match audio_source_for(&tools, id, quality, checked) {
                 Ok(src) => return Ok((src, id.clone())),
                 Err(e) => {
                     first_error.get_or_insert(e);
@@ -1386,6 +1459,41 @@ mod tests {
 
     fn entry(id: &str, title: &str, secs: f64, channel: &str) -> SearchEntry {
         SearchEntry { id: id.into(), title: title.into(), duration: Some(secs), channel: Some(channel.into()), ..Default::default() }
+    }
+
+    #[test]
+    fn a_different_song_of_the_same_length_is_not_a_match() {
+        let t = song("KD!", "Depictions", 150);
+        let wrong = entry("w", "Something Else", 150.0, "KD! - Topic");
+        let right = entry("r", "Depictions", 149.0, "KD! - Topic");
+        assert!(pick_best(&t, &[wrong.clone()]).is_none());
+        assert_eq!(pick_best(&t, &[wrong, right]).map(|e| e.id.as_str()), Some("r"));
+    }
+
+    #[test]
+    fn spacing_and_censoring_do_not_hide_the_title() {
+        assert!(title_matches("Back2TheBasics", "Back 2 The Basics (Official Audio)"));
+        assert!(title_matches("Wen We Fuckin", "Wen We F***in"));
+        assert!(title_matches("Song (Remastered 2021)", "Song"));
+        assert!(!title_matches("Depictions", "Depression"));
+    }
+
+    #[test]
+    fn audio_beats_the_music_video() {
+        let t = song("ericdoa", "Kickstand", 120);
+        let video = entry("v", "ericdoa - Kickstand (Official Music Video)", 120.0, "ericdoa");
+        let audio = entry("a", "Kickstand", 118.0, "ericdoa");
+        assert_eq!(rank(&t, &[video.clone(), audio]).first().map(|e| e.id.as_str()), Some("a"));
+        // With only the video available, it still plays.
+        assert_eq!(rank(&t, &[video]).len(), 1);
+    }
+
+    #[test]
+    fn a_stale_link_to_another_song_is_refused() {
+        let t = song("KD!", "Depictions", 150);
+        assert!(is_wrong_video(&t, r#"{"title":"Other Song","duration":240}"#));
+        assert!(!is_wrong_video(&t, r#"{"title":"KD! - Depictions","duration":151}"#));
+        assert!(!is_wrong_video(&t, r#"{"title":"Other Song"}"#));
     }
 
     #[test]

@@ -1422,6 +1422,7 @@ impl App {
     }
 
     pub fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        crate::winstate::flush();
         self.saved.last_track = self.current.clone();
         // The queue, kept to a few thousand songs around where you are.
         let from = self.queue_pos.saturating_sub(500);
@@ -4006,6 +4007,7 @@ impl eframe::App for App {
     /// the window is minimized or hidden behind a full-screen game, when it doesn't call
     /// `ui` at all. Keeping this work in `ui` stopped the music at the end of the song.
     fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        crate::winstate::track(ctx);
         if self.trim_memory_at.is_some_and(|t| Instant::now() >= t) {
             self.trim_memory_at = None;
             crate::perf::give_back_memory();

@@ -38,6 +38,7 @@ mod ui;
 mod uninstall;
 mod update;
 mod widgets;
+mod winstate;
 mod youtube;
 
 /// Windows slows down programs that are minimized or in the background ("Efficiency
@@ -83,14 +84,24 @@ fn main() -> eframe::Result {
         return Ok(());
     }
     no_power_throttling();
+    // Where the window was last time, if that still fits the screens. Otherwise a sensible
+    // size, placed by the system.
+    let mut viewport = egui::ViewportBuilder::default()
+        .with_title(if separate { "Pulse (separate profile)" } else { "Pulse" })
+        .with_app_id("pulse-player")
+        .with_inner_size(winstate::DEFAULT_SIZE)
+        .with_min_inner_size(winstate::MIN_SIZE)
+        .with_icon(app_icon());
+    if let Some(h) = std::env::var("PULSE_DEBUG_HEIGHT").ok().and_then(|h| h.parse::<f32>().ok()) {
+        viewport = viewport.with_inner_size([winstate::DEFAULT_SIZE[0], h]);
+    } else if let Some(w) = winstate::WinState::load() {
+        viewport = viewport.with_inner_size(w.size).with_position(w.pos).with_maximized(w.maximized);
+    }
     #[allow(unused_mut)]
     let mut options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_title(if separate { "Pulse (separate profile)" } else { "Pulse" })
-            .with_app_id("pulse-player")
-            .with_inner_size([1280.0, std::env::var("PULSE_DEBUG_HEIGHT").ok().and_then(|h| h.parse().ok()).unwrap_or(800.0)])
-            .with_min_inner_size([980.0, 620.0])
-            .with_icon(app_icon()),
+        viewport,
+        // eframe's own window saving restored minimized (-32000) positions: see winstate.rs.
+        persist_window: false,
         // eframe otherwise keeps the library in %APPDATA%\pulse-player\data whatever
         // PULSE_DATA_DIR says, so a test copy would read and overwrite the real one.
         persistence_path: if separate { settings::library_file() } else { None },
