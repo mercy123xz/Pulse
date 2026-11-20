@@ -1848,7 +1848,7 @@ impl App {
             }
             _ => {}
         }
-        if let Some(n) = self.audio.take_notice() {
+        if let Some(n) = self.audio.take_notice().or_else(crate::soundcloud::take_notice) {
             self.toast(&n, ctx);
         }
         self.receive_autoplay(ctx);
@@ -3485,7 +3485,12 @@ impl App {
             // Straight away, ahead of all background work; marked in flight so a hover or
             // queue job for the same song doesn't start a second lookup.
             in_flight.lock().unwrap().insert(track.id.clone());
-            let found = crate::youtube::resolve(&track, known, quality, status);
+            let found = crate::youtube::resolve(&track, known, quality, &|msg| {
+                if msg == crate::soundcloud::SWITCHING {
+                    crate::soundcloud::announce();
+                }
+                status(msg)
+            });
             in_flight.lock().unwrap().remove(&track.id);
             match found {
                 Ok((src, video)) => {

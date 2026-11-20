@@ -11,6 +11,20 @@ use crate::youtube::{self, Tools};
 use serde::Deserialize;
 use std::time::Duration;
 
+/// Shown as a popup when Pulse gives up on YouTube for a song and tries SoundCloud.
+pub const SWITCHING: &str = "Switching to SoundCloud";
+
+static NOTICE: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+/// Queues the popup (the app shows it on its next frame).
+pub fn announce() {
+    *NOTICE.lock().unwrap() = Some(SWITCHING.into());
+}
+
+pub fn take_notice() -> Option<String> {
+    NOTICE.lock().unwrap().take()
+}
+
 const PREFIX: &str = "sc:";
 const HOME: &str = "https://soundcloud.com/";
 
@@ -150,7 +164,7 @@ fn local_source(path: &std::path::Path, duration: Option<f64>) -> Result<StreamS
         headers: vec![],
         codec,
         content_length: None,
-        notice: Some("Playing from SoundCloud".into()),
+        notice: None,
         duration: duration.filter(|d| *d > 0.0 && d.is_finite()).map(Duration::from_secs_f64),
         keep_as: None,
     })
@@ -305,7 +319,7 @@ mod tests {
         std::fs::write(&file, b"x").unwrap();
         let src = local_source(&file, Some(152.7)).unwrap();
         assert_eq!(src.codec, crate::audio::Codec::Mp4);
-        assert!(src.url.starts_with("file://") && src.notice.as_deref() == Some("Playing from SoundCloud"));
+        assert!(src.url.starts_with("file://"));
         assert_eq!(src.duration, Some(Duration::from_secs_f64(152.7)));
         assert!(local_source(&dir.join("x.opus"), None).is_err(), "formats Pulse can't play are refused");
         let info = format!(r#"{{"title":"wen we fuckn (WarSemi)","duration":152.7,"requested_downloads":[{{"filepath":"{}"}}]}}"#, file.display().to_string().replace('\\', "/"));

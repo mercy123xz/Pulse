@@ -1416,7 +1416,8 @@ pub fn resolve(track: &Track, known_video: Option<String>, quality: Quality, sta
         if let Some(id) = &known_video {
             if let Some(url) = crate::soundcloud::url_of(id) {
                 status("Loading audio from SoundCloud…");
-                if let Ok(src) = crate::soundcloud::open(&tools, url, track) {
+                if let Ok(mut src) = crate::soundcloud::open(&tools, url, track) {
+                    src.notice = Some("Playing from SoundCloud".into());
                     return Ok((src, id.clone()));
                 }
             } else {
@@ -1448,7 +1449,7 @@ pub fn resolve(track: &Track, known_video: Option<String>, quality: Quality, sta
             Err(e) if e.starts_with("Couldn't reach") => Err(e),
             // YouTube has nothing that plays: SoundCloud, then YouTube's own message if that fails too.
             Err(e) => {
-                status("Trying SoundCloud…");
+                status(crate::soundcloud::SWITCHING);
                 crate::soundcloud::find_and_open(&tools, track).map_err(|sc| {
                     crate::audio::trace(&format!("soundcloud: {sc}"));
                     e
