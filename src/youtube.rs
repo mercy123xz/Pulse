@@ -1361,6 +1361,11 @@ fn link_args(tools: &Tools, quality: Quality) -> Vec<String> {
     args
 }
 
+#[cfg(test)]
+fn audio_source(tools: &Tools, video_id: &str, quality: Quality) -> Result<StreamSource, String> {
+    audio_source_for(tools, video_id, quality, None)
+}
+
 /// Does what yt-dlp found fit the song about to be shown? Different title *and* a different
 /// length means the wrong video (a stale saved link, say): better to look again than to play it.
 pub(crate) fn is_wrong_video(track: &Track, json: &str) -> bool {
