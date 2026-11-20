@@ -49,6 +49,9 @@ pub fn settings_page(app: &mut App, ui: &mut Ui) {
     row(ui, tr("Streaming quality"), tr("Low uses less data. High is the best YouTube offers (usually 128 kbps AAC)."), |ui| {
         quality_combo(ui, "stream_q", &mut s.stream_quality);
     });
+    row(ui, tr("Prefer SoundCloud"), tr("Look for each new song on SoundCloud first. A SoundCloud song takes a few seconds longer to start."), |ui| {
+        switch(ui, &mut s.prefer_soundcloud, tr("Prefer SoundCloud"));
+    });
     row(ui, tr("Download"), tr("Quality of songs you download for offline listening."), |ui| {
         quality_combo(ui, "download_q", &mut s.download_quality);
     });

@@ -131,6 +131,8 @@ pub const EQ_PRESETS: [(&str, [f32; 6]); 8] = [
 pub struct Settings {
     pub language: Language,
     pub stream_quality: Quality,
+    /// Look on SoundCloud first, and use YouTube when it has no match.
+    pub prefer_soundcloud: bool,
     pub download_quality: Quality,
     /// Show songs from the Music folder in the sidebar.
     pub show_local_files: bool,
@@ -194,6 +196,7 @@ impl Default for Settings {
         Self {
             language: Language::English,
             stream_quality: Quality::Auto,
+            prefer_soundcloud: true,
             download_quality: Quality::High,
             show_local_files: false,
             crossfade_secs: 0.0,
