@@ -852,7 +852,7 @@ pub fn cache_size() -> u64 {
 pub fn share_link(t: &Track, target: ShareTarget, youtube_video: Option<&str>) -> String {
     let query = crate::net::encode(&format!("{} {}", t.artist.name, t.title));
     match target {
-        ShareTarget::YouTube => match youtube_video {
+        ShareTarget::YouTube => match youtube_video.filter(|v| !crate::soundcloud::is_soundcloud_id(v)) {
             Some(v) => format!("https://www.youtube.com/watch?v={v}"),
             None => format!("https://www.youtube.com/results?search_query={query}"),
         },
@@ -3691,7 +3691,7 @@ impl App {
             Some(picked) if self.autoplay_ids.contains(&cur.id) => picked.clone(),
             _ => cur,
         };
-        let video = self.youtube_ids.lock().unwrap().get(&seed.id).cloned();
+        let video = self.youtube_ids.lock().unwrap().get(&seed.id).filter(|v| !crate::soundcloud::is_soundcloud_id(v)).cloned();
         let mut avoid = crate::radio::Avoid::default();
         for t in self.saved.recent.iter().take(50).chain(self.queue.iter()) {
             avoid.add(t);

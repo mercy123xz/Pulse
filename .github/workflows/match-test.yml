@@ -39,7 +39,14 @@ jobs:
         if: always()
         with:
           name: trouble-songs
-          path: trouble.txt
+          path: |
+            trouble.txt
+            soundcloud.txt
+      - name: SoundCloud
+        env:
+          PULSE_YTDLP: yt-dlp
+          PULSE_DENO: deno
+        run: cargo test --release live_soundcloud_wen_we -- --ignored --nocapture 2>&1 | tee soundcloud.txt
       - name: Match the playlist
         env:
           PULSE_LIVE_SONGS: tests/data/friend-playlist.txt

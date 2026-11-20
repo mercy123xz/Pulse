@@ -29,6 +29,7 @@ mod resample;
 mod settings;
 mod share;
 mod single;
+mod soundcloud;
 mod suggest;
 mod tidal;
 mod theme;

@@ -258,7 +258,7 @@ fn update_now(tools: &Tools) {
 // ---------------------------------------------------------------------------
 
 /// Runs a program and returns its output. Gives up after `timeout`.
-fn run(program: &Path, args: &[String], timeout: Duration) -> Result<String, String> {
+pub(crate) fn run(program: &Path, args: &[String], timeout: Duration) -> Result<String, String> {
     finish(spawn(program, args, Stdio::null())?, timeout)
 }
 
@@ -482,7 +482,7 @@ fn explain_error(stderr: &str) -> String {
     }
 }
 
-fn base_args(tools: &Tools) -> Vec<String> {
+pub(crate) fn base_args(tools: &Tools) -> Vec<String> {
     vec![
         "--ignore-config".into(),
         "--no-warnings".into(),
@@ -632,11 +632,31 @@ pub fn title_matches(song_title: &str, result_title: &str) -> bool {
     if short.len() >= 3 && want.contains(&short) && short.len() * 10 >= want.len() * 7 {
         return true;
     }
+    // A spelling variant ("Fuckin" and "fuckn"): one small slip in a long enough title.
+    if want.len() >= 8 && short.len() >= 8 && edit_distance(&want, &short) <= want.len() / 8 {
+        return true;
+    }
     if result_title.contains('*') && short.len() * 10 >= want.len() * 6 {
         let mut rest = want.chars();
         return short.chars().all(|c| rest.any(|w| w == c));
     }
     false
+}
+
+/// How many single-letter changes turn `a` into `b`.
+fn edit_distance(a: &str, b: &str) -> usize {
+    let b: Vec<char> = b.chars().collect();
+    let mut row: Vec<usize> = (0..=b.len()).collect();
+    for (i, ca) in a.chars().enumerate() {
+        let mut diag = row[0];
+        row[0] = i + 1;
+        for (j, cb) in b.iter().enumerate() {
+            let up = row[j + 1];
+            row[j + 1] = (diag + (ca != *cb) as usize).min(up + 1).min(row[j] + 1);
+            diag = up;
+        }
+    }
+    row[b.len()]
 }
 
 /// Scores how well a YouTube result matches the song. Higher is better; below 0 it
@@ -1070,7 +1090,7 @@ fn wait_for(available_at: Option<i64>, now: i64) -> Result<Duration, String> {
 }
 
 /// Turns yt-dlp's video JSON into something the audio engine can play.
-fn source_from_info(json: &str) -> Result<StreamSource, String> {
+pub(crate) fn source_from_info(json: &str) -> Result<StreamSource, String> {
     let info: VideoInfo = serde_json::from_str(json).map_err(|e| format!("Unexpected YouTube reply ({e})"))?;
     let wait = wait_for(info.available_at, now_secs() as i64)?;
     if !wait.is_zero() {
@@ -1348,7 +1368,7 @@ pub fn audio_source(tools: &Tools, video_id: &str, quality: Quality) -> Result<S
 
 /// Does what yt-dlp found fit the song about to be shown? Different title *and* a different
 /// length means the wrong video (a stale saved link, say): better to look again than to play it.
-fn is_wrong_video(track: &Track, json: &str) -> bool {
+pub(crate) fn is_wrong_video(track: &Track, json: &str) -> bool {
     let Ok(info) = serde_json::from_str::<VideoInfo>(json) else { return false };
     let (Some(title), Some(d)) = (info.title, info.duration) else { return false };
     track.duration >= 60 && (d - track.duration as f64).abs() > 20.0 && !title_matches(&track.title, &title)
@@ -1394,26 +1414,48 @@ pub fn resolve(track: &Track, known_video: Option<String>, quality: Quality, sta
     let checked = crate::fixes::video(&track.id).is_none().then_some(track);
     let attempt = |status: &dyn Fn(&str)| -> Result<(StreamSource, String), String> {
         if let Some(id) = &known_video {
-            status("Loading audio…");
-            if let Ok(src) = audio_source_for(&tools, id, quality, checked) {
-                return Ok((src, id.clone()));
+            if let Some(url) = crate::soundcloud::url_of(id) {
+                status("Loading audio from SoundCloud…");
+                if let Ok(src) = crate::soundcloud::open(&tools, url, track) {
+                    return Ok((src, id.clone()));
+                }
+            } else {
+                status("Loading audio…");
+                if let Ok(src) = audio_source_for(&tools, id, quality, checked) {
+                    return Ok((src, id.clone()));
+                }
             }
             // The saved video may be gone: search again.
         }
         status("Finding song on YouTube…");
-        let ids = find_videos(&tools, track)?;
-        status("Loading audio…");
-        // If the best video won't play (removed, age-gated, region-locked), try the next ones.
-        let mut first_error = None;
-        for id in ids.iter().filter(|id| Some(*id) != known_video.as_ref()).take(3) {
-            match audio_source_for(&tools, id, quality, checked) {
-                Ok(src) => return Ok((src, id.clone())),
-                Err(e) => {
-                    first_error.get_or_insert(e);
+        let from_youtube = || -> Result<(StreamSource, String), String> {
+            let ids = find_videos(&tools, track)?;
+            status("Loading audio…");
+            // If the best video won't play (removed, age-gated, region-locked), try the next ones.
+            let mut first_error = None;
+            for id in ids.iter().filter(|id| Some(*id) != known_video.as_ref()).take(3) {
+                match audio_source_for(&tools, id, quality, checked) {
+                    Ok(src) => return Ok((src, id.clone())),
+                    Err(e) => {
+                        first_error.get_or_insert(e);
+                    }
                 }
             }
+            Err(first_error.unwrap_or_else(|| "Couldn't find this song on YouTube.".into()))
+        };
+        match from_youtube() {
+            // Offline: SoundCloud would only wait and fail too.
+            Err(e) if e.starts_with("Couldn't reach") => Err(e),
+            // YouTube has nothing that plays: SoundCloud, then YouTube's own message if that fails too.
+            Err(e) => {
+                status("Trying SoundCloud…");
+                crate::soundcloud::find_and_open(&tools, track).map_err(|sc| {
+                    crate::audio::trace(&format!("soundcloud: {sc}"));
+                    e
+                })
+            }
+            ok => ok,
         }
-        Err(first_error.unwrap_or_else(|| "Couldn't find this song on YouTube.".into()))
     };
     match attempt(status) {
         Ok(v) => Ok(v),
@@ -1476,6 +1518,9 @@ mod tests {
         assert!(title_matches("Wen We Fuckin", "Wen We F***in"));
         assert!(title_matches("Song (Remastered 2021)", "Song"));
         assert!(!title_matches("Depictions", "Depression"));
+        assert!(title_matches("Wen We Fuckin", "wen we fuckn (WarSemi)"), "a one-letter spelling difference");
+        assert!(!title_matches("Kickstand", "Kickback"));
+        assert_eq!(edit_distance("kitten", "sitting"), 3);
     }
 
     #[test]
@@ -1661,6 +1706,35 @@ mod tests {
             Ok(Ok(v)) => println!("\nSOUNDCLOUD track: title {} | uploader {} | duration {} | ext {} | url set {} | thumbnail {}", v["title"], v["uploader"], v["duration"], v["ext"], v["url"].is_string(), v["thumbnail"]),
             other => println!("\nSOUNDCLOUD track failed: {:?}", other.map(|r| r.map(|_| ()).map_err(|e| e.to_string()))),
         }
+    }
+
+    /// Opens "Wen We Fuckin" from SoundCloud for real and fetches the first bytes of its audio.
+    #[test]
+    #[ignore]
+    fn live_soundcloud_wen_we() {
+        let tools = Tools { ytdlp: std::env::var("PULSE_YTDLP").unwrap().into(), deno: std::env::var("PULSE_DENO").unwrap().into(), dir: std::env::temp_dir().join("pulse-sc") };
+        let t = song("Death To Ricky", "Wen We Fuckin", 153);
+        let (src, id) = crate::soundcloud::find_and_open(&tools, &t).expect("found on SoundCloud");
+        println!("SC id {id}\ncodec {:?} | length {:?} | size {:?} | notice {:?}\nurl host {}", src.codec, src.duration, src.content_length, src.notice, src.url.split('/').nth(2).unwrap_or("?"));
+        let (status, head) = {
+            let mut req = crate::net::api().get(&src.url).header("Range", "bytes=0-1023");
+            for (k, v) in &src.headers {
+                req = req.header(k, v);
+            }
+            let mut resp = req.call().expect("audio request");
+            let status = resp.status().as_u16();
+            (status, resp.body_mut().read_to_vec().unwrap_or_default())
+        };
+        println!("range request: HTTP {status}, {} bytes, starts {:02x?}", head.len(), &head[..head.len().min(4)]);
+        assert!(status == 206 || status == 200);
+        assert!(!head.is_empty());
+        // Saved id plays again without a search.
+        let again = crate::soundcloud::open(&tools, crate::soundcloud::url_of(&id).unwrap(), &t);
+        println!("saved id reopens: {}", again.is_ok());
+        assert!(again.is_ok());
+        // A song that isn't there is not replaced by another.
+        let none = crate::soundcloud::find_and_open(&tools, &song("Death To Ricky", "A Song That Does Not Exist Anywhere", 200));
+        println!("missing song: {:?}", none.map(|_| ()));
     }
 
     #[test]
