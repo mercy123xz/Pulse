@@ -1639,14 +1639,27 @@ mod tests {
                 println!("    {} | {} | {} | {}s | score {}", e.id, e.title, e.channel.as_deref().unwrap_or("?"), e.duration.unwrap_or(0.0), score(t, e));
             }
         }
-        for target in ["scsearch5:Death To Ricky Wen We Fuckin"] {
+        for target in ["scsearch5:lofi hip hop", "scsearch5:Death To Ricky", "scsearch5:Death To Ricky Wen We Fuckin", "scsearch5:deathtoricky wen we", "scsearch5:wen we fuckin"] {
             let mut flat = base_args(&tools);
             flat.extend(["--flat-playlist".into(), "-J".into(), target.into()]);
-            let out = run(&tools.ytdlp, &flat, Duration::from_secs(60)).unwrap_or_else(|e| e);
-            println!("\nSOUNDCLOUD flat ({target}): {}", out.chars().take(1500).collect::<String>());
-            let mut full = base_args(&tools);
-            full.extend(["--print".into(), "%(title)s | %(uploader)s | %(duration)s | %(webpage_url)s".into(), "--playlist-end".into(), "3".into(), target.into()]);
-            println!("SOUNDCLOUD full: {:?}", run(&tools.ytdlp, &full, Duration::from_secs(90)));
+            let out = run(&tools.ytdlp, &flat, Duration::from_secs(60));
+            println!("\nSOUNDCLOUD flat ({target}):");
+            match out.map(|o| serde_json::from_str::<serde_json::Value>(&o)) {
+                Ok(Ok(v)) => {
+                    for e in v["entries"].as_array().into_iter().flatten().take(5) {
+                        println!("  {}", serde_json::to_string(&serde_json::json!({"id":e["id"],"title":e["title"],"uploader":e["uploader"],"duration":e["duration"],"url":e["url"],"webpage_url":e["webpage_url"],"ie":e["ie_key"]})).unwrap());
+                    }
+                    println!("  ({} entries)", v["entries"].as_array().map_or(0, Vec::len));
+                }
+                other => println!("  failed: {:?}", other.map(|r| r.map(|_| ()).map_err(|e| e.to_string()))),
+            }
+        }
+        // A track's own page, to see what a SoundCloud link gives (a public sample track).
+        let mut one = base_args(&tools);
+        one.extend(["-J".into(), "https://soundcloud.com/forss/flickermood".into()]);
+        match run(&tools.ytdlp, &one, Duration::from_secs(60)).map(|o| serde_json::from_str::<serde_json::Value>(&o)) {
+            Ok(Ok(v)) => println!("\nSOUNDCLOUD track: title {} | uploader {} | duration {} | ext {} | url set {} | thumbnail {}", v["title"], v["uploader"], v["duration"], v["ext"], v["url"].is_string(), v["thumbnail"]),
+            other => println!("\nSOUNDCLOUD track failed: {:?}", other.map(|r| r.map(|_| ()).map_err(|e| e.to_string()))),
         }
     }
 
