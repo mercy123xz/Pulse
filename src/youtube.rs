@@ -1714,6 +1714,15 @@ mod tests {
     fn live_soundcloud_wen_we() {
         let tools = Tools { ytdlp: std::env::var("PULSE_YTDLP").unwrap().into(), deno: std::env::var("PULSE_DENO").unwrap().into(), dir: std::env::temp_dir().join("pulse-sc") };
         let t = song("Death To Ricky", "Wen We Fuckin", 153);
+        let url = "https://soundcloud.com/deathtoricky/wen-we-fuckn";
+        let mut f = base_args(&tools);
+        f.extend(["-F".into(), url.into()]);
+        println!("FORMATS: {:?}", run(&tools.ytdlp, &f, Duration::from_secs(60)));
+        for sel in ["bestaudio[protocol=https]/bestaudio[protocol=http]", "bestaudio", "http_mp3_128", "bestaudio[ext=mp3]"] {
+            let mut a = base_args(&tools);
+            a.extend(["--no-playlist".into(), "-f".into(), sel.into(), "--print".into(), "%(format_id)s | %(ext)s | %(protocol)s | %(acodec)s | %(filesize)s".into(), url.into()]);
+            println!("SELECTOR {sel}: {:?}", run(&tools.ytdlp, &a, Duration::from_secs(60)));
+        }
         let (src, id) = crate::soundcloud::find_and_open(&tools, &t).expect("found on SoundCloud");
         println!("SC id {id}\ncodec {:?} | length {:?} | size {:?} | notice {:?}\nurl host {}", src.codec, src.duration, src.content_length, src.notice, src.url.split('/').nth(2).unwrap_or("?"));
         let (status, head) = {
