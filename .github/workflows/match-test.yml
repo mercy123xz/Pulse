@@ -30,6 +30,16 @@ jobs:
           PULSE_YTDLP: yt-dlp
           PULSE_DENO: deno
         run: cargo test --release live_explicit_and_namesakes -- --ignored --nocapture
+      - name: Trouble songs
+        env:
+          PULSE_YTDLP: yt-dlp
+          PULSE_DENO: deno
+        run: cargo test --release live_trouble_songs -- --ignored --nocapture 2>&1 | tee trouble.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: trouble-songs
+          path: trouble.txt
       - name: Match the playlist
         env:
           PULSE_LIVE_SONGS: tests/data/friend-playlist.txt

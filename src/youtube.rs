@@ -1613,6 +1613,43 @@ mod tests {
         assert!(page.releases.len() < 15 && page.namesakes.len() > 40);
     }
 
+    /// Prints what Deezer, YouTube and SoundCloud return for songs that play wrong.
+    /// `PULSE_YTDLP=yt-dlp PULSE_DENO=deno cargo test live_trouble_songs -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn live_trouble_songs() {
+        let tools = Tools { ytdlp: std::env::var("PULSE_YTDLP").unwrap().into(), deno: std::env::var("PULSE_DENO").unwrap().into(), dir: std::env::temp_dir().join("pulse-trouble") };
+        println!("yt-dlp {}", run(&tools.ytdlp, &["--version".to_string()], Duration::from_secs(20)).unwrap_or_default().trim());
+        let mut a = base_args(&tools);
+        a.extend(["--print".into(), "%(title)s | %(duration)s | %(channel)s".into(), "https://www.youtube.com/watch?v=L-AgYKnXN1w".into()]);
+        println!("LINK L-AgYKnXN1w: {:?}", run(&tools.ytdlp, &a, Duration::from_secs(60)));
+        for q in ["KD! Back2TheBasics", "KD Back2TheBasics", "KD! Depictions", "Death To Ricky Wen We Fuckin", "ericdoa Kickstand"] {
+            println!("\n=== Deezer: {q}");
+            let Ok(r) = crate::deezer::search(q) else { println!("  search failed"); continue };
+            for t in r.tracks.iter().take(3) {
+                println!("  {} | {} – {} | {}s | rank {}", t.id, t.all_artists(), t.title, t.duration, t.rank);
+            }
+            let Some(t) = r.tracks.first() else { continue };
+            let [quoted, plain] = queries(t);
+            let mut entries = music_search(&plain).unwrap_or_default();
+            entries.extend(web_search(Some(&tools), &quoted, 8).unwrap_or_default());
+            entries.extend(web_search(Some(&tools), &plain, 8).unwrap_or_default());
+            println!("  queries: {quoted} / {plain}; {} results; ranked:", entries.len());
+            for e in rank(t, &entries).iter().take(4) {
+                println!("    {} | {} | {} | {}s | score {}", e.id, e.title, e.channel.as_deref().unwrap_or("?"), e.duration.unwrap_or(0.0), score(t, e));
+            }
+        }
+        for target in ["scsearch5:Death To Ricky Wen We Fuckin"] {
+            let mut flat = base_args(&tools);
+            flat.extend(["--flat-playlist".into(), "-J".into(), target.into()]);
+            let out = run(&tools.ytdlp, &flat, Duration::from_secs(60)).unwrap_or_else(|e| e);
+            println!("\nSOUNDCLOUD flat ({target}): {}", out.chars().take(1500).collect::<String>());
+            let mut full = base_args(&tools);
+            full.extend(["--print".into(), "%(title)s | %(uploader)s | %(duration)s | %(webpage_url)s".into(), "--playlist-end".into(), "3".into(), target.into()]);
+            println!("SOUNDCLOUD full: {:?}", run(&tools.ytdlp, &full, Duration::from_secs(90)));
+        }
+    }
+
     #[test]
     fn reads_youtube_music_songs_and_the_explicit_badge() {
         let col = |runs: &[&str]| serde_json::json!({ "musicResponsiveListItemFlexColumnRenderer": { "text": { "runs": runs.iter().map(|t| serde_json::json!({ "text": t })).collect::<Vec<_>>() } } });
