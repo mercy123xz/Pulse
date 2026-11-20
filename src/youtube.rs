@@ -1366,12 +1366,12 @@ fn audio_source(tools: &Tools, video_id: &str, quality: Quality) -> Result<Strea
     audio_source_for(tools, video_id, quality, None)
 }
 
-/// Does what yt-dlp found fit the song about to be shown? Different title *and* a different
-/// length means the wrong video (a stale saved link, say): better to look again than to play it.
+/// Does what yt-dlp found fit the song about to be shown? A video with another title is the
+/// wrong one even when its length is close (a saved link to another song on the same album,
+/// say): better to look again than to play it.
 pub(crate) fn is_wrong_video(track: &Track, json: &str) -> bool {
     let Ok(info) = serde_json::from_str::<VideoInfo>(json) else { return false };
-    let (Some(title), Some(d)) = (info.title, info.duration) else { return false };
-    track.duration >= 60 && (d - track.duration as f64).abs() > 20.0 && !title_matches(&track.title, &title)
+    info.title.is_some_and(|title| !title_matches(&track.title, &title))
 }
 
 /// Like `audio_source`; with the song, a video that isn't it is refused.
@@ -1537,8 +1537,15 @@ mod tests {
     fn a_stale_link_to_another_song_is_refused() {
         let t = song("KD!", "Depictions", 150);
         assert!(is_wrong_video(&t, r#"{"title":"Other Song","duration":240}"#));
+        assert!(is_wrong_video(&t, r#"{"title":"Other Song","duration":151}"#), "same length is not enough");
+        assert!(is_wrong_video(&t, r#"{"title":"Other Song"}"#));
         assert!(!is_wrong_video(&t, r#"{"title":"KD! - Depictions","duration":151}"#));
-        assert!(!is_wrong_video(&t, r#"{"title":"Other Song"}"#));
+        assert!(!is_wrong_video(&t, r#"{"duration":151}"#), "no title: nothing to compare");
+        let w = song("deathtoricky", "wen we fuckn", 152);
+        assert!(is_wrong_video(&w, r#"{"title":"all year","duration":150}"#));
+        let b = song("KD!", "back2thebasics", 134);
+        assert!(is_wrong_video(&b, r#"{"title":"Back Then","duration":134}"#));
+        assert!(!is_wrong_video(&b, r#"{"title":"Back2TheBasics","duration":134}"#));
     }
 
     #[test]
