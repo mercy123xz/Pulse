@@ -1062,6 +1062,8 @@ pub struct App {
     pub cache_size: Option<u64>,
     /// When to hand unused memory back to Windows, after a mode that saves memory went on.
     trim_memory_at: Option<Instant>,
+    /// Last time memory was trimmed because Pulse was in the background.
+    idle_trim_at: Instant,
     /// The song last given to the audio engine as "next" (None = not told yet).
     told_next: Option<Option<String>>,
 
@@ -1203,6 +1205,7 @@ impl App {
             credits_rx: None,
             cache_size: None,
             trim_memory_at: None,
+            idle_trim_at: Instant::now(),
             highlight: None,
             backdrop: Default::default(),
             swept_at: 0.0,
@@ -1590,6 +1593,10 @@ impl App {
     /// (they load again if you go back to them).
     fn trim_page_cache(&mut self) {
         let keep = if crate::perf::mode() == crate::perf::Mode::UltraLow { 20 } else { 60 };
+        self.trim_page_cache_to(keep);
+    }
+
+    fn trim_page_cache_to(&mut self, keep: usize) {
         if self.cache.len() <= keep {
             return;
         }
@@ -4022,6 +4029,17 @@ impl eframe::App for App {
         crate::winstate::track(ctx);
         if self.trim_memory_at.is_some_and(|t| Instant::now() >= t) {
             self.trim_memory_at = None;
+            crate::perf::give_back_memory();
+        }
+        // Behind a game or another window, nobody is browsing: keep memory low there too, not
+        // only after a switch to Gaming or Ultra-low. Pictures only go when minimized (a
+        // window still showing would flash while they reload).
+        if self.idle_trim_at.elapsed() >= Duration::from_secs(30) && ctx.input(|i| !i.focused || i.viewport().minimized.unwrap_or(false)) {
+            self.idle_trim_at = Instant::now();
+            self.trim_page_cache_to(20);
+            if ctx.input(|i| i.viewport().minimized.unwrap_or(false)) {
+                ctx.forget_all_images();
+            }
             crate::perf::give_back_memory();
         }
         self.updates(ctx);
