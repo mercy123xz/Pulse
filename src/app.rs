@@ -1824,6 +1824,10 @@ impl App {
             LoadState::Failed(e) if self.current.is_some() && !self.needs_load => {
                 crate::crash::note(&format!("Couldn't play: {e}"));
                 self.failures_in_row += 1;
+                // A link that failed must not be reused when the song is tried again.
+                if let Some(t) = &self.current {
+                    self.prefetched.lock().unwrap().remove(&t.id);
+                }
                 let name = self.current.as_ref().map(|t| t.title.clone()).unwrap_or_default();
                 self.toast(&format!("Couldn't play “{name}”: {e}"), ctx);
                 self.audio.stop();
@@ -3474,7 +3478,9 @@ impl App {
                 crate::audio::trace("link: on this PC (downloaded or kept)");
                 return src;
             }
-            if let Some((src, at)) = prefetched.lock().unwrap().remove(&track.id)
+            // Kept (not taken) so playing the same song again soon skips the lookup too.
+            let ahead = prefetched.lock().unwrap().get(&track.id).cloned();
+            if let Some((src, at)) = ahead
                 && at.elapsed() < LINK_LIFETIME
             {
                 crate::audio::trace(&format!("link: found ahead of time, ready {} ms before it was needed", at.elapsed().as_millis()));
@@ -3495,6 +3501,7 @@ impl App {
             match found {
                 Ok((src, video)) => {
                     ids.lock().unwrap().insert(track.id.clone(), video);
+                    prefetched.lock().unwrap().insert(track.id.clone(), (src.clone(), Instant::now()));
                     Ok(kept_for_next_time(src, &track))
                 }
                 Err(e) => {
