@@ -139,8 +139,6 @@ fn use_directx(options: &mut eframe::NativeOptions) {
                 .cloned()
                 .ok_or_else(|| "No graphics adapter found".to_string())
         }));
-        // Software drawing: don't also wait for the display's refresh after each frame.
-        options.wgpu_options.surface.present_mode = wgpu::PresentMode::AutoNoVsync;
         // One less step per pixel for the software renderer.
         options.dithering = false;
     }
