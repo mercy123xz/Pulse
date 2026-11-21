@@ -4071,7 +4071,8 @@ impl eframe::App for App {
             eprintln!("frame {} causes {:?}", ctx.cumulative_frame_nr(), ctx.repaint_causes());
         }
         // Minimized: nothing to draw (the music and the mini player carry on).
-        if !ctx.input(|i| i.viewport().minimized.unwrap_or(false)) {
+        let probe = crate::perf::probe_frame(&ctx);
+        if probe != 1 && !ctx.input(|i| i.viewport().minimized.unwrap_or(false)) {
             crate::ui::draw(self, ui);
         }
         crate::ui::mini::show(self, &ctx);

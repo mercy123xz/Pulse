@@ -181,6 +181,51 @@ pub fn frame_stats(started: std::time::Instant, render_secs: Option<f32>, causes
     }
 }
 
+static PROBE: AtomicU8 = AtomicU8::new(0);
+
+/// Which part of the window the render probe is leaving out right now (0 = nothing).
+pub fn probe() -> u8 {
+    PROBE.load(Ordering::Relaxed)
+}
+
+/// Render probe, only in software drawing and only while the flag file
+/// `logs/render-probe.on` exists. Redraws nonstop and cycles every 5 s through: everything
+/// drawn, nothing drawn, covers left out. Each phase logs its frame gap, so the log shows
+/// what the software renderer spends its time on. Returns the phase.
+pub fn probe_frame(ctx: &egui::Context) -> u8 {
+    use std::time::{Duration, Instant};
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if !*ON.get_or_init(|| crate::settings::data_dir().join("logs").join("render-probe.on").exists()) || !software() {
+        return 0;
+    }
+    struct P {
+        start: Instant,
+        last: Instant,
+        phase: u8,
+        n: u32,
+        gap: Duration,
+    }
+    static ST: std::sync::Mutex<Option<P>> = std::sync::Mutex::new(None);
+    let now = Instant::now();
+    let mut g = ST.lock().unwrap_or_else(|e| e.into_inner());
+    let p = g.get_or_insert(P { start: now, last: now, phase: 0, n: 0, gap: Duration::ZERO });
+    let phase = ((now.duration_since(p.start).as_secs() / 5) % 3) as u8;
+    if phase != p.phase {
+        let name = ["everything", "nothing drawn", "covers left out"][p.phase as usize];
+        crate::audio::trace(&format!("probe {name}: {} frames, gap avg {:.1} ms", p.n, p.gap.as_secs_f64() * 1000.0 / p.n.max(1) as f64));
+        p.phase = phase;
+        p.n = 0;
+        p.gap = Duration::ZERO;
+    } else {
+        p.n += 1;
+        p.gap += now.duration_since(p.last);
+    }
+    p.last = now;
+    PROBE.store(phase, Ordering::Relaxed);
+    ctx.request_repaint();
+    phase
+}
+
 /// Puts a mode into effect. `keep` holds the extras you asked to keep on.
 pub fn apply(mode: Mode, keep: &[String]) {
     let mut bits = 0;

@@ -82,6 +82,9 @@ pub fn artwork(ui: &Ui, rect: Rect, url: Option<&str>, radius: CornerRadius) {
 /// (it used to pop in). One that couldn't be downloaded (offline, a dead link) leaves the
 /// placeholder underneath, instead of egui's red "failed" mark.
 fn paint_loaded(ui: &Ui, img: egui::Image, rect: Rect, url: &str) {
+    if crate::perf::probe() == 2 {
+        return;
+    }
     if img.load_for_size(ui.ctx(), rect.size()).is_ok() {
         let shown = crate::theme::appear(ui.ctx(), egui::Id::new(("art_in", url)), 0.22);
         let img = if shown < 1.0 { img.tint(Color32::from_white_alpha((shown * 255.0) as u8)) } else { img };

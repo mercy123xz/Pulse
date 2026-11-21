@@ -141,6 +141,8 @@ fn use_directx(options: &mut eframe::NativeOptions) {
         }));
         // Software drawing: don't also wait for the display's refresh after each frame.
         options.wgpu_options.surface.present_mode = wgpu::PresentMode::AutoNoVsync;
+        // One less step per pixel for the software renderer.
+        options.dithering = false;
     }
     // Graphics memory sized for a music player, not a game: wgpu otherwise sets aside big
     // blocks of memory up front for speed, which Pulse (some text and a few pictures) never fills.
