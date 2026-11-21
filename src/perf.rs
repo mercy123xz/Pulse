@@ -109,7 +109,7 @@ pub fn software() -> bool {
 /// slow scrolling is Pulse's own drawing work or the renderer. `started` is when this frame's
 /// `ui` began. Every 3 s of continuous drawing one line is logged: the work inside `ui`
 /// (average, longest) and the gap between frames (average, longest).
-pub fn frame_stats(started: std::time::Instant, render_secs: Option<f32>) {
+pub fn frame_stats(started: std::time::Instant, render_secs: Option<f32>, causes: &[egui::RepaintCause]) {
     use std::time::{Duration, Instant};
     #[derive(Default)]
     struct Stats {
@@ -124,6 +124,7 @@ pub fn frame_stats(started: std::time::Instant, render_secs: Option<f32>) {
         render: f64,
         render_max: f64,
         renders: u32,
+        why: std::collections::HashMap<String, u32>,
     }
     static STATS: std::sync::Mutex<Option<Stats>> = std::sync::Mutex::new(None);
     let now = Instant::now();
@@ -149,6 +150,9 @@ pub fn frame_stats(started: std::time::Instant, render_secs: Option<f32>) {
         st.render += r;
         st.render_max = st.render_max.max(r);
     }
+    for c in causes {
+        *st.why.entry(format!("{}:{} {}", c.file.rsplit(['/', '\\']).next().unwrap_or(c.file), c.line, c.reason)).or_default() += 1;
+    }
     st.last = Some(started);
     if now.duration_since(since) >= Duration::from_secs(3) {
         if st.gaps >= 10 {
@@ -163,6 +167,12 @@ pub fn frame_stats(started: std::time::Instant, render_secs: Option<f32>) {
                 st.render / st.renders.max(1) as f64,
                 st.render_max
             ));
+        }
+        if st.gaps >= 10 {
+            let mut v: Vec<_> = st.why.iter().collect();
+            v.sort_by(|a, b| b.1.cmp(a.1));
+            let top: Vec<String> = v.iter().take(4).map(|(k, n)| format!("{k} x{n}")).collect();
+            crate::audio::trace(&format!("redraw asked by: {}", top.join(" | ")));
         }
         let last = st.last;
         *st = Stats { last, ..Default::default() };
