@@ -105,6 +105,59 @@ pub fn software() -> bool {
     SOFTWARE.load(Ordering::Relaxed)
 }
 
+/// Frame timing for the playback log, only while drawing in software (WARP), to tell whether
+/// slow scrolling is Pulse's own drawing work or the renderer. `started` is when this frame's
+/// `ui` began. Every 3 s of continuous drawing one line is logged: the work inside `ui`
+/// (average, longest) and the gap between frames (average, longest).
+pub fn frame_stats(started: std::time::Instant) {
+    use std::time::{Duration, Instant};
+    #[derive(Default)]
+    struct Stats {
+        since: Option<Instant>,
+        last: Option<Instant>,
+        n: u32,
+        work: Duration,
+        work_max: Duration,
+        gaps: u32,
+        gap: Duration,
+        gap_max: Duration,
+    }
+    static STATS: std::sync::Mutex<Option<Stats>> = std::sync::Mutex::new(None);
+    let now = Instant::now();
+    let mut guard = STATS.lock().unwrap_or_else(|e| e.into_inner());
+    let st = guard.get_or_insert_with(Stats::default);
+    let since = *st.since.get_or_insert(started);
+    let work = now.duration_since(started);
+    st.n += 1;
+    st.work += work;
+    st.work_max = st.work_max.max(work);
+    // Only gaps under half a second count: longer ones are idle time, not slow drawing.
+    if let Some(last) = st.last {
+        let gap = started.duration_since(last);
+        if gap < Duration::from_millis(500) {
+            st.gaps += 1;
+            st.gap += gap;
+            st.gap_max = st.gap_max.max(gap);
+        }
+    }
+    st.last = Some(started);
+    if now.duration_since(since) >= Duration::from_secs(3) {
+        if st.gaps >= 10 {
+            let ms = |d: Duration| d.as_secs_f64() * 1000.0;
+            crate::audio::trace(&format!(
+                "frames: {} in 3 s, ui work avg {:.1} ms max {:.1} ms, gap between frames avg {:.1} ms max {:.1} ms",
+                st.n,
+                ms(st.work) / st.n as f64,
+                ms(st.work_max),
+                ms(st.gap) / st.gaps as f64,
+                ms(st.gap_max)
+            ));
+        }
+        let last = st.last;
+        *st = Stats { last, ..Default::default() };
+    }
+}
+
 /// Puts a mode into effect. `keep` holds the extras you asked to keep on.
 pub fn apply(mode: Mode, keep: &[String]) {
     let mut bits = 0;

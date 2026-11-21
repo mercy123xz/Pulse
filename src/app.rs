@@ -4057,6 +4057,7 @@ impl eframe::App for App {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        let frame_started = Instant::now();
         let ctx = ui.ctx().clone();
         if self.diag.gpu.is_none() {
             self.diag.gpu = Some(crate::diag::gpu(frame));
@@ -4074,6 +4075,9 @@ impl eframe::App for App {
             crate::ui::draw(self, ui);
         }
         crate::ui::mini::show(self, &ctx);
+        if crate::perf::software() {
+            crate::perf::frame_stats(frame_started);
+        }
         // Clicking in the window can ask for a save too.
         if std::mem::take(&mut self.save_now)
             && let Some(storage) = frame.storage_mut()
