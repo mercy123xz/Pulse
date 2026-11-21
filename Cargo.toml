@@ -44,6 +44,11 @@ rfd = "0.18.0"
 # The window handle, to paint Windows' title bar in the theme's colours (titlebar.rs).
 raw-window-handle = "0.6"
 
+# egui-wgpu with one addition (patches/egui-wgpu/src/winit.rs, marked PULSE PATCH): in software
+# drawing, a frame identical to the one on screen is not rendered again.
+[patch.crates-io]
+egui-wgpu = { path = "patches/egui-wgpu" }
+
 [profile.release]
 opt-level = 3
 lto = "thin"

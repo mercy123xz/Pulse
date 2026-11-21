@@ -99,6 +99,9 @@ static SOFTWARE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::
 
 pub fn set_software(on: bool) {
     SOFTWARE.store(on, Ordering::Relaxed);
+    // Software drawing: don't render a frame that looks like the one on screen (patches/egui-wgpu).
+    #[cfg(windows)]
+    eframe::egui_wgpu::winit::SKIP_IDENTICAL_FRAMES.store(on, Ordering::Relaxed);
 }
 
 pub fn software() -> bool {
@@ -181,10 +184,11 @@ pub fn frame_stats(started: std::time::Instant, render_secs: Option<f32>, causes
     }
 }
 
-/// Software drawing only: a frame caused by nothing but the pointer moving (no click, scroll,
-/// key or running animation) is held back so such frames come at most 15 times a second. Every
-/// mouse move redraws the whole window and eframe cannot skip that, so without this, moving
-/// the mouse costs one full software frame per mouse event.
+/// Software drawing only: a frame caused by nothing but the pointer moving (no click, scroll or
+/// key) is held back so such frames come at most 15 times a second. (egui asks for an
+/// immediate repaint whenever a frame has any input event, so that can't be used to tell.)
+/// Frames that look identical to the one on screen are then not rendered at all
+/// (patches/egui-wgpu).
 pub fn pace(ctx: &egui::Context) {
     use std::time::{Duration, Instant};
     static LAST: std::sync::Mutex<Option<Instant>> = std::sync::Mutex::new(None);
@@ -197,7 +201,7 @@ pub fn pace(ctx: &egui::Context) {
             && i.events.iter().all(|e| matches!(e, egui::Event::PointerMoved(_) | egui::Event::MouseMoved(_)))
             && i.smooth_scroll_delta == egui::Vec2::ZERO
             && !i.pointer.any_down()
-    }) && !ctx.requested_repaint_last_pass();
+    });
     let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
     if hover_only && let Some(l) = *last {
         let wait = GAP.saturating_sub(l.elapsed());
