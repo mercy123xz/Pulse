@@ -181,49 +181,31 @@ pub fn frame_stats(started: std::time::Instant, render_secs: Option<f32>, causes
     }
 }
 
-static PROBE: AtomicU8 = AtomicU8::new(0);
-
-/// Which part of the window the render probe is leaving out right now (0 = nothing).
-pub fn probe() -> u8 {
-    PROBE.load(Ordering::Relaxed)
-}
-
-/// Render probe, only in software drawing and only while the flag file
-/// `logs/render-probe.on` exists. Redraws nonstop and cycles every 5 s through: everything
-/// drawn, nothing drawn, covers left out. Each phase logs its frame gap, so the log shows
-/// what the software renderer spends its time on. Returns the phase.
-pub fn probe_frame(ctx: &egui::Context) -> u8 {
+/// Software drawing only: a frame caused by nothing but the pointer moving (no click, scroll,
+/// key or running animation) is held back so such frames come at most 20 times a second. Every
+/// mouse move redraws the whole window and eframe cannot skip that, so without this, moving
+/// the mouse costs one full software frame per mouse event.
+pub fn pace(ctx: &egui::Context) {
     use std::time::{Duration, Instant};
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    if !*ON.get_or_init(|| crate::settings::data_dir().join("logs").join("render-probe.on").exists()) || !software() {
-        return 0;
+    static LAST: std::sync::Mutex<Option<Instant>> = std::sync::Mutex::new(None);
+    const GAP: Duration = Duration::from_millis(50);
+    if !software() {
+        return;
     }
-    struct P {
-        start: Instant,
-        last: Instant,
-        phase: u8,
-        n: u32,
-        gap: Duration,
+    let hover_only = ctx.input(|i| {
+        !i.events.is_empty()
+            && i.events.iter().all(|e| matches!(e, egui::Event::PointerMoved(_) | egui::Event::MouseMoved(_)))
+            && i.smooth_scroll_delta == egui::Vec2::ZERO
+            && !i.pointer.any_down()
+    }) && !ctx.requested_repaint_last_pass();
+    let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
+    if hover_only && let Some(l) = *last {
+        let wait = GAP.saturating_sub(l.elapsed());
+        if !wait.is_zero() {
+            std::thread::sleep(wait);
+        }
     }
-    static ST: std::sync::Mutex<Option<P>> = std::sync::Mutex::new(None);
-    let now = Instant::now();
-    let mut g = ST.lock().unwrap_or_else(|e| e.into_inner());
-    let p = g.get_or_insert(P { start: now, last: now, phase: 0, n: 0, gap: Duration::ZERO });
-    let phase = ((now.duration_since(p.start).as_secs() / 5) % 3) as u8;
-    if phase != p.phase {
-        let name = ["everything", "nothing drawn", "covers left out"][p.phase as usize];
-        crate::audio::trace(&format!("probe {name}: {} frames, gap avg {:.1} ms", p.n, p.gap.as_secs_f64() * 1000.0 / p.n.max(1) as f64));
-        p.phase = phase;
-        p.n = 0;
-        p.gap = Duration::ZERO;
-    } else {
-        p.n += 1;
-        p.gap += now.duration_since(p.last);
-    }
-    p.last = now;
-    PROBE.store(phase, Ordering::Relaxed);
-    ctx.request_repaint();
-    phase
+    *last = Some(Instant::now());
 }
 
 /// Puts a mode into effect. `keep` holds the extras you asked to keep on.
@@ -250,7 +232,8 @@ pub fn key(e: Extra) -> &'static str {
 }
 
 pub fn on(e: Extra) -> bool {
-    if e == Extra::Animations && software() {
+    // Every frame costs the CPU in software drawing: no animations, progress bar once a second.
+    if matches!(e, Extra::Animations | Extra::LiveProgress) && software() {
         return false;
     }
     OFF.load(Ordering::Relaxed) & e.bit() == 0
@@ -295,7 +278,7 @@ mod tests {
     fn software_drawing_stops_animations() {
         apply(Mode::Normal, &[]);
         set_software(true);
-        assert!(!on(Extra::Animations) && on(Extra::ListArtwork));
+        assert!(!on(Extra::Animations) && !on(Extra::LiveProgress) && on(Extra::ListArtwork));
         set_software(false);
         assert!(on(Extra::Animations));
     }

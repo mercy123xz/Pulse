@@ -4057,11 +4057,14 @@ impl eframe::App for App {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
-        let frame_started = Instant::now();
         let ctx = ui.ctx().clone();
+        crate::perf::pace(&ctx);
+        let frame_started = Instant::now();
         if self.diag.gpu.is_none() {
             self.diag.gpu = Some(crate::diag::gpu(frame));
             crate::perf::set_software(crate::diag::software(frame));
+            // Software drawing turns animations off, but the settings were applied before it was known.
+            self.apply_perf(&ctx);
         }
         // The title bar in the theme's colours (Windows draws it white otherwise).
         crate::titlebar::match_theme(frame, &ctx);
@@ -4071,8 +4074,7 @@ impl eframe::App for App {
             eprintln!("frame {} causes {:?}", ctx.cumulative_frame_nr(), ctx.repaint_causes());
         }
         // Minimized: nothing to draw (the music and the mini player carry on).
-        let probe = crate::perf::probe_frame(&ctx);
-        if probe != 1 && !ctx.input(|i| i.viewport().minimized.unwrap_or(false)) {
+        if !ctx.input(|i| i.viewport().minimized.unwrap_or(false)) {
             crate::ui::draw(self, ui);
         }
         crate::ui::mini::show(self, &ctx);
