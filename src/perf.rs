@@ -173,6 +173,22 @@ pub fn frame_stats(started: std::time::Instant, render_secs: Option<f32>, causes
                 px[1]
             ));
         }
+        #[cfg(windows)]
+        {
+            let p = eframe::egui_wgpu::winit::take_stats();
+            if st.gaps >= 10 {
+                crate::audio::trace(&format!(
+                    "painter: {} drawn, {} skipped (same as on screen), last drawn frame: {} draw calls, {} triangles, shaded area {:.2}x the window, render wait avg {:.1} ms, scale now {:.2}",
+                    p.painted,
+                    p.skipped,
+                    p.draws,
+                    p.triangles,
+                    p.area_px as f64 / (px[0] as f64 * px[1] as f64).max(1.0),
+                    p.wait_secs as f64 * 1000.0 / p.painted.max(1) as f64,
+                    f32::from_bits(eframe::egui_wgpu::winit::RENDER_SCALE.load(Ordering::Relaxed)),
+                ));
+            }
+        }
         if st.gaps >= 10 {
             let mut v: Vec<_> = st.why.iter().collect();
             v.sort_by(|a, b| b.1.cmp(a.1));
@@ -210,6 +226,33 @@ pub fn pace(ctx: &egui::Context) {
         }
     }
     *last = Some(Instant::now());
+}
+
+/// Software drawing, while scrolling: draw smaller and stretch (patches/egui-wgpu), then sharp
+/// again 0.15 s after the last scroll. Off unless the file `logs/scroll-scale.txt` holds a
+/// number from 0.4 to 0.95 (the share of the window's size to draw at while scrolling).
+pub fn scroll_scale(ctx: &egui::Context) {
+    #[cfg(windows)]
+    {
+        static SCALE: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
+        let s = *SCALE.get_or_init(|| {
+            std::fs::read_to_string(crate::settings::data_dir().join("logs").join("scroll-scale.txt"))
+                .ok()
+                .and_then(|t| t.trim().parse::<f32>().ok())
+                .filter(|v| (0.4..=0.95).contains(v))
+                .unwrap_or(1.0)
+        });
+        if s >= 1.0 || !software() {
+            return;
+        }
+        let scrolling = ctx.input(|i| i.time_since_last_scroll() < 0.15);
+        eframe::egui_wgpu::winit::RENDER_SCALE.store((if scrolling { s } else { 1.0 }).to_bits(), Ordering::Relaxed);
+        if scrolling {
+            ctx.request_repaint_after(std::time::Duration::from_millis(160));
+        }
+    }
+    #[cfg(not(windows))]
+    let _ = ctx;
 }
 
 /// Puts a mode into effect. `keep` holds the extras you asked to keep on.
