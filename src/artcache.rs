@@ -114,8 +114,10 @@ impl ArtLoader {
     }
 }
 
-/// No picture is drawn bigger than this many pixels a side (covers are shown at 320 at most).
-const MAX_SIDE: u32 = 1280;
+/// No picture is kept bigger than this many pixels a side. Covers are shown at 320 at most
+/// (640 covers a 2x screen); a 1000 px cover costs 4 MB in memory and makes the software
+/// renderer slow when it is drawn at list size.
+const MAX_SIDE: u32 = 640;
 /// Pictures with more pixels than this aren't opened at all (decoding them needs gigabytes).
 const MAX_PIXELS: u64 = 120_000_000;
 
@@ -133,7 +135,12 @@ pub fn fit(bytes: Vec<u8>) -> Result<Vec<u8>, String> {
     }
     let img = image::load_from_memory(&bytes).map_err(|e| e.to_string())?.thumbnail(MAX_SIDE, MAX_SIDE);
     let mut out = std::io::Cursor::new(Vec::new());
-    img.write_to(&mut out, image::ImageFormat::Png).map_err(|e| e.to_string())?;
+    // JPEG is much faster to write and read; PNG only where the picture has transparency.
+    if img.color().has_alpha() {
+        img.write_to(&mut out, image::ImageFormat::Png).map_err(|e| e.to_string())?;
+    } else {
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 88).encode_image(&img.to_rgb8()).map_err(|e| e.to_string())?;
+    }
     Ok(out.into_inner())
 }
 
@@ -162,7 +169,15 @@ fn fetch(uri: &str) -> Result<Vec<u8>, String> {
         if let Ok(f) = std::fs::File::options().append(true).open(&path) {
             let _ = f.set_modified(SystemTime::now());
         }
-        return fit(b);
+        // An older, bigger copy is made smaller once and saved, not on every load.
+        let small = fit(b.clone())?;
+        if small != b {
+            let tmp = path.with_extension("part");
+            if std::fs::write(&tmp, &small).is_ok() {
+                let _ = std::fs::rename(&tmp, &path);
+            }
+        }
+        return Ok(small);
     }
     let bytes = crate::net::download(uri, |_, _| {})?;
     if bytes.is_empty() {
@@ -365,8 +380,8 @@ mod fit_tests {
     fn big_pictures_are_made_smaller_and_others_left_alone() {
         let small = png(600, 600);
         assert_eq!(fit(small.clone()).unwrap(), small);
-        assert_eq!(size(&fit(png(9000, 4500)).unwrap()), (1280, 640));
-        assert_eq!(size(&fit(png(300, 17000)).unwrap()).1, 1280);
+        assert_eq!(size(&fit(png(9000, 4500)).unwrap()), (640, 320));
+        assert_eq!(size(&fit(png(300, 17000)).unwrap()).1, 640);
         // Not a picture: passed on as it is (it just won't show).
         assert_eq!(fit(b"<html>".to_vec()).unwrap(), b"<html>");
     }
