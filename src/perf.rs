@@ -109,7 +109,7 @@ pub fn software() -> bool {
 /// slow scrolling is Pulse's own drawing work or the renderer. `started` is when this frame's
 /// `ui` began. Every 3 s of continuous drawing one line is logged: the work inside `ui`
 /// (average, longest) and the gap between frames (average, longest).
-pub fn frame_stats(started: std::time::Instant) {
+pub fn frame_stats(started: std::time::Instant, render_secs: Option<f32>) {
     use std::time::{Duration, Instant};
     #[derive(Default)]
     struct Stats {
@@ -121,6 +121,9 @@ pub fn frame_stats(started: std::time::Instant) {
         gaps: u32,
         gap: Duration,
         gap_max: Duration,
+        render: f64,
+        render_max: f64,
+        renders: u32,
     }
     static STATS: std::sync::Mutex<Option<Stats>> = std::sync::Mutex::new(None);
     let now = Instant::now();
@@ -140,17 +143,25 @@ pub fn frame_stats(started: std::time::Instant) {
             st.gap_max = st.gap_max.max(gap);
         }
     }
+    if let Some(r) = render_secs {
+        let r = r as f64 * 1000.0;
+        st.renders += 1;
+        st.render += r;
+        st.render_max = st.render_max.max(r);
+    }
     st.last = Some(started);
     if now.duration_since(since) >= Duration::from_secs(3) {
         if st.gaps >= 10 {
             let ms = |d: Duration| d.as_secs_f64() * 1000.0;
             crate::audio::trace(&format!(
-                "frames: {} in 3 s, ui work avg {:.1} ms max {:.1} ms, gap between frames avg {:.1} ms max {:.1} ms",
+                "frames: {} in 3 s, ui work avg {:.1} ms max {:.1} ms, gap between frames avg {:.1} ms max {:.1} ms, whole frame cpu (draw + render, no vsync wait) avg {:.1} ms max {:.1} ms",
                 st.n,
                 ms(st.work) / st.n as f64,
                 ms(st.work_max),
                 ms(st.gap) / st.gaps as f64,
-                ms(st.gap_max)
+                ms(st.gap_max),
+                st.render / st.renders.max(1) as f64,
+                st.render_max
             ));
         }
         let last = st.last;
