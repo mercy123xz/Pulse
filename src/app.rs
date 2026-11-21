@@ -2385,7 +2385,13 @@ impl App {
         crate::theme::set_reduce_motion(s.reduce_motion || !on(Extra::Animations));
         // egui's own small animations (hover fades, opening sections).
         let anim = if on(Extra::Animations) && !s.reduce_motion { 1.0 / 12.0 } else { 0.0 };
-        ctx.all_styles_mut(|st| st.animation_time = anim);
+        // In software drawing, egui's "tooltips only when the pointer is still" asks for a new
+        // frame on every call while the pointer moves, so moving the mouse redraws nonstop.
+        let still_only = !crate::perf::software();
+        ctx.all_styles_mut(|st| {
+            st.animation_time = anim;
+            st.interaction.show_tooltips_only_when_still = still_only;
+        });
         if !on(Extra::Lookups) {
             self.featured_queue.clear();
             self.views_queue.clear();

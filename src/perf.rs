@@ -182,13 +182,13 @@ pub fn frame_stats(started: std::time::Instant, render_secs: Option<f32>, causes
 }
 
 /// Software drawing only: a frame caused by nothing but the pointer moving (no click, scroll,
-/// key or running animation) is held back so such frames come at most 20 times a second. Every
+/// key or running animation) is held back so such frames come at most 15 times a second. Every
 /// mouse move redraws the whole window and eframe cannot skip that, so without this, moving
 /// the mouse costs one full software frame per mouse event.
 pub fn pace(ctx: &egui::Context) {
     use std::time::{Duration, Instant};
     static LAST: std::sync::Mutex<Option<Instant>> = std::sync::Mutex::new(None);
-    const GAP: Duration = Duration::from_millis(50);
+    const GAP: Duration = Duration::from_millis(66);
     if !software() {
         return;
     }
