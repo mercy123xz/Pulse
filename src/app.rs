@@ -672,7 +672,7 @@ fn warm_one(
             }
             crate::audio::trace(&format!("ahead: lookup started for {}", t.id));
             let known = ids.lock().unwrap().get(&t.id).cloned();
-            let found = crate::youtube::resolve(t, known, quality, &|_| {});
+            let found = crate::youtube::resolve(t, known, quality, false, &|_| {});
             if let Ok((src, video)) = &found {
                 ids.lock().unwrap().insert(t.id.clone(), video.clone());
                 let mut p = prefetched.lock().unwrap();
@@ -3491,7 +3491,7 @@ impl App {
             // Straight away, ahead of all background work; marked in flight so a hover or
             // queue job for the same song doesn't start a second lookup.
             in_flight.lock().unwrap().insert(track.id.clone());
-            let found = crate::youtube::resolve(&track, known, quality, &|msg| {
+            let found = crate::youtube::resolve(&track, known, quality, true, &|msg| {
                 if msg == crate::soundcloud::SWITCHING {
                     crate::soundcloud::announce();
                 }
@@ -3529,7 +3529,7 @@ impl App {
     /// Opening a playlist, album or Orbit loads its first songs ahead of time, so the one
     /// you press starts at once. Done once per visit; not in Gaming and Ultra-low modes.
     pub fn warm_list(&mut self, tracks: &[Track]) {
-        let first: Vec<String> = tracks.iter().take(3).map(|t| t.id.clone()).collect();
+        let first: Vec<String> = tracks.iter().take(4).map(|t| t.id.clone()).collect();
         if first.is_empty() || first == self.warmed_list {
             return;
         }
@@ -3540,7 +3540,7 @@ impl App {
         crate::youtube::get_ready(self.saved.settings.stream_quality);
         // A new list replaces the last one's songs that haven't started yet.
         self.warm_queue.lock().unwrap().clear();
-        self.warm(tracks.iter().take(3).cloned().collect(), false);
+        self.warm(tracks.iter().take(4).cloned().collect(), false);
     }
 
     /// Finds one song's audio link right away (the song under the pointer), so pressing it
@@ -3587,7 +3587,7 @@ impl App {
             let started = Instant::now();
             crate::audio::trace(&format!("hover: lookup started for {}", t.id));
             let known = ids.lock().unwrap().get(&t.id).cloned();
-            let found = crate::youtube::resolve(&t, known, quality, &|_| {});
+            let found = crate::youtube::resolve(&t, known, quality, true, &|_| {});
             if let Ok((src, video)) = &found {
                 ids.lock().unwrap().insert(t.id.clone(), video.clone());
                 let mut p = prefetched.lock().unwrap();

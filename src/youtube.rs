@@ -80,7 +80,6 @@ pub fn ensure_tools(status: &dyn Fn(&str)) -> Result<Tools, String> {
     let tools = installed_tools();
     if tools.ytdlp.is_file() && tools.deno.is_file() {
         update_in_background(&tools);
-        measure_startup_once(&tools);
         return Ok(tools);
     }
     std::fs::create_dir_all(&tools.dir).map_err(|e| format!("Couldn't create {} ({e})", tools.dir.display()))?;
@@ -1115,24 +1114,6 @@ pub(crate) fn source_from_info(json: &str) -> Result<StreamSource, String> {
     })
 }
 
-/// MEASUREMENT ONLY (for the playback log): how long yt-dlp and Deno take just to start,
-/// once per session, on a background thread. Tells how much of a ~1.8 s lookup is
-/// starting the programs (which looking up several songs in one run would save).
-fn measure_startup_once(tools: &Tools) {
-    static ONCE: std::sync::Once = std::sync::Once::new();
-    let tools = tools.clone();
-    ONCE.call_once(move || {
-        std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_secs(5)); // not while the first song starts
-            for (name, program) in [("yt-dlp", &tools.ytdlp), ("Deno", &tools.deno)] {
-                let t = Instant::now();
-                let ok = run(program, &["--version".to_string()], Duration::from_secs(30)).is_ok();
-                crate::audio::trace(&format!("measure: {name} --version took {} ms ({})", t.elapsed().as_millis(), if ok { "ok" } else { "failed" }));
-            }
-        });
-    });
-}
-
 /// The video id in a YouTube link (youtube.com/watch?v=…, music.youtube.com, youtu.be/…,
 /// /shorts/…), if `text` is one. Ids are 11 letters, digits, `-` or `_`.
 pub fn video_id_in_link(text: &str) -> Option<String> {
@@ -1408,7 +1389,9 @@ fn audio_source_for(tools: &Tools, video_id: &str, quality: Quality, track: Opti
 
 /// Everything needed to play `track` from YouTube. `known_video` skips the search
 /// when Pulse already knows which video it is. Returns the source and the video id.
-pub fn resolve(track: &Track, known_video: Option<String>, quality: Quality, status: &dyn Fn(&str)) -> Result<(StreamSource, String), String> {
+/// `discover_soundcloud`: when YouTube has nothing, also search SoundCloud (which downloads the
+/// whole track). Off for lookups nobody asked for yet, so they never fetch tracks by guessing.
+pub fn resolve(track: &Track, known_video: Option<String>, quality: Quality, discover_soundcloud: bool, status: &dyn Fn(&str)) -> Result<(StreamSource, String), String> {
     let tools = ensure_tools(status)?;
     // A song fix names its video on purpose: that one isn't second-guessed.
     let checked = crate::fixes::video(&track.id).is_none().then_some(track);
@@ -1447,6 +1430,7 @@ pub fn resolve(track: &Track, known_video: Option<String>, quality: Quality, sta
         match from_youtube() {
             // Offline: SoundCloud would only wait and fail too.
             Err(e) if e.starts_with("Couldn't reach") => Err(e),
+            Err(e) if !discover_soundcloud => Err(e),
             // YouTube has nothing that plays: SoundCloud, then YouTube's own message if that fails too.
             Err(e) => {
                 status(crate::soundcloud::SWITCHING);
@@ -1613,7 +1597,7 @@ mod tests {
             *SPARE_UNTIL.lock().unwrap() = None;
             // A song never played before, with nothing found ahead of time.
             let at = Instant::now();
-            let (_, video) = resolve(&t, None, Quality::Auto, &|_| {}).expect("a link");
+            let (_, video) = resolve(&t, None, Quality::Auto, true, &|_| {}).expect("a link");
             first.push(at.elapsed().as_secs_f64());
             let at = Instant::now();
             find_videos(&tools, &t).expect("found");

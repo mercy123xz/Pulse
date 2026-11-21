@@ -40,7 +40,7 @@ pub fn download(t: &Track, known_video: Option<String>, quality: Quality, dir: &
             return Ok((path, known_video.unwrap_or_default()));
         }
     }
-    let (src, video) = crate::youtube::resolve(t, known_video, quality, &|_| {})?;
+    let (src, video) = crate::youtube::resolve(t, known_video, quality, true, &|_| {})?;
     let ext = match src.codec {
         crate::audio::Codec::Mp3 => "mp3",
         _ => "m4a",

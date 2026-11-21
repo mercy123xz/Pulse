@@ -1593,7 +1593,7 @@ fn search(app: &mut App, ui: &mut Ui, q: &str) {
             let key = egui::Id::new(("search_warm", &query));
             let now = ui.input(|i| i.time);
             let since: f64 = ui.data_mut(|d| *d.get_temp_mut_or(key, now));
-            if now - since >= 0.7 {
+            if now - since >= 0.3 {
                 app.warm_list(&r.tracks);
             } else {
                 ui.ctx().request_repaint_after(std::time::Duration::from_millis(250));
