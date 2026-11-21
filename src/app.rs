@@ -4076,7 +4076,7 @@ impl eframe::App for App {
         }
         crate::ui::mini::show(self, &ctx);
         if crate::perf::software() {
-            crate::perf::frame_stats(frame_started, frame.info().cpu_usage, &ctx.repaint_causes());
+            crate::perf::frame_stats(frame_started, frame.info().cpu_usage, &ctx.repaint_causes(), { let r = ctx.content_rect().size() * ctx.pixels_per_point(); [r.x as u32, r.y as u32] });
         }
         // Clicking in the window can ask for a save too.
         if std::mem::take(&mut self.save_now)
