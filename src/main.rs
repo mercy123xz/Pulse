@@ -140,7 +140,7 @@ fn use_directx(options: &mut eframe::NativeOptions) {
                 .ok_or_else(|| "No graphics adapter found".to_string())
         }));
         // Software drawing: don't also wait for the display's refresh after each frame.
-        options.wgpu_options.present_mode = wgpu::PresentMode::AutoNoVsync;
+        options.wgpu_options.surface.present_mode = wgpu::PresentMode::AutoNoVsync;
     }
     // Graphics memory sized for a music player, not a game: wgpu otherwise sets aside big
     // blocks of memory up front for speed, which Pulse (some text and a few pictures) never fills.
