@@ -112,7 +112,7 @@ pub fn software() -> bool {
 /// slow scrolling is Pulse's own drawing work or the renderer. `started` is when this frame's
 /// `ui` began. Every 3 s of continuous drawing one line is logged: the work inside `ui`
 /// (average, longest) and the gap between frames (average, longest).
-pub fn frame_stats(started: std::time::Instant, render_secs: Option<f32>, causes: &[egui::RepaintCause], px: [u32; 2]) {
+pub fn frame_stats(ctx: &egui::Context, started: std::time::Instant, render_secs: Option<f32>, causes: &[egui::RepaintCause], px: [u32; 2]) {
     use std::time::{Duration, Instant};
     #[derive(Default)]
     struct Stats {
@@ -189,6 +189,7 @@ pub fn frame_stats(started: std::time::Instant, render_secs: Option<f32>, causes
             }
         }
         if st.gaps >= 10 {
+            crate::audio::trace(&memory_line(ctx));
             let mut v: Vec<_> = st.why.iter().collect();
             v.sort_by(|a, b| b.1.cmp(a.1));
             let top: Vec<String> = v.iter().take(4).map(|(k, n)| format!("{k} x{n}")).collect();
@@ -197,6 +198,73 @@ pub fn frame_stats(started: std::time::Instant, render_secs: Option<f32>, causes
         let last = st.last;
         *st = Stats { last, ..Default::default() };
     }
+}
+
+/// One log line on where Pulse's memory is: what egui holds for pictures (textures on the
+/// graphics side, decoded copies, downloaded files) and, on Windows, the process numbers.
+/// `private` isn't changed by the idle trim (Task Manager's working set is); `faults` are pages
+/// read back in since the last line.
+fn memory_line(ctx: &egui::Context) -> String {
+    let mb = |b: usize| b as f64 / 1_048_576.0;
+    let l = ctx.loaders();
+    let textures: usize = l.texture.lock().iter().map(|t| t.byte_size()).sum();
+    let decoded: usize = l.image.lock().iter().map(|t| t.byte_size()).sum();
+    let files: usize = l.bytes.lock().iter().map(|t| t.byte_size()).sum();
+    let n = ctx.tex_manager().read().num_allocated();
+    let mut s = format!(
+        "memory: {n} egui textures, picture textures {:.1} MB, decoded pictures kept {:.1} MB, downloaded picture files kept {:.1} MB",
+        mb(textures),
+        mb(decoded),
+        mb(files)
+    );
+    if let Some(p) = process_memory() {
+        s += &format!(", process private {:.0} MB, working set {:.0} MB, {} page faults since last line", mb(p.private), mb(p.working_set), p.faults);
+    }
+    s
+}
+
+struct ProcessMemory {
+    private: usize,
+    working_set: usize,
+    faults: u32,
+}
+
+#[cfg(windows)]
+fn process_memory() -> Option<ProcessMemory> {
+    use std::sync::atomic::AtomicU32;
+    static LAST_FAULTS: AtomicU32 = AtomicU32::new(0);
+    #[repr(C)]
+    #[derive(Default)]
+    struct Counters {
+        cb: u32,
+        page_faults: u32,
+        peak_working_set: usize,
+        working_set: usize,
+        quota_peak_paged: usize,
+        quota_paged: usize,
+        quota_peak_non_paged: usize,
+        quota_non_paged: usize,
+        pagefile: usize,
+        peak_pagefile: usize,
+        private: usize,
+    }
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GetCurrentProcess() -> isize;
+        fn K32GetProcessMemoryInfo(process: isize, counters: *mut Counters, cb: u32) -> i32;
+    }
+    let mut c = Counters::default();
+    c.cb = std::mem::size_of::<Counters>() as u32;
+    // SAFETY: our own process and a correctly sized struct; on failure `c` stays unused.
+    if unsafe { K32GetProcessMemoryInfo(GetCurrentProcess(), &mut c, c.cb) } == 0 {
+        return None;
+    }
+    let before = LAST_FAULTS.swap(c.page_faults, Ordering::Relaxed);
+    Some(ProcessMemory { private: c.private, working_set: c.working_set, faults: c.page_faults.wrapping_sub(before) })
+}
+#[cfg(not(windows))]
+fn process_memory() -> Option<ProcessMemory> {
+    None
 }
 
 /// Software drawing only: a frame caused by nothing but the pointer moving (no click, scroll or

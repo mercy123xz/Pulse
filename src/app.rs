@@ -1126,6 +1126,10 @@ impl App {
         egui_extras::install_image_loaders(&cc.egui_ctx);
         // Pictures from the web: saved on disk, let go of in memory when off screen.
         crate::artcache::ArtLoader::install(&cc.egui_ctx);
+        // Once a picture is on the graphics side, let go of the decoded copy and the downloaded
+        // file in memory (a 500 px cover is 1 MB decoded; the copy was kept until it went off
+        // screen for a minute). Drawn again later, it is read back from the disk cache.
+        cc.egui_ctx.options_mut(|o| o.reduce_texture_memory = true);
 
         // A damaged save file (cut off by a crash or power cut) is recovered from the spare
         // copy or the newest backup, rather than starting over with an empty library.
@@ -4085,7 +4089,7 @@ impl eframe::App for App {
         }
         crate::ui::mini::show(self, &ctx);
         if crate::perf::software() {
-            crate::perf::frame_stats(frame_started, frame.info().cpu_usage, &ctx.repaint_causes(), { let r = ctx.content_rect().size() * ctx.pixels_per_point(); [r.x as u32, r.y as u32] });
+            crate::perf::frame_stats(&ctx, frame_started, frame.info().cpu_usage, &ctx.repaint_causes(), { let r = ctx.content_rect().size() * ctx.pixels_per_point(); [r.x as u32, r.y as u32] });
         }
         // Clicking in the window can ask for a save too.
         if std::mem::take(&mut self.save_now)
