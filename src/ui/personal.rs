@@ -194,7 +194,7 @@ fn quick_tile(ui: &mut Ui, w: f32, art: Option<&str>, glyph: &str, title: &str, 
     focus_ring(ui, &resp);
     // Pointing at the play button on top still counts (see `widgets::card`).
     let hovered = resp.hovered() || ui.rect_contains_pointer(rect);
-    let fill = if hovered { pal().surface_active } else { pal().surface_hover };
+    let fill = if hovered && hover_fx() { pal().surface_active } else { pal().surface_hover };
     ui.painter().rect_filled(rect, r_md(), fill);
     let art_rect = Rect::from_min_size(rect.min, Vec2::splat(56.0));
     let r = CornerRadius { nw: r_md().nw, sw: r_md().sw, ne: 0, se: 0 };
@@ -289,7 +289,7 @@ pub fn profile_page(app: &mut App, ui: &mut Ui) {
     ui.painter().add(egui::Shadow { offset: [0, 10], blur: 28, spread: 0, color: Color32::from_black_alpha(110) }.as_shape(pic, CornerRadius::same(92)));
     avatar(ui, pic, app);
     let edit = ui.interact(pic, egui::Id::new("profile_pic"), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
-    if edit.hovered() {
+    if edit.hot() {
         ui.painter().circle_filled(pic.center(), 92.0, Color32::from_black_alpha(140));
         paint_icon(ui.painter(), pic.center(), icon::PENCIL_SIMPLE, regular(40.0), Color32::WHITE);
     }
@@ -479,7 +479,7 @@ pub fn profile_dialog(app: &mut App, ctx: &egui::Context) {
                         paint_icon(ui.painter(), c, icon::USER, regular(40.0), pal().text_muted);
                     }
                 }
-                if resp.hovered() {
+                if resp.hot() {
                     ui.painter().circle_filled(c, 56.0, Color32::from_black_alpha(110));
                     paint_icon(ui.painter(), c, icon::CAMERA, regular(26.0), Color32::WHITE);
                 }

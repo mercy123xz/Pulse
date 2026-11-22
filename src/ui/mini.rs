@@ -110,10 +110,10 @@ fn draw(app: &mut App, ui: &mut Ui) {
         let resp = ui.interact(r, ui.id().with(("mini_btn", name)), Sense::click());
         a11y(ui, &resp, egui::WidgetType::Button, || name.to_owned());
         if main {
-            ui.painter().circle_filled(c, 15.0, if resp.hovered() { pal().text.gamma_multiply(0.85) } else { pal().text });
+            ui.painter().circle_filled(c, 15.0, if resp.hot() { pal().text.gamma_multiply(0.85) } else { pal().text });
             paint_icon(ui.painter(), c, glyph, filled_icon(14.0), pal().bg);
         } else {
-            if resp.hovered() {
+            if resp.hot() {
                 ui.painter().circle_filled(c, 13.0, pal().surface_hover);
             }
             paint_icon(ui.painter(), c, glyph, filled_icon(14.0), pal().text);
@@ -147,7 +147,7 @@ fn close_button(app: &mut App, ui: &Ui, full: Rect) {
     let r = Rect::from_center_size(pos2(full.right() - 11.0, full.top() + 11.0), Vec2::splat(16.0));
     let resp = ui.interact(r, ui.id().with("mini_close"), Sense::click());
     a11y(ui, &resp, egui::WidgetType::Button, || tr("Close mini player").to_owned());
-    if resp.hovered() {
+    if resp.hot() {
         ui.painter().circle_filled(r.center(), 8.0, pal().surface_active);
     }
     paint_icon(ui.painter(), r.center(), icon::X, regular(10.0), pal().text_muted);

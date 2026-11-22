@@ -413,7 +413,7 @@ fn sidebar_items(app: &mut App, ui: &mut Ui) {
         let tip = format!("{}\n{}", tr("Music info by Deezer"), "Song info, artwork and charts from Deezer. Audio from YouTube.");
         let (row, resp) = ui.allocate_exact_size(vec2(ui.available_width(), if compact { 36.0 } else { 34.0 }), Sense::click());
         a11y(ui, &resp, egui::WidgetType::Link, || tr("Music info by Deezer").to_owned());
-        let hot = resp.hovered();
+        let hot = resp.hot();
         if hot {
             ui.painter().rect_filled(row, r_md(), pal().surface_hover);
         }
@@ -506,7 +506,7 @@ fn nav_item_art(ui: &mut Ui, art: Option<&str>, glyph: &str, label: &str, select
         focus_ring(ui, &resp);
         let fill = if selected {
             pal().surface_active
-        } else if resp.hovered() {
+        } else if resp.hot() {
             pal().surface_hover
         } else {
             Color32::TRANSPARENT
@@ -519,7 +519,7 @@ fn nav_item_art(ui: &mut Ui, art: Option<&str>, glyph: &str, label: &str, select
             let (font, col) = if selected { (filled_icon(19.0), pal().accent_soft) } else { (regular(19.0), pal().text_muted) };
             paint_icon(ui.painter(), top, glyph, font, col);
         }
-        let text_col = if selected || resp.hovered() { pal().text } else { pal().text_muted };
+        let text_col = if selected || resp.hot() { pal().text } else { pal().text_muted };
         let g = one_line(ui, short, med(9.5), text_col, rect.width() - 6.0);
         ui.painter().galley(pos2(rect.center().x - g.size().x / 2.0, rect.bottom() - 8.0 - g.size().y), g, text_col);
         return resp.on_hover_text(full).on_hover_cursor(egui::CursorIcon::PointingHand);
@@ -531,7 +531,7 @@ fn nav_item_art(ui: &mut Ui, art: Option<&str>, glyph: &str, label: &str, select
     // Highlights fade in and out; the accent bar beside the page you're on is drawn once
     // for the whole sidebar (`nav_bar`), so it can slide from one row to the next.
     let ctx = ui.ctx().clone();
-    let hover_t = ctx.animate_bool_with_time(resp.id.with("hover_fade"), resp.hovered(), crate::theme::motion(0.12));
+    let hover_t = ctx.animate_bool_with_time(resp.id.with("hover_fade"), resp.hot(), crate::theme::motion(0.12));
     let sel_t = ctx.animate_bool_with_time(resp.id.with("sel_fade"), selected, crate::theme::motion(0.18));
     if hover_t > 0.0 && sel_t < 1.0 {
         ui.painter().rect_filled(rect, r_md(), pal().surface_hover.gamma_multiply(hover_t));
@@ -550,13 +550,13 @@ fn nav_item_art(ui: &mut Ui, art: Option<&str>, glyph: &str, label: &str, select
         let font = if selected { filled_icon(17.0) } else { regular(17.0) };
         paint_icon(ui.painter(), icon_c, glyph, font, icon_col);
     }
-    let text_col = if selected || resp.hovered() { pal().text } else { pal().text_muted };
+    let text_col = if selected || resp.hot() { pal().text } else { pal().text_muted };
     let max_w = rect.width() - 80.0;
     let g = one_line(ui, label, med(13.5), text_col, max_w);
     ui.painter().galley(pos2(rect.left() + 44.0, rect.center().y - g.size().y / 2.0), g, text_col);
     if let Some(n) = badge.filter(|n| *n > 0) {
         // Hovered/selected rows have a lighter background, where faint text would be too dim.
-        let badge_col = if selected || resp.hovered() { pal().text_muted } else { pal().text_faint };
+        let badge_col = if selected || resp.hot() { pal().text_muted } else { pal().text_faint };
         ui.painter().text(pos2(rect.right() - 10.0, rect.center().y), Align2::RIGHT_CENTER, n.to_string(), regular(11.5), badge_col);
     }
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
@@ -689,10 +689,10 @@ fn search_dropdown(app: &mut App, ui: &mut Ui, pill: Rect, edit: &egui::Response
                 let b = Rect::from_min_size(pos2(head.right() - label.size().x - 20.0 - 4.0, head.center().y - 13.0), vec2(label.size().x + 20.0, 26.0));
                 let br = ui.interact(b, area_id.with("clear"), Sense::click());
                 a11y(ui, &br, egui::WidgetType::Button, || tr("Clear history").to_owned());
-                if br.hovered() {
+                if br.hot() {
                     ui.painter().rect_filled(b, CornerRadius::same(13), pal().surface_hover);
                 }
-                ui.painter().galley(b.center() - label.size() / 2.0, label, if br.hovered() { pal().text } else { pal().text_muted });
+                ui.painter().galley(b.center() - label.size() / 2.0, label, if br.hot() { pal().text } else { pal().text_muted });
                 if br.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                     clear_history = true;
                 }
@@ -713,7 +713,7 @@ fn search_dropdown(app: &mut App, ui: &mut Ui, pill: Rect, edit: &egui::Response
                 };
                 let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::click());
                 // The whole row counts as pointed at, the × on it included.
-                let hot = ui.rect_contains_pointer(rect) || sel == Some(k);
+                let hot = (hover_fx() && ui.rect_contains_pointer(rect)) || sel == Some(k);
                 let fade = ui.ctx().animate_bool(area_id.with(("hot", k)), hot);
                 if fade > 0.0 {
                     ui.painter().rect_filled(rect, r_md(), pal().surface_hover.gamma_multiply(fade));
@@ -732,10 +732,10 @@ fn search_dropdown(app: &mut App, ui: &mut Ui, pill: Rect, edit: &egui::Response
                             let b = Rect::from_center_size(pos2(right - 13.0, rect.center().y), Vec2::splat(28.0));
                             let br = ui.interact(b, area_id.with(("forget", k)), Sense::click());
                             a11y(ui, &br, egui::WidgetType::Button, || format!("{} {text}", tr("Remove")));
-                            if br.hovered() {
+                            if br.hot() {
                                 ui.painter().circle_filled(b.center(), 14.0, pal().surface_active);
                             }
-                            paint_icon(ui.painter(), b.center(), icon::X, regular(14.0), if br.hovered() { pal().text } else { pal().text_muted });
+                            paint_icon(ui.painter(), b.center(), icon::X, regular(14.0), if br.hot() { pal().text } else { pal().text_muted });
                             if br.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                                 forget = Some(k);
                             }
@@ -775,7 +775,7 @@ fn search_dropdown(app: &mut App, ui: &mut Ui, pill: Rect, edit: &egui::Response
                             ui.painter().rect_stroke(
                                 b,
                                 CornerRadius::same(15),
-                                Stroke::new(1.0, if br.hovered() { pal().text } else { pal().text_faint }),
+                                Stroke::new(1.0, if br.hot() { pal().text } else { pal().text_faint }),
                                 egui::StrokeKind::Inside,
                             );
                             ui.painter().text(b.center(), Align2::CENTER_CENTER, tr(if on { "Following" } else { "Follow" }), semi(12.0), pal().text);
@@ -789,7 +789,7 @@ fn search_dropdown(app: &mut App, ui: &mut Ui, pill: Rect, edit: &egui::Response
                             let (glyph, font, col) = if on {
                                 (icon::CHECK_CIRCLE, filled_icon(20.0), pal().accent_soft)
                             } else {
-                                (icon::PLUS_CIRCLE, regular(20.0), if br.hovered() { pal().text } else { pal().text_muted })
+                                (icon::PLUS_CIRCLE, regular(20.0), if br.hot() { pal().text } else { pal().text_muted })
                             };
                             paint_icon(ui.painter(), b.center(), glyph, font, col);
                             let tip = tr(if on { "Remove from your library" } else { "Save to your library" });
@@ -884,7 +884,7 @@ fn top_bar(app: &mut App, ui: &mut Ui) {
         let (rect, pill) = ui.allocate_exact_size(vec2(w, 40.0), Sense::click());
         let id = egui::Id::new("search_box");
         let focused = ui.memory(|m| m.has_focus(id));
-        let hot = focused || ui.rect_contains_pointer(rect);
+        let hot = focused || (hover_fx() && ui.rect_contains_pointer(rect));
         if focused {
             ui.painter().add(egui::Shadow { offset: [0, 0], blur: 16, spread: 1, color: pal().accent.gamma_multiply(0.30) }.as_shape(rect, CornerRadius::same(20)));
         }
@@ -927,10 +927,10 @@ fn top_bar(app: &mut App, ui: &mut Ui) {
             let r = Rect::from_center_size(right - vec2(10.0, 0.0), Vec2::splat(26.0));
             let c = ui.interact(r, id.with("clear"), Sense::click());
             a11y(ui, &c, egui::WidgetType::Button, || "Clear search".to_owned());
-            if c.hovered() {
+            if c.hot() {
                 ui.painter().circle_filled(r.center(), 13.0, pal().surface_active);
             }
-            paint_icon(ui.painter(), r.center(), icon::X, regular(14.0), if c.hovered() { pal().text } else { pal().text_muted });
+            paint_icon(ui.painter(), r.center(), icon::X, regular(14.0), if c.hot() { pal().text } else { pal().text_muted });
             if c.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                 app.search_text.clear();
                 ui.memory_mut(|m| m.request_focus(id));
@@ -946,7 +946,7 @@ fn top_bar(app: &mut App, ui: &mut Ui) {
             // Your profile picture: opens your profile.
             let (r, resp) = ui.allocate_exact_size(Vec2::splat(34.0), Sense::click());
             personal::avatar(ui, r, app);
-            if app.route == Route::Profile || resp.hovered() {
+            if app.route == Route::Profile || resp.hot() {
                 ui.painter().circle_stroke(r.center(), 18.0, Stroke::new(2.0, pal().accent_soft));
             }
             let who = if app.saved.profile.name.is_empty() { tr("Profile").to_string() } else { app.saved.profile.name.clone() };
@@ -992,7 +992,7 @@ fn top_bar(app: &mut App, ui: &mut Ui) {
 fn top_icon(ui: &mut Ui, glyph: &str, on: bool, tip: &str) -> egui::Response {
     let (rect, resp) = ui.allocate_exact_size(Vec2::splat(38.0), Sense::click());
     a11y(ui, &resp, egui::WidgetType::Button, || tip.lines().next().unwrap_or(tip).to_owned());
-    let hovered = resp.hovered();
+    let hovered = resp.hot();
     let h = ui.ctx().animate_bool(resp.id.with("hover_fade"), hovered);
     if on {
         ui.painter().circle_filled(rect.center(), 19.0, pal().surface_active);
@@ -1469,7 +1469,7 @@ fn search_top_card(app: &mut App, ui: &mut Ui, artist: Option<&ArtistInfo>, trac
         .or_else(|| tracks.first().map(|t| (t.title.as_str(), "Song", t.art_big()))) else { return };
     // The same height as the four songs beside it, so the two sit level.
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 4.0 * 56.0), Sense::click());
-    let hot = response.hovered() || ui.rect_contains_pointer(rect);
+    let hot = hover_fx() && (response.hovered() || ui.rect_contains_pointer(rect));
     // A soft wash of the theme's accent from the top-left corner, like a cover glow.
     ui.painter().rect_filled(rect, r_lg(), if hot { pal().surface_active } else { pal().surface_hover });
     let glow = pal().accent.gamma_multiply(if hot { 0.26 } else { 0.18 });
@@ -1725,7 +1725,7 @@ fn hero(ui: &mut Ui, h: &Hero) -> HeroClicks {
     if h.editable {
         let r = ui.interact(art_rect, ui.id().with("hero_art"), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
         a11y(ui, &r, egui::WidgetType::Button, || tr("Change cover").to_owned());
-        if r.hovered() {
+        if r.hot() {
             // Pencil overlay, like Spotify.
             ui.painter().rect_filled(art_rect, radius, Color32::from_black_alpha(140));
             paint_icon(ui.painter(), art_rect.center() - vec2(0.0, 10.0), icon::PENCIL_SIMPLE, regular(40.0), Color32::WHITE);
@@ -1929,7 +1929,7 @@ fn save_heart(ui: &mut Ui, liked: bool) -> egui::Response {
     let (rect, resp) = ui.allocate_exact_size(Vec2::splat(40.0), Sense::click());
     resp_selected(ui, &resp, liked, "Save to your library");
     let size = 24.0 * heart_pop(ui, resp.id.with("pop"), liked);
-    let (font, col) = if liked { (filled_icon(size), pal().accent_soft) } else { (regular(size), if resp.hovered() { pal().text } else { pal().text_muted }) };
+    let (font, col) = if liked { (filled_icon(size), pal().accent_soft) } else { (regular(size), if resp.hot() { pal().text } else { pal().text_muted }) };
     paint_icon(ui.painter(), rect.center(), icon::HEART, font, col);
     resp.on_hover_text(tr(if liked { "Remove from your library" } else { "Save to your library" })).on_hover_cursor(egui::CursorIcon::PointingHand)
 }
@@ -2067,7 +2067,7 @@ fn artist(app: &mut App, ui: &mut Ui) {
 fn latest_release_card(ui: &mut Ui, a: &AlbumInfo) -> bool {
     let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width().min(560.0), 104.0), Sense::click());
     a11y(ui, &resp, egui::WidgetType::Button, || format!("Latest release: {}", a.title));
-    let fill = if resp.hovered() { pal().surface_active } else { pal().surface_hover };
+    let fill = if resp.hot() { pal().surface_active } else { pal().surface_hover };
     ui.painter().rect_filled(rect, r_lg(), fill);
     let art = Rect::from_min_size(rect.min + vec2(12.0, 12.0), Vec2::splat(80.0));
     artwork(ui, art, a.cover.as_deref(), r_md());
@@ -2517,7 +2517,7 @@ fn player_bar(app: &mut App, ui: &mut Ui) {
         if let Some(t) = app.audio.timing() {
             title_resp = title_resp.on_hover_text(t);
         }
-        if title_resp.hovered() {
+        if title_resp.hot() {
             ui.painter().hline(title_rect.x_range(), title_rect.bottom() - 1.0, Stroke::new(1.0, pal().text));
         }
         if title_resp.clicked() {
@@ -2576,7 +2576,7 @@ fn player_bar(app: &mut App, ui: &mut Ui) {
         resp_selected(ui, &h, liked, "Like current song");
         // Keyed to the song, so changing songs doesn't make an already-liked heart pop.
         let size = 18.0 * heart_pop(ui, egui::Id::new(("np_like_pop", &t.id)), liked);
-        let (font, col) = if liked { (filled_icon(size), pal().accent_soft) } else { (regular(size), if h.hovered() { pal().text } else { pal().text_muted }) };
+        let (font, col) = if liked { (filled_icon(size), pal().accent_soft) } else { (regular(size), if h.hot() { pal().text } else { pal().text_muted }) };
         paint_icon(ui.painter(), hr.center(), icon::HEART, font, col);
         if h.clicked() {
             app.toggle_like(&t, &ctx);
@@ -2618,7 +2618,7 @@ fn player_bar(app: &mut App, ui: &mut Ui) {
         let resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand);
         let playing = app.is_playing();
         a11y(ui, &resp, egui::WidgetType::Button, || if playing { "Pause" } else { "Play" }.to_owned());
-        ui.painter().circle_filled(r.center(), 19.0, if resp.hovered() { pal().text.gamma_multiply(0.85) } else { pal().text });
+        ui.painter().circle_filled(r.center(), 19.0, if resp.hot() { pal().text.gamma_multiply(0.85) } else { pal().text });
         if loading {
             let t = ui.input(|i| i.time) as f32;
             let start = t * 6.0;

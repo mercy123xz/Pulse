@@ -503,7 +503,7 @@ fn theme_step(app: &mut App, ui: &mut Ui, s: &mut Setup) {
             super::settings_page::swatch(ui, pic, &t.schemes[0].palette);
             let border = if selected {
                 Stroke::new(2.5, LAVENDER)
-            } else if resp.hovered() {
+            } else if resp.hot() {
                 Stroke::new(1.0, Color32::from_white_alpha(90))
             } else {
                 Stroke::new(1.0, Color32::from_white_alpha(30))

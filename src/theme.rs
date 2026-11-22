@@ -448,6 +448,25 @@ pub fn motion(secs: f32) -> f32 {
     if reduce_motion() { 0.0 } else { secs }
 }
 
+/// Hover highlights and hover animations. Off in Ultra-low (a mouse move then redraws
+/// nothing); turning Animations back on there brings them back.
+pub fn hover_fx() -> bool {
+    use crate::perf::{mode, on, Extra, Mode};
+    mode() != Mode::UltraLow || on(Extra::Animations)
+}
+
+/// `resp.hot()` is `resp.hovered()` for looks only. Clicks, tooltips and controls that
+/// appear on hover keep using `hovered()`.
+pub trait Hot {
+    fn hot(&self) -> bool;
+}
+
+impl Hot for egui::Response {
+    fn hot(&self) -> bool {
+        hover_fx() && self.hovered()
+    }
+}
+
 /// 0..1 → 0..1: quick at first, settling gently at the end.
 pub fn ease_out(t: f32) -> f32 {
     1.0 - (1.0 - t.clamp(0.0, 1.0)).powi(3)

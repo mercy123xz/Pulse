@@ -181,7 +181,7 @@ pub fn labeled_button(ui: &mut Ui, glyph: &str, label: &str, active: bool) -> Re
     let (rect, resp) = ui.allocate_exact_size(vec2(w, 32.0), Sense::click());
     a11y(ui, &resp, WidgetType::Button, || label.to_owned());
     focus_ring(ui, &resp);
-    let hovered = resp.hovered();
+    let hovered = resp.hot();
     let fill = if active { pal().surface_active } else if hovered { pal().surface_hover } else { Color32::TRANSPARENT };
     ui.painter().rect_filled(rect, CornerRadius::same(16), fill);
     let col = if active { pal().accent_soft } else if hovered { pal().text } else { pal().text_muted };
@@ -207,7 +207,7 @@ fn icon_button_impl(ui: &mut Ui, glyph: &str, size: f32, color: Color32, tip: &s
         Some((name, on)) => resp_selected(ui, &resp, on, name),
         None => a11y(ui, &resp, WidgetType::Button, || tip.to_owned()),
     }
-    let hovered = resp.hovered();
+    let hovered = resp.hot();
     if hovered {
         ui.painter().circle_filled(rect.center(), rect.width() / 2.0, pal().surface_hover);
     }
@@ -273,7 +273,7 @@ pub fn play_button(ui: &mut Ui, size: f32, playing: bool) -> Response {
     let (rect, resp) = ui.allocate_exact_size(Vec2::splat(size), Sense::click());
     a11y(ui, &resp, WidgetType::Button, || if playing { "Pause" } else { "Play" }.to_owned());
     // Hover is shown by the grow animation only: white on the lighter accent is too faint.
-    let t = ui.ctx().animate_bool(resp.id, resp.hovered());
+    let t = ui.ctx().animate_bool(resp.id, resp.hot());
     // Grows a little under the pointer and gives a little when pressed.
     let press = ui.ctx().animate_bool_with_time(resp.id.with("press"), resp.is_pointer_button_down_on(), crate::theme::motion(0.08));
     let r = size / 2.0 * (1.0 + 0.05 * t - 0.08 * press);
@@ -297,7 +297,7 @@ pub fn pill(ui: &mut Ui, label: &str, selected: bool) -> Response {
     focus_ring(ui, &resp);
     let (fill, fg) = if selected {
         (pal().text, pal().bg)
-    } else if resp.hovered() {
+    } else if resp.hot() {
         (pal().surface_active, pal().text)
     } else {
         (pal().surface_hover, pal().text)
@@ -315,7 +315,7 @@ pub fn ghost_button(ui: &mut Ui, glyph: &str, label: &str) -> Response {
     let (rect, resp) = ui.allocate_exact_size(vec2(g.size().x + icon_w + 28.0, 34.0), Sense::click());
     a11y(ui, &resp, WidgetType::Button, || label.to_owned());
     focus_ring(ui, &resp);
-    let hovered = resp.hovered();
+    let hovered = resp.hot();
     let stroke = if hovered { Stroke::new(1.0, pal().text_muted) } else { Stroke::new(1.0, pal().border) };
     let fill = if hovered { pal().surface_hover } else { Color32::TRANSPARENT };
     ui.painter().rect(rect, CornerRadius::same(17), fill, stroke, egui::StrokeKind::Inside);
@@ -356,9 +356,9 @@ pub fn link_text(ui: &Ui, rect_id: egui::Id, pos: Pos2, text: &str, font: FontId
     let rect = Rect::from_min_size(pos, g.size());
     let resp = ui.interact(rect, rect_id, Sense::click());
     a11y(ui, &resp, WidgetType::Link, || text.to_owned());
-    let col = if resp.hovered() { pal().text } else { color };
+    let col = if resp.hot() { pal().text } else { color };
     ui.painter().galley_with_override_text_color(pos, g, col);
-    if resp.hovered() {
+    if resp.hot() {
         ui.painter().hline(rect.x_range(), rect.bottom() - 1.0, Stroke::new(1.0, col));
     }
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
@@ -375,7 +375,7 @@ pub fn slim_slider(ui: &mut Ui, width: f32, value: f32, buffered: Option<f32>, l
     let (rect, mut resp) = ui.allocate_exact_size(vec2(width, 16.0), Sense::click_and_drag());
     resp.widget_info(|| WidgetInfo::slider(true, (value * 100.0).round() as f64, label));
     focus_ring(ui, &resp);
-    let hot = resp.hovered() || resp.dragged() || resp.has_focus();
+    let hot = resp.hot() || resp.dragged() || resp.has_focus();
     let track_h = if hot { 5.0 } else { 4.0 };
     let track = Rect::from_center_size(rect.center(), vec2(rect.width(), track_h));
     let r = CornerRadius::same(3);
@@ -479,7 +479,7 @@ pub fn card(ui: &mut Ui, w: f32, info: &CardInfo) -> CardClick {
     let hovered = resp.hovered() || ui.rect_contains_pointer(rect);
     let style = &parts().card;
     let radius = style.radius.map(CornerRadius::same).unwrap_or(r_lg());
-    if hovered {
+    if hovered && hover_fx() {
         ui.painter().rect_filled(rect, radius, pal().surface_hover);
     } else if let Some(fill) = style.fill {
         ui.painter().rect_filled(rect, radius, fill);
@@ -523,7 +523,7 @@ pub fn card(ui: &mut Ui, w: f32, info: &CardInfo) -> CardClick {
         let b = ui.interact(btn, id.with("play"), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
         a11y(ui, &b, WidgetType::Button, || format!("Play {}", info.title));
         // Pointing at it: it grows a little and its glow gets stronger.
-        let over = ui.ctx().animate_bool_with_time(id.with("play_hover"), b.hovered(), crate::theme::motion(0.12));
+        let over = ui.ctx().animate_bool_with_time(id.with("play_hover"), b.hot(), crate::theme::motion(0.12));
         let r = 21.0 * (1.0 + 0.06 * over);
         let pb = &parts().play_button;
         let fill = pb.fill.unwrap_or(pal().accent);
@@ -1012,10 +1012,11 @@ fn track_row(ui: &mut Ui, id: egui::Id, list: &str, i: usize, t: &Track, tracks:
     let radius = style.radius.map(CornerRadius::same).unwrap_or(r_md());
     let is_selected = selected.contains(&i);
     // The hover highlight fades in and out instead of blinking on and off.
-    let hover_t = ui.ctx().animate_bool_with_time(id.with("hover_fade"), hovered, crate::theme::motion(0.12));
+    let fx = hovered && hover_fx();
+    let hover_t = ui.ctx().animate_bool_with_time(id.with("hover_fade"), fx, crate::theme::motion(0.12));
     if is_selected {
         ui.painter().rect_filled(rect, radius, pal().surface_active);
-        if hovered {
+        if fx {
             ui.painter().rect_filled(rect, radius, Color32::from_white_alpha(6));
         }
     } else if hover_t > 0.0 {
@@ -1115,7 +1116,7 @@ fn track_row(ui: &mut Ui, id: egui::Id, list: &str, i: usize, t: &Track, tracks:
         let (font, col) = if liked {
             (filled_icon(size), pal().accent_soft)
         } else {
-            (regular(size), if heart.hovered() { pal().text } else { pal().text_muted })
+            (regular(size), if heart.hot() { pal().text } else { pal().text_muted })
         };
         paint_icon(ui.painter(), c.like.center(), icon::HEART, font, col);
     }
@@ -1125,7 +1126,7 @@ fn track_row(ui: &mut Ui, id: egui::Id, list: &str, i: usize, t: &Track, tracks:
         ui.painter().text(c.time.right_center(), Align2::RIGHT_CENTER, fmt_duration(length), regular(12.5), pal().text_muted);
     }
     if hovered || more.has_focus() {
-        let hot = more.hovered() || more_open;
+        let hot = more.hot() || more_open;
         if hot {
             ui.painter().circle_filled(more.rect.center(), 15.0, pal().surface_hover);
         }
@@ -1269,7 +1270,7 @@ fn menu_row(ui: &mut Ui, glyph: &str, label: &str, trailing: Option<&str>, open:
     let resp = ui.allocate_response(vec2(min_w, 27.0), Sense::click());
     let rect = resp.rect;
     a11y(ui, &resp, WidgetType::Button, || label.to_owned());
-    let hot = resp.hovered() || resp.has_focus() || open;
+    let hot = resp.hot() || resp.has_focus() || open;
     let t = ui.ctx().animate_bool_with_time(resp.id.with("hover"), hot, 0.08);
     if t > 0.0 {
         let fill = if danger { Color32::from_rgb(220, 70, 70).gamma_multiply(0.16) } else { pal().surface_hover.lerp_to_gamma(pal().accent, 0.10) };
@@ -1339,7 +1340,7 @@ pub fn paint_more_dots(p: &egui::Painter, center: egui::Pos2, size: f32, color: 
 pub fn more_button(ui: &mut Ui, size: f32, tip: &str) -> Response {
     let (rect, resp) = ui.allocate_exact_size(Vec2::splat(size + 12.0), Sense::click());
     a11y(ui, &resp, WidgetType::Button, || tip.to_owned());
-    let hot = resp.hovered();
+    let hot = resp.hot();
     if hot {
         ui.painter().circle_filled(rect.center(), rect.width() / 2.0, pal().surface_hover);
     }
@@ -1425,7 +1426,7 @@ pub fn section_title(ui: &mut Ui, title: &str, action: Option<&str>) -> bool {
         if let Some(a) = action {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let r = ui.add(egui::Label::new(egui::RichText::new(a).font(semi(12.5)).color(pal().text_muted)).sense(Sense::click()));
-                if r.hovered() {
+                if r.hot() {
                     ui.painter().hline(r.rect.x_range(), r.rect.bottom(), Stroke::new(1.0, pal().text_muted));
                 }
                 clicked = r.on_hover_cursor(egui::CursorIcon::PointingHand).clicked();

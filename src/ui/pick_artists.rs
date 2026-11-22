@@ -286,7 +286,7 @@ fn artist(ui: &mut Ui, a: &ArtistInfo, picked: bool, w: f32) -> egui::Response {
             p.circle_filled(badge, 14.0, pal().accent);
             p.circle_stroke(badge, 14.0, Stroke::new(3.0, pal().surface));
             paint_icon(p, badge, icon::CHECK, regular(15.0), Color32::WHITE);
-        } else if resp.hovered() {
+        } else if resp.hot() {
             p.circle_filled(pic.center(), pic.width() / 2.0, Color32::from_black_alpha(60));
         }
         if resp.has_focus() {

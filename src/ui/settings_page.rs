@@ -465,7 +465,7 @@ fn themes_section(app: &mut App, ui: &mut Ui) {
             swatch(ui, Rect::from_min_size(rect.min, vec2(176.0, 100.0)), &t.schemes[scheme].palette);
             let border = if selected {
                 Stroke::new(2.5, pal().accent_soft)
-            } else if resp.hovered() {
+            } else if resp.hot() {
                 Stroke::new(1.0, pal().text_muted)
             } else {
                 Stroke::new(1.0, pal().border)
@@ -741,7 +741,7 @@ fn eq_curve(ui: &mut Ui, gains: &mut [f32; 6]) -> bool {
             }
         }
         focus_ring(ui, &resp);
-        let r = if resp.hovered() || resp.dragged() { 7.0 } else { 5.5 };
+        let r = if resp.hot() || resp.dragged() { 7.0 } else { 5.5 };
         p.circle(pos2(x_of(i), y_of(*g)), r, Color32::WHITE, Stroke::new(1.5, pal().accent));
         if resp.hovered() || resp.dragged() {
             resp.on_hover_text(format!("{:+.1} dB", *g));

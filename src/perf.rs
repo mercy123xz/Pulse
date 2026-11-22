@@ -20,7 +20,7 @@ pub enum Mode {
 /// The extras a mode can switch off.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Extra {
-    /// Moving backgrounds, menu fades and hover animations.
+    /// Moving backgrounds, menu fades and hover effects.
     Animations,
     /// Loading pages ahead when you point at them.
     Preloading,
@@ -368,6 +368,12 @@ mod tests {
         assert!(on(Extra::Animations));
         apply(Mode::UltraLow, &[]);
         assert_eq!(switched_off().len(), Extra::ALL.len());
+        // Hover effects follow: gone in Ultra-low, back if you keep Animations.
+        assert!(!crate::theme::hover_fx());
+        apply(Mode::UltraLow, &["animations".into()]);
+        assert!(crate::theme::hover_fx());
+        apply(Mode::Gaming, &[]);
+        assert!(crate::theme::hover_fx());
         apply(Mode::Normal, &[]);
     }
 
