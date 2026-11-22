@@ -218,7 +218,7 @@ fn memory_line(ctx: &egui::Context) -> String {
         mb(files)
     );
     if let Some(p) = process_memory() {
-        s += &format!(", process private {:.0} MB, working set {:.0} MB, {} page faults since last line", mb(p.private), mb(p.working_set), p.faults);
+        s += &format!(", process private {:.0} MB, working set {:.0} MB (Task Manager's number: {:.0} MB), {} page faults since last line", mb(p.private), mb(p.working_set), mb(p.private_working_set), p.faults);
     }
     s
 }
@@ -226,6 +226,8 @@ fn memory_line(ctx: &egui::Context) -> String {
 struct ProcessMemory {
     private: usize,
     working_set: usize,
+    /// What Task Manager's Memory column shows (0 = Windows too old to say).
+    private_working_set: usize,
     faults: u32,
 }
 
@@ -247,6 +249,9 @@ fn process_memory() -> Option<ProcessMemory> {
         pagefile: usize,
         peak_pagefile: usize,
         private: usize,
+        // The rest is only there on Windows 10 1809 and later.
+        private_working_set: usize,
+        shared_commit: u64,
     }
     #[link(name = "kernel32")]
     unsafe extern "system" {
@@ -255,12 +260,17 @@ fn process_memory() -> Option<ProcessMemory> {
     }
     let mut c = Counters::default();
     c.cb = std::mem::size_of::<Counters>() as u32;
-    // SAFETY: our own process and a correctly sized struct; on failure `c` stays unused.
+    // SAFETY: our own process and a struct at least as large as the size passed; on failure `c` stays unused.
     if unsafe { K32GetProcessMemoryInfo(GetCurrentProcess(), &mut c, c.cb) } == 0 {
-        return None;
+        // An older Windows: ask for the shorter version.
+        c.cb = std::mem::offset_of!(Counters, private_working_set) as u32;
+        if unsafe { K32GetProcessMemoryInfo(GetCurrentProcess(), &mut c, c.cb) } == 0 {
+            return None;
+        }
     }
+    let _ = c.shared_commit;
     let before = LAST_FAULTS.swap(c.page_faults, Ordering::Relaxed);
-    Some(ProcessMemory { private: c.private, working_set: c.working_set, faults: c.page_faults.wrapping_sub(before) })
+    Some(ProcessMemory { private: c.private, working_set: c.working_set, private_working_set: c.private_working_set, faults: c.page_faults.wrapping_sub(before) })
 }
 #[cfg(not(windows))]
 fn process_memory() -> Option<ProcessMemory> {
