@@ -3,7 +3,7 @@
 #![expect(clippy::unwrap_used)] // TODO(emilk): avoid unwraps
 #![expect(unsafe_code)]
 
-use crate::{RenderState, SurfaceConfig, SurfaceErrorAction, WgpuConfiguration, damage, renderer};
+use crate::{RenderState, SurfaceConfig, SurfaceErrorAction, WgpuConfiguration, renderer};
 use crate::{
     RendererOptions,
     capture::{CaptureReceiver, CaptureSender, CaptureState, capture_channel},
@@ -20,8 +20,6 @@ struct SurfaceState {
     resizing: bool,
     needs_reconfigure: bool,
     needs_recreate: bool,
-    /// PULSE PATCH: the surface can be copied into (needed to show the kept picture).
-    copy_dst: core::sync::atomic::AtomicBool,
 }
 
 /// Everything you need to paint egui with [`wgpu`] on [`winit`].
@@ -48,10 +46,6 @@ pub struct Painter {
 
     // PULSE PATCH: what was last drawn per viewport (hash, when), to skip identical frames.
     last_painted: ViewportIdMap<(u64, web_time::Instant)>,
-    // PULSE PATCH: the last picture per viewport, to redraw only what changed (see `damage`).
-    canvases: ViewportIdMap<damage::Canvas>,
-    // PULSE PATCH: asked once for a surface that can be copied into.
-    copy_dst_tried: bool,
 }
 
 /// PULSE PATCH: what the painter did since `take_stats` was last called.
@@ -85,22 +79,6 @@ pub fn take_stats() -> FrameStats {
     g.skipped = 0;
     g.wait_secs = 0.0;
     out
-}
-
-/// PULSE PATCH. Where the page scrolls, in points (left, top, right, bottom). Pulse sets it every
-/// frame, `None` if nothing scrolls. Only used when drawing in software (see `damage`).
-pub static SCROLL_REGION: std::sync::Mutex<Option<[f32; 4]>> = std::sync::Mutex::new(None);
-
-static DAMAGE: std::sync::Mutex<(damage::DamageStats, Vec<(&'static str, u32)>)> =
-    std::sync::Mutex::new((
-        damage::DamageStats { skipped: 0, presented: 0, shifted: 0, patched: 0, full: 0, drawn_px: 0 },
-        Vec::new(),
-    ));
-
-/// PULSE PATCH: how frames were drawn since the last call (and why whole frames were), then
-/// starts counting again.
-pub fn take_damage() -> (damage::DamageStats, Vec<(&'static str, u32)>) {
-    std::mem::take(&mut *DAMAGE.lock().unwrap_or_else(|e| e.into_inner()))
 }
 
 fn geometry(primitives: &[epaint::ClippedPrimitive], pixels_per_point: f32) -> (u32, u32, u64) {
@@ -203,8 +181,6 @@ impl Painter {
             capture_tx,
             capture_rx,
             last_painted: Default::default(),
-            canvases: Default::default(),
-            copy_dst_tried: false,
         }
     }
 
@@ -239,21 +215,8 @@ impl Painter {
         let width = surface_state.width;
         let height = surface_state.height;
 
-        // PULSE PATCH: in software mode the kept picture is copied into the surface.
-        let copy_dst = SKIP_IDENTICAL_FRAMES.load(core::sync::atomic::Ordering::Relaxed)
-            && surface_state
-                .surface
-                .get_capabilities(&render_state.adapter)
-                .usages
-                .contains(wgpu::TextureUsages::COPY_DST);
-        surface_state.copy_dst.store(copy_dst, core::sync::atomic::Ordering::Relaxed);
-
         let mut surf_config = wgpu::SurfaceConfiguration {
-            usage: if copy_dst {
-                wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_DST
-            } else {
-                wgpu::TextureUsages::RENDER_ATTACHMENT
-            },
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format: render_state.target_format,
             present_mode,
             alpha_mode: surface_state.alpha_mode,
@@ -433,7 +396,6 @@ impl Painter {
                 resizing,
                 needs_reconfigure: false,
                 needs_recreate: false,
-                copy_dst: false.into(),
             },
         );
         let Some(width) = NonZeroU32::new(width) else {
@@ -648,7 +610,6 @@ impl Painter {
 
         // PULSE PATCH: skip a frame that would look exactly like the one on screen.
         let mut fingerprint = None;
-        let mut prior_painted_at = None;
         if !capture && SKIP_IDENTICAL_FRAMES.load(core::sync::atomic::Ordering::Relaxed) {
             if let Some(surface) = self.surfaces.get(&viewport_id) {
                 fingerprint = frame_fingerprint(
@@ -672,7 +633,7 @@ impl Painter {
                 }
             }
             // Recorded again only once this frame has really been presented.
-            prior_painted_at = self.last_painted.remove(&viewport_id).map(|(_, at)| at);
+            self.last_painted.remove(&viewport_id);
         }
 
         // If the previous frame produced `CurrentSurfaceTexture::Lost`, the action match
@@ -722,44 +683,6 @@ impl Painter {
                     label: Some("encoder"),
                 });
 
-        // PULSE PATCH: work out how little of the window has to be drawn again (software only).
-        let mut damage: Option<(damage::FrameDesc, damage::Plan)> = None;
-        let software = SKIP_IDENTICAL_FRAMES.load(core::sync::atomic::Ordering::Relaxed);
-        if software
-            && !capture
-            && self.options.msaa_samples <= 1
-            && self.options.depth_stencil_format.is_none()
-            && !self.options.dithering
-            && clear_color[3] >= 1.0
-            && surface_state.copy_dst.load(core::sync::atomic::Ordering::Relaxed)
-        {
-            let size = [surface_state.width, surface_state.height];
-            let region = *SCROLL_REGION.lock().unwrap_or_else(|e| e.into_inner());
-            if let Some(desc) = damage::FrameDesc::describe(size, pixels_per_point, clear_color, region, clipped_primitives) {
-                let format = render_state.target_format;
-                let canvas = self
-                    .canvases
-                    .entry(viewport_id)
-                    .or_insert_with(|| damage::Canvas::new(&render_state.device, size, format));
-                if !canvas.fits(size, format) {
-                    *canvas = damage::Canvas::new(&render_state.device, size, format);
-                }
-                let plan = canvas.plan(&desc, textures_delta, SKIP_KEEPALIVE);
-                damage = Some((desc, plan));
-            }
-        }
-        if damage.is_none() {
-            if let Some(canvas) = self.canvases.get_mut(&viewport_id) {
-                canvas.invalidate();
-            }
-            // Started in software after the window was set up: ask once for a surface we can copy into.
-            if software && !surface_state.copy_dst.load(core::sync::atomic::Ordering::Relaxed) && !self.copy_dst_tried {
-                self.copy_dst_tried = true;
-                surface_state.needs_reconfigure = true;
-            }
-        }
-        let draws_nothing = matches!(damage, Some((_, damage::Plan::Skip | damage::Plan::Present)));
-
         // Upload all resources for the GPU.
         let screen_descriptor = renderer::ScreenDescriptor {
             size_in_pixels: [surface_state.width, surface_state.height],
@@ -780,39 +703,14 @@ impl Painter {
                 }
             }
 
-            if draws_nothing {
-                Vec::new()
-            } else {
-                renderer.update_buffers(
-                    &render_state.device,
-                    &render_state.queue,
-                    &mut encoder,
-                    clipped_primitives,
-                    &screen_descriptor,
-                )
-            }
+            renderer.update_buffers(
+                &render_state.device,
+                &render_state.queue,
+                &mut encoder,
+                clipped_primitives,
+                &screen_descriptor,
+            )
         };
-
-        // PULSE PATCH: the frame looks like the picture we have: nothing to draw or present.
-        if let Some((_, damage::Plan::Skip)) = &damage {
-            if let Some((desc, _)) = damage.take() {
-                if let Some(canvas) = self.canvases.get_mut(&viewport_id) {
-                    canvas.skip(desc);
-                }
-            }
-            {
-                let mut renderer = render_state.renderer.write();
-                #[expect(clippy::iter_over_hash_type)] // Order doesn't matter here
-                for id in textures_delta.free.drain() {
-                    renderer.free_texture(&id);
-                }
-            }
-            if let (Some(f), Some(at)) = (fingerprint, prior_painted_at) {
-                self.last_painted.insert(viewport_id, (f, at));
-            }
-            STATS.lock().unwrap_or_else(|e| e.into_inner()).skipped += 1;
-            return vsync_sec;
-        }
 
         if surface_state.needs_reconfigure {
             Self::configure_surface(surface_state, render_state, &self.config.surface);
@@ -859,35 +757,6 @@ impl Painter {
         {
             let renderer = render_state.renderer.read();
 
-            // PULSE PATCH: draw into the kept picture and copy that to the window.
-            if let Some((desc, plan)) = damage.take() {
-                if let Some(canvas) = self.canvases.get_mut(&viewport_id) {
-                    let mut ds = damage::DamageStats::default();
-                    canvas.paint(
-                        &mut encoder,
-                        &renderer,
-                        clipped_primitives,
-                        desc,
-                        &plan,
-                        clear_color,
-                        &screen_descriptor,
-                        &output_frame.texture,
-                        &mut ds,
-                    );
-                    let mut g = DAMAGE.lock().unwrap_or_else(|e| e.into_inner());
-                    g.0.presented += ds.presented;
-                    g.0.shifted += ds.shifted;
-                    g.0.patched += ds.patched;
-                    g.0.full += ds.full;
-                    g.0.drawn_px += ds.drawn_px;
-                    if let damage::Plan::Full(why) = plan {
-                        match g.1.iter_mut().find(|e| e.0 == why) {
-                            Some(e) => e.1 += 1,
-                            None => g.1.push((why, 1)),
-                        }
-                    }
-                }
-            } else {
             let target_texture = if capture {
                 let capture_state = self.screen_capture_state.get_or_insert_with(|| {
                     CaptureState::new(&render_state.device, &output_frame.texture)
@@ -970,7 +839,6 @@ impl Painter {
                     &output_frame,
                     &mut encoder,
                 ));
-            }
             }
         }
 
@@ -1062,7 +930,6 @@ impl Painter {
             .retain(|id, _| active_viewports.contains(id));
         self.msaa_texture_view
             .retain(|id, _| active_viewports.contains(id));
-        self.canvases.retain(|id, _| active_viewports.contains(id));
     }
 
     #[expect(clippy::needless_pass_by_ref_mut, clippy::unused_self)]

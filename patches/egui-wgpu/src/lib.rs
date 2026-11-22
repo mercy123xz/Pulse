@@ -21,9 +21,6 @@ pub use wgpu;
 /// Low-level painting of [`egui`](https://github.com/emilk/egui) on [`wgpu`].
 mod renderer;
 
-/// PULSE PATCH: redraw only what changed.
-pub mod damage;
-
 mod setup;
 
 pub use renderer::*;
