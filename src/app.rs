@@ -4070,6 +4070,8 @@ impl eframe::App for App {
         let ctx = ui.ctx().clone();
         crate::perf::pace(&ctx);
         let frame_started = Instant::now();
+        // Set again by the page's scroll area, if this frame has one (software drawing).
+        crate::perf::set_scroll_region(None);
         if self.diag.gpu.is_none() {
             self.diag.gpu = Some(crate::diag::gpu(frame));
             crate::perf::set_software(crate::diag::software(frame));

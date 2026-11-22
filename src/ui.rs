@@ -187,7 +187,9 @@ fn main_scroll(app: &mut App, ui: &mut Ui) {
         }
     }
     let t = crate::theme::appear(ui.ctx(), id.with("t"), 0.2);
-    egui::ScrollArea::vertical().id_salt(("page", page_key)).auto_shrink(false).show(ui, |ui| {
+    let mut region = None;
+    let out = egui::ScrollArea::vertical().id_salt(("page", page_key)).auto_shrink(false).show(ui, |ui| {
+        region = Some(ui.clip_rect());
         if t < 1.0 {
             ui.multiply_opacity(t);
         }
@@ -196,6 +198,28 @@ fn main_scroll(app: &mut App, ui: &mut Ui) {
             page(app, ui);
         });
     });
+    if crate::perf::software() {
+        snap_scroll(ui.ctx(), out);
+        crate::perf::set_scroll_region(region);
+    }
+}
+
+/// Software drawing: after egui has scrolled the page, park it on a whole pixel (the part of a
+/// pixel is kept aside, so slow scrolling still adds up). Every scroll step then moves the whole
+/// picture by whole pixels, and the painter can move the old picture instead of drawing the page
+/// again. The page looks the same: egui already draws text on whole pixels.
+fn snap_scroll<R>(ctx: &egui::Context, out: egui::scroll_area::ScrollAreaOutput<R>) {
+    let ppp = ctx.pixels_per_point();
+    let key = out.id.with("snap");
+    let was: Option<(f32, f32)> = ctx.data(|d| d.get_temp(key));
+    let mut state = out.state;
+    let y = state.offset.y;
+    let max = (out.content_size.y - out.inner_rect.height()).max(0.0);
+    let exact = was.map_or(y, |(exact, set)| exact + (y - set)).clamp(0.0, max);
+    let set = if exact >= max { max } else { (exact * ppp).round() / ppp };
+    ctx.data_mut(|d| d.insert_temp(key, (exact, set)));
+    state.offset.y = set;
+    state.store(ctx, out.id);
 }
 
 fn shortcuts(app: &mut App, ctx: &egui::Context) {

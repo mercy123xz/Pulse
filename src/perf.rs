@@ -108,6 +108,19 @@ pub fn software() -> bool {
     SOFTWARE.load(Ordering::Relaxed)
 }
 
+/// Software drawing: tells the painter where the page scrolls this frame (in points), so it can
+/// move the old picture instead of drawing the page again (patches/egui-wgpu `damage`).
+/// Call with `None` at the start of every frame.
+pub fn set_scroll_region(region: Option<egui::Rect>) {
+    #[cfg(windows)]
+    if software() {
+        let r = region.map(|r| [r.min.x, r.min.y, r.max.x, r.max.y]);
+        *eframe::egui_wgpu::winit::SCROLL_REGION.lock().unwrap_or_else(|e| e.into_inner()) = r;
+    }
+    #[cfg(not(windows))]
+    let _ = region;
+}
+
 /// Frame timing for the playback log, only while drawing in software (WARP), to tell whether
 /// slow scrolling is Pulse's own drawing work or the renderer. `started` is when this frame's
 /// `ui` began. Every 3 s of continuous drawing one line is logged: the work inside `ui`
@@ -185,6 +198,17 @@ pub fn frame_stats(ctx: &egui::Context, started: std::time::Instant, render_secs
                     p.triangles,
                     p.area_px as f64 / (px[0] as f64 * px[1] as f64).max(1.0),
                     p.wait_secs as f64 * 1000.0 / p.painted.max(1) as f64
+                ));
+                let (d, why) = eframe::egui_wgpu::winit::take_damage();
+                let why: Vec<String> = why.iter().map(|(k, n)| format!("{k} x{n}")).collect();
+                crate::audio::trace(&format!(
+                    "damage: {} moved the old picture, {} patched, {} drawn whole, {} shown again; drawn {:.2}x the window per frame; whole frames because: {}",
+                    d.shifted,
+                    d.patched,
+                    d.full,
+                    d.presented,
+                    d.drawn_px as f64 / (px[0] as f64 * px[1] as f64).max(1.0) / p.painted.max(1) as f64,
+                    if why.is_empty() { "-".to_string() } else { why.join(" | ") }
                 ));
             }
         }

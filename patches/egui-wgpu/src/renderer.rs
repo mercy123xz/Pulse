@@ -606,6 +606,59 @@ impl Renderer {
         render_pass.set_scissor_rect(0, 0, size_in_pixels[0], size_in_pixels[1]);
     }
 
+    /// PULSE PATCH: like [`Self::render`] for meshes only, but draws only inside `region`
+    /// (x, y, width, height in pixels), and skips a mesh whose pixel bounds `job_bounds`
+    /// (x0, y0, x1, y1; same order as `paint_jobs`) don't touch it. Used to redraw just the
+    /// part of a frame that changed. Must not be given paint callbacks.
+    pub fn render_damage(
+        &self,
+        render_pass: &mut wgpu::RenderPass<'static>,
+        paint_jobs: &[epaint::ClippedPrimitive],
+        job_bounds: &[[i32; 4]],
+        screen_descriptor: &ScreenDescriptor,
+        region: [u32; 4],
+    ) {
+        let pixels_per_point = screen_descriptor.pixels_per_point;
+        let size_in_pixels = screen_descriptor.size_in_pixels;
+
+        render_pass.set_viewport(0.0, 0.0, size_in_pixels[0] as f32, size_in_pixels[1] as f32, 0.0, 1.0);
+        render_pass.set_pipeline(&self.pipeline);
+        render_pass.set_bind_group(0, &self.uniform_bind_group, &[]);
+
+        let (rx0, ry0, rx1, ry1) = (region[0], region[1], region[0] + region[2], region[1] + region[3]);
+        let mut index_buffer_slices = self.index_buffer.slices.iter();
+        let mut vertex_buffer_slices = self.vertex_buffer.slices.iter();
+
+        for (i, epaint::ClippedPrimitive { clip_rect, primitive }) in paint_jobs.iter().enumerate() {
+            let epaint::Primitive::Mesh(mesh) = primitive else { continue };
+            let index_buffer_slice = index_buffer_slices.next().expect("You must call .update_buffers() before .render()");
+            let vertex_buffer_slice = vertex_buffer_slices.next().expect("You must call .update_buffers() before .render()");
+            let b = job_bounds[i];
+            if b[2] <= rx0 as i32 || b[0] >= rx1 as i32 || b[3] <= ry0 as i32 || b[1] >= ry1 as i32 {
+                continue;
+            }
+            let rect = ScissorRect::new(clip_rect, pixels_per_point, size_in_pixels);
+            let x0 = rect.x.max(rx0);
+            let y0 = rect.y.max(ry0);
+            let x1 = (rect.x + rect.width).min(rx1);
+            let y1 = (rect.y + rect.height).min(ry1);
+            if x1 <= x0 || y1 <= y0 {
+                continue;
+            }
+            render_pass.set_scissor_rect(x0, y0, x1 - x0, y1 - y0);
+            if let Some(Texture { bind_group, .. }) = self.textures.get(&mesh.texture_id) {
+                render_pass.set_bind_group(1, bind_group, &[]);
+                render_pass.set_index_buffer(
+                    self.index_buffer.buffer.slice(index_buffer_slice.start as u64..index_buffer_slice.end as u64),
+                    wgpu::IndexFormat::Uint32,
+                );
+                render_pass.set_vertex_buffer(0, self.vertex_buffer.buffer.slice(vertex_buffer_slice.start as u64..vertex_buffer_slice.end as u64));
+                render_pass.draw_indexed(0..mesh.indices.len() as u32, 0, 0..1);
+            }
+        }
+        render_pass.set_scissor_rect(0, 0, size_in_pixels[0], size_in_pixels[1]);
+    }
+
     /// Should be called before [`Self::render`].
     pub fn update_texture(
         &mut self,
