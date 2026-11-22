@@ -4065,7 +4065,6 @@ impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         crate::perf::pace(&ctx);
-        crate::perf::scroll_scale(&ctx);
         let frame_started = Instant::now();
         if self.diag.gpu.is_none() {
             self.diag.gpu = Some(crate::diag::gpu(frame));

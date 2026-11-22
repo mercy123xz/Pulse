@@ -46,22 +46,7 @@ pub struct Painter {
 
     // PULSE PATCH: what was last drawn per viewport (hash, when), to skip identical frames.
     last_painted: ViewportIdMap<(u64, web_time::Instant)>,
-
-    // PULSE PATCH: the smaller picture the window is drawn into while Pulse asks for a
-    // lower render scale (see `RENDER_SCALE`).
-    scaled: Option<ScaledTarget>,
 }
-
-struct ScaledTarget {
-    view: wgpu::TextureView,
-    id: epaint::TextureId,
-    size: [u32; 2],
-}
-
-/// PULSE PATCH. 1.0 = draw at full size. Below that (software drawing, while scrolling) the
-/// frame is drawn into a smaller picture first and stretched to the window: the software
-/// renderer's cost is per pixel, so a smaller picture is much cheaper. f32 bits.
-pub static RENDER_SCALE: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0x3f80_0000);
 
 /// PULSE PATCH: what the painter did since `take_stats` was last called.
 #[derive(Default, Clone, Copy, Debug)]
@@ -94,22 +79,6 @@ pub fn take_stats() -> FrameStats {
     g.skipped = 0;
     g.wait_secs = 0.0;
     out
-}
-
-fn begin_pass<'a>(encoder: &'a mut wgpu::CommandEncoder, view: &'a wgpu::TextureView, clear: wgpu::Color) -> wgpu::RenderPass<'a> {
-    encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-        label: Some("pulse_scaled_pass"),
-        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-            view,
-            resolve_target: None,
-            ops: wgpu::Operations { load: wgpu::LoadOp::Clear(clear), store: wgpu::StoreOp::Store },
-            depth_slice: None,
-        })],
-        depth_stencil_attachment: None,
-        timestamp_writes: None,
-        occlusion_query_set: None,
-        multiview_mask: None,
-    })
 }
 
 fn geometry(primitives: &[epaint::ClippedPrimitive], pixels_per_point: f32) -> (u32, u32, u64) {
@@ -149,7 +118,6 @@ fn frame_fingerprint(
     let mut h = ahash::AHasher::default();
     h.write(bytemuck::bytes_of(&size));
     h.write_u32(pixels_per_point.to_bits());
-    h.write_u32(RENDER_SCALE.load(core::sync::atomic::Ordering::Relaxed));
     for c in clear_color {
         h.write_u32(c.to_bits());
     }
@@ -213,7 +181,6 @@ impl Painter {
             capture_tx,
             capture_rx,
             last_painted: Default::default(),
-            scaled: None,
         }
     }
 
@@ -722,7 +689,7 @@ impl Painter {
             pixels_per_point,
         };
 
-        let mut user_cmd_bufs = {
+        let user_cmd_bufs = {
             let mut renderer = render_state.renderer.write();
             #[expect(clippy::iter_over_hash_type)] // Order doesn't matter here
             for (id, image_deltas) in textures_delta.set.drain() {
@@ -786,95 +753,8 @@ impl Painter {
             }
         };
 
-        // PULSE PATCH: draw into a smaller picture, then stretch it over the window.
-        let scale = f32::from_bits(RENDER_SCALE.load(core::sync::atomic::Ordering::Relaxed));
-        let use_scaled = !capture
-            && scale < 0.99
-            && self.options.msaa_samples <= 1
-            && !self.depth_texture_view.contains_key(&viewport_id);
-        if use_scaled {
-            let full = [surface_state.width, surface_state.height];
-            let small = [
-                ((full[0] as f32 * scale).ceil() as u32).clamp(1, full[0]),
-                ((full[1] as f32 * scale).ceil() as u32).clamp(1, full[1]),
-            ];
-            if self.scaled.as_ref().map(|t| t.size) != Some(small) {
-                let texture = render_state.device.create_texture(&wgpu::TextureDescriptor {
-                    label: Some("pulse_scaled"),
-                    size: wgpu::Extent3d { width: small[0], height: small[1], depth_or_array_layers: 1 },
-                    mip_level_count: 1,
-                    sample_count: 1,
-                    dimension: wgpu::TextureDimension::D2,
-                    format: render_state.target_format,
-                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-                    view_formats: &[],
-                });
-                let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-                let mut renderer = render_state.renderer.write();
-                let id = match self.scaled.take() {
-                    Some(old) => {
-                        renderer.update_egui_texture_from_wgpu_texture(&render_state.device, &view, wgpu::FilterMode::Linear, old.id);
-                        old.id
-                    }
-                    None => renderer.register_native_texture(&render_state.device, &view, wgpu::FilterMode::Linear),
-                };
-                self.scaled = Some(ScaledTarget { view, id, size: small });
-            }
-            let target = self.scaled.as_ref().expect("just made");
-            let clear = wgpu::Color {
-                r: clear_color[0] as f64,
-                g: clear_color[1] as f64,
-                b: clear_color[2] as f64,
-                a: clear_color[3] as f64,
-            };
-            // 1) the page, into the small picture
-            {
-                let renderer = render_state.renderer.read();
-                let pass = begin_pass(&mut encoder, &target.view, clear);
-                renderer.render(
-                    &mut pass.forget_lifetime(),
-                    clipped_primitives,
-                    &renderer::ScreenDescriptor {
-                        size_in_pixels: small,
-                        pixels_per_point: pixels_per_point * small[0] as f32 / full[0] as f32,
-                    },
-                );
-            }
-            // Submitted now, so the buffers are not overwritten by the next step.
-            let first = encoder.finish();
-            render_state.queue.submit(core::iter::chain(core::mem::take(&mut user_cmd_bufs), [first]));
-            render_queue_guard.commands_submitted = true;
-            // 2) the small picture, stretched over the window
-            encoder = render_state
-                .device
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("encoder_stretch") });
-            let points = [full[0] as f32 / pixels_per_point, full[1] as f32 / pixels_per_point];
-            let rect = epaint::Rect::from_min_size(epaint::Pos2::ZERO, epaint::vec2(points[0], points[1]));
-            let mut mesh = epaint::Mesh::with_texture(target.id);
-            mesh.add_rect_with_uv(
-                rect,
-                epaint::Rect::from_min_max(epaint::pos2(0.0, 0.0), epaint::pos2(1.0, 1.0)),
-                epaint::Color32::WHITE,
-            );
-            let quad = [epaint::ClippedPrimitive { clip_rect: rect, primitive: epaint::Primitive::Mesh(mesh) }];
-            let stretch_cmds = render_state.renderer.write().update_buffers(
-                &render_state.device,
-                &render_state.queue,
-                &mut encoder,
-                &quad,
-                &screen_descriptor,
-            );
-            user_cmd_bufs = stretch_cmds;
-            {
-                let renderer = render_state.renderer.read();
-                let view = output_frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
-                let pass = begin_pass(&mut encoder, &view, clear);
-                renderer.render(&mut pass.forget_lifetime(), &quad, &screen_descriptor);
-            }
-        }
-
         let mut capture_buffer = None;
-        if !use_scaled {
+        {
             let renderer = render_state.renderer.read();
 
             let target_texture = if capture {
