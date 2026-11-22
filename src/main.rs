@@ -129,19 +129,6 @@ fn use_directx(options: &mut eframe::NativeOptions) {
     setup.instance_descriptor.backends = wgpu::Backends::DX12;
     // The shader compiler built into Windows, so no extra DLL has to ship with the .exe.
     setup.instance_descriptor.backend_options.dx12.shader_compiler = wgpu::Dx12Compiler::Fxc;
-    if !crate::settings::hardware_acceleration_enabled() {
-        // "Hardware acceleration" off: draw with Windows' built-in software renderer (WARP).
-        setup.native_adapter_selector = Some(std::sync::Arc::new(|adapters: &[wgpu::Adapter], _surface: Option<&wgpu::Surface<'_>>| {
-            adapters
-                .iter()
-                .find(|a| a.get_info().device_type == wgpu::DeviceType::Cpu)
-                .or_else(|| adapters.first())
-                .cloned()
-                .ok_or_else(|| "No graphics adapter found".to_string())
-        }));
-        // One less step per pixel for the software renderer.
-        options.dithering = false;
-    }
     // Graphics memory sized for a music player, not a game: wgpu otherwise sets aside big
     // blocks of memory up front for speed, which Pulse (some text and a few pictures) never fills.
     let device = setup.device_descriptor.clone();

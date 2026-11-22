@@ -244,14 +244,13 @@ impl Check {
 }
 
 /// Everything on the page as plain text, for pasting into an issue. No file paths.
-pub fn report(d: &Diagnostics, settings: &crate::settings::Settings) -> String {
+pub fn report(d: &Diagnostics) -> String {
     let mut out = String::from("Pulse diagnostics\n\n");
     let f = d.facts.clone().unwrap_or_default();
     let line = |out: &mut String, k: &str, v: &str| out.push_str(&format!("{k}: {v}\n"));
     line(&mut out, "Pulse", env!("CARGO_PKG_VERSION"));
     line(&mut out, "System", &f.os);
     line(&mut out, "Graphics", d.gpu.as_deref().unwrap_or("Unknown"));
-    line(&mut out, "Hardware acceleration", if settings.hardware_acceleration { "on" } else { "off" });
     line(&mut out, "Performance mode", &format!("{:?}", crate::perf::mode()));
     line(&mut out, "yt-dlp", &f.ytdlp);
     line(&mut out, "Deno", &f.deno);
@@ -286,7 +285,7 @@ mod tests {
     #[test]
     fn report_has_no_file_paths() {
         let d = Diagnostics { facts: Some(gather(std::env::temp_dir().join("pulse-no-downloads"))), ..Default::default() };
-        let text = report(&d, &crate::settings::Settings::default());
+        let text = report(&d);
         assert!(text.contains("Storage:"));
         let home = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")).unwrap_or_default();
         assert!(home.is_empty() || !text.contains(&home), "the report mustn't show your folders");

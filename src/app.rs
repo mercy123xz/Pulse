@@ -1369,8 +1369,6 @@ impl App {
         if app.saved.settings.show_local_files {
             app.scan_local_files(&cc.egui_ctx);
         }
-        // The window was created before settings loaded; keep the setting in step with how it opened.
-        app.saved.settings.hardware_acceleration = crate::settings::hardware_acceleration_enabled();
         if let Some(err) = app.audio.device_error.clone() {
             app.toast(&err, &cc.egui_ctx);
         }
@@ -2452,10 +2450,6 @@ impl App {
         }
         if s.high_contrast != before.high_contrast || s.theme != before.theme || s.scheme != before.scheme {
             self.apply_theme(ctx);
-        }
-        if s.hardware_acceleration != before.hardware_acceleration {
-            crate::settings::set_hardware_acceleration(s.hardware_acceleration);
-            self.toast(crate::i18n::tr("Restart Pulse to apply this change."), ctx);
         }
         if s.stream_quality != before.stream_quality {
             // Links found ahead of time were for the old quality.

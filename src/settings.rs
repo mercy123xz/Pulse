@@ -190,7 +190,6 @@ pub struct Settings {
     pub check_updates: bool,
     /// When that was last asked (seconds since 1970).
     pub update_checked_at: u64,
-    pub hardware_acceleration: bool,
     /// Theme name and its color scheme.
     pub theme: String,
     /// Empty = the theme's first scheme.
@@ -234,7 +233,6 @@ impl Default for Settings {
             discord_status: false,
             check_updates: true,
             update_checked_at: 0,
-            hardware_acceleration: true,
             theme: "Default".into(),
             scheme: String::new(),
             found_secret_theme: false,
@@ -246,29 +244,6 @@ impl Default for Settings {
 impl Settings {
     pub fn offline_dir(&self) -> PathBuf {
         self.offline_dir.clone().unwrap_or_else(default_offline_dir)
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Hardware acceleration is needed before the window opens, earlier than the
-// saved settings load, so it's also kept in a small file of its own.
-// ---------------------------------------------------------------------------
-
-fn software_flag() -> PathBuf {
-    data_dir().join("software-rendering")
-}
-
-pub fn hardware_acceleration_enabled() -> bool {
-    !software_flag().exists()
-}
-
-pub fn set_hardware_acceleration(on: bool) {
-    let flag = software_flag();
-    if on {
-        let _ = std::fs::remove_file(flag);
-    } else {
-        let _ = std::fs::create_dir_all(data_dir());
-        let _ = std::fs::write(flag, "Pulse draws without the graphics card. Delete this file to undo.\n");
     }
 }
 

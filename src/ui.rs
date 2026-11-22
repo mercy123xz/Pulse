@@ -2838,7 +2838,7 @@ fn report_dialog(app: &mut App, ctx: &egui::Context) {
         }
     });
     if send {
-        let details = if include { crate::diag::report(&app.diag, &app.saved.settings) } else { String::new() };
+        let details = if include { crate::diag::report(&app.diag) } else { String::new() };
         app.report_sending = Some(crate::report::send(crate::report::Kind::Problem, &text, &details));
         app.toast(tr("Sending your report…"), ctx);
     } else if open {

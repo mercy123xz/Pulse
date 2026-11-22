@@ -28,7 +28,7 @@ pub fn diagnostics_page(app: &mut App, ui: &mut Ui) {
             .corner_radius(17)
             .min_size(egui::vec2(0.0, 34.0));
         if ui.add(copy).clicked() {
-            ctx.copy_text(crate::diag::report(&app.diag, &app.saved.settings));
+            ctx.copy_text(crate::diag::report(&app.diag));
             app.toast(tr("Report copied"), &ctx);
         }
         if ghost_button(ui, icon::CHAT_CIRCLE_TEXT, "Report a problem").clicked() {

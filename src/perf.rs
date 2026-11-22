@@ -93,7 +93,7 @@ pub fn give_back_memory() {}
 /// Bits of the extras switched off right now.
 static OFF: AtomicU8 = AtomicU8::new(0);
 static MODE: AtomicU8 = AtomicU8::new(0);
-/// Pulse is drawn without the graphics card (hardware acceleration off, or no graphics
+/// Pulse is drawn without the graphics card (no graphics
 /// driver). Every frame then costs the CPU, so animations and the moving background stay off.
 static SOFTWARE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
