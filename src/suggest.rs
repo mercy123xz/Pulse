@@ -8,19 +8,8 @@
 //!    (songs you liked or played and albums or artists you saved come first).
 
 use crate::deezer::{AlbumInfo, ArtistInfo, PlaylistInfo, SearchResults, Track, name_match};
+use crate::taste::Taste as Library;
 use std::collections::{HashMap, HashSet};
-
-/// What's in your library, for ranking.
-#[derive(Default)]
-pub struct Library<'a> {
-    pub liked_songs: HashSet<&'a str>,
-    pub liked_albums: HashSet<&'a str>,
-    pub liked_playlists: HashSet<&'a str>,
-    pub followed: HashSet<&'a str>,
-    /// Artist id → how often you've played them.
-    pub played_artists: HashMap<&'a str, u32>,
-    pub recent_songs: HashSet<&'a str>,
-}
 
 /// One row under the search box.
 #[derive(Debug, Clone)]
@@ -116,12 +105,7 @@ pub fn picks(typed: &str, r: &SearchResults, lib: &Library, max: usize) -> Vec<P
     let mut artists: Vec<&ArtistInfo> = r.artists.iter().filter(|a| name_match(&a.name, typed) >= 2).collect();
     let artist_score = |a: &ArtistInfo| {
         let mut s = ((a.fans + 1) as f64).log10();
-        if lib.followed.contains(a.id.as_str()) {
-            s += 3.0;
-        }
-        if let Some(n) = lib.played_artists.get(a.id.as_str()) {
-            s += 1.0 + (*n as f64).ln_1p();
-        }
+        s += crate::taste::ARTIST_WEIGHT * lib.artist(&a.id);
         s + name_match(&a.name, typed) as f64
     };
     artists.sort_by(|a, b| artist_score(b).total_cmp(&artist_score(a)));
@@ -142,9 +126,7 @@ pub fn picks(typed: &str, r: &SearchResults, lib: &Library, max: usize) -> Vec<P
         if al.record_type == "album" {
             s += 0.5;
         }
-        if lib.liked_albums.contains(al.id.as_str()) {
-            s += 4.0;
-        }
+        s += 3.0 * lib.album(&al.id).min(1.0) + if lib.liked_albums.contains(&al.id) { 1.0 } else { 0.0 };
         scored.push((s, Pick::Album(al.clone())));
     }
     for t in &r.tracks {
@@ -160,6 +142,8 @@ pub fn picks(typed: &str, r: &SearchResults, lib: &Library, max: usize) -> Vec<P
         if lib.recent_songs.contains(t.id.as_str()) {
             s += 2.0;
         }
+        // Songs by artists you like, even ones you haven't played yet.
+        s += 0.75 * lib.artist(&t.artist.id);
         scored.push((s, Pick::Song(Box::new(t.clone()))));
     }
     for (i, p) in r.playlists.iter().enumerate() {
@@ -250,7 +234,8 @@ mod tests {
     #[test]
     fn your_library_comes_first() {
         let r = results();
-        let lib = Library { liked_songs: HashSet::from(["t1"]), ..Default::default() };
+        let mut lib = Library::default();
+        lib.liked_songs.insert("t1".to_string());
         let picks = picks("osamason", &r, &lib, 6);
         assert!(matches!(&picks[1], Pick::Song(t) if t.id == "t1"), "the liked song is right after the artist: {picks:?}");
         assert!(picks[1].saved(&lib));

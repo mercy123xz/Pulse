@@ -596,22 +596,7 @@ fn search_dropdown(app: &mut App, ui: &mut Ui, pill: Rect, edit: &egui::Response
     if !q.is_empty() {
         app.want_popular_searches(&q, &ctx);
     }
-    let lib = crate::suggest::Library {
-        liked_songs: app.liked_ids.iter().map(String::as_str).collect(),
-        liked_albums: app.saved.liked_albums.iter().map(|a| a.id.as_str()).collect(),
-        liked_playlists: app.saved.liked_playlists.iter().map(|p| p.id.as_str()).collect(),
-        followed: app.saved.followed_artists.iter().map(|a| a.id.as_str()).collect(),
-        played_artists: app
-            .saved
-            .played_artists
-            .iter()
-            .filter_map(|v| match &v.place {
-                crate::app::Place::Artist(id) => Some((id.as_str(), v.count)),
-                _ => None,
-            })
-            .collect(),
-        recent_songs: app.saved.recent.iter().take(50).map(|t| t.id.as_str()).collect(),
-    };
+    let lib = app.taste(&ctx);
     let mut items: Vec<Suggestion> = vec![];
     if q.is_empty() {
         for r in &app.saved.recent_searches {

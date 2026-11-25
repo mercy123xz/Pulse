@@ -424,6 +424,10 @@ pub struct Saved {
     pub artist_ids: HashMap<String, String>,
     /// What you searched for lately, newest first.
     pub recent_searches: Vec<String>,
+    /// Artists like your top ones (artist id → how close), for ranking search, and when
+    /// they were looked up (see `taste::related`).
+    pub taste_related: Vec<(String, f64)>,
+    pub taste_related_at: u64,
     /// The queue when Pulse was closed, where in it you were, and how far into the song.
     pub last_queue: Vec<Track>,
     pub last_queue_pos: usize,
@@ -476,6 +480,8 @@ impl Default for Saved {
             setup_done: false,
             artist_ids: HashMap::new(),
             recent_searches: vec![],
+            taste_related: vec![],
+            taste_related_at: 0,
             last_queue: vec![],
             last_queue_pos: 0,
             last_position: 0.0,
@@ -1113,6 +1119,10 @@ pub struct App {
     views_tx: Sender<(String, Option<(String, u64)>)>,
     views_rx: Receiver<(String, Option<(String, u64)>)>,
     genre_rx: Option<Receiver<(String, Option<Vec<String>>)>>,
+    /// Your taste for ranking search, what it was built from, and related artists on the way.
+    taste: Arc<crate::taste::Taste>,
+    taste_key: u64,
+    related_rx: Option<Receiver<Vec<(String, f64)>>>,
     /// Albums whose genres couldn't be looked up this time (offline, Deezer busy).
     genre_failed: HashSet<String>,
     /// Said once the window is up (the library had to be recovered).
@@ -1272,6 +1282,9 @@ impl App {
             views_tx,
             views_rx,
             genre_rx: None,
+            taste: Arc::default(),
+            taste_key: 0,
+            related_rx: None,
             intro: None,
             artist_alias: HashMap::new(),
             picker: None,
@@ -1693,7 +1706,10 @@ impl App {
                 let genre = self.chart_genre.0;
                 Box::new(move || deezer::chart_tracks(genre).map(Page::Tracks))
             }
-            Route::Search(q) => Box::new(move || deezer::search(&q).map(Page::Search)),
+            Route::Search(q) => {
+                let taste = self.taste(ctx);
+                Box::new(move || deezer::search(&q).map(|r| Page::Search(taste.rerank(&q, r))))
+            }
             Route::Playlist(id) => Box::new(move || deezer::playlist(&id).map(|(info, tracks)| Page::Playlist { info, tracks })),
             Route::Album(id) => Box::new(move || deezer::album(&id).map(|(info, tracks)| Page::Album { info, tracks })),
             Route::Artist(id) => Box::new(move || deezer::artist_page(&id).map(Page::Artist)),
@@ -2462,6 +2478,42 @@ impl App {
         if !s.show_local_files && self.route == Route::LocalFiles {
             self.navigate(Route::Home, ctx);
         }
+    }
+
+    /// Your taste, for ranking search (see `taste`). Rebuilt only when what it's made from
+    /// changed; related artists are looked up in the background once a day.
+    pub fn taste(&mut self, ctx: &egui::Context) -> Arc<crate::taste::Taste> {
+        if let Some(rx) = &self.related_rx
+            && let Ok(related) = rx.try_recv()
+        {
+            self.related_rx = None;
+            if related.is_empty() {
+                // Nothing found (offline): try again in an hour, not in a loop.
+                self.saved.taste_related_at = now_unix().saturating_sub(crate::taste::RELATED_EVERY - 3600);
+            } else {
+                self.saved.taste_related = related;
+            }
+        }
+        let key = crate::taste::fingerprint(&self.saved);
+        if key != self.taste_key {
+            self.taste_key = key;
+            self.taste = Arc::new(crate::taste::Taste::build(&self.saved, now_unix()));
+        }
+        let now = now_unix();
+        if self.related_rx.is_none() && now.saturating_sub(self.saved.taste_related_at) >= crate::taste::RELATED_EVERY {
+            let top = self.taste.top_artists(crate::taste::RELATED_FROM);
+            if !top.is_empty() {
+                self.saved.taste_related_at = now;
+                let (tx, rx) = channel();
+                self.related_rx = Some(rx);
+                let ctx = ctx.clone();
+                std::thread::spawn(move || {
+                    let _ = tx.send(crate::taste::related(&top));
+                    ctx.request_repaint();
+                });
+            }
+        }
+        self.taste.clone()
     }
 
     /// Looks up genres for the albums in `tracks` that aren't known yet (in the background).

@@ -31,6 +31,7 @@ mod share;
 mod single;
 mod soundcloud;
 mod suggest;
+mod taste;
 mod tidal;
 mod theme;
 mod themes;

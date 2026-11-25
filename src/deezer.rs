@@ -894,23 +894,26 @@ pub fn rank_songs(q: &str, list: Vec<Track>) -> Vec<Track> {
             None => out.push(t),
         }
     }
-    // How well a song matches what was typed: 2 every word typed is in its title or
-    // artist and the whole title was typed, 1 every word, 0 otherwise.
     let typed = words(q);
     let typed: Vec<&str> = typed.split_whitespace().collect();
-    let tier = |t: &Track| {
-        let text = words(&format!("{} {}", t.title, t.all_artists()));
-        let all = !typed.is_empty() && typed.iter().all(|w| text.contains(&format!(" {w} ")));
-        let title = norm(&core_title(&t.title));
-        let whole = !title.is_empty() && norm(q).contains(&title);
-        u8::from(all) + u8::from(all && whole)
-    };
+    let tier = |t: &Track| song_tier(&typed, q, t);
     // Stable: Deezer's own order among equals.
     out.sort_by_key(|t| {
         let tr = tier(t);
         (std::cmp::Reverse(tr), std::cmp::Reverse(if tr == 2 { t.rank } else { 0 }))
     });
     out
+}
+
+/// How well a song matches what was typed (`typed`: the words of `q`): 2 every word typed
+/// is in its title or artist and the whole title was typed, 1 every word, 0 otherwise.
+pub fn song_tier(typed: &[&str], q: &str, t: &Track) -> u8 {
+    use crate::youtube::{core_title, norm, words};
+    let text = words(&format!("{} {}", t.title, t.all_artists()));
+    let all = !typed.is_empty() && typed.iter().all(|w| text.contains(&format!(" {w} ")));
+    let title = norm(&core_title(&t.title));
+    let whole = !title.is_empty() && norm(q).contains(&title);
+    u8::from(all) + u8::from(all && whole)
 }
 
 pub fn search(q: &str) -> Result<SearchResults, String> {
