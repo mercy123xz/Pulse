@@ -1538,6 +1538,8 @@ fn search(app: &mut App, ui: &mut Ui, q: &str) {
         let all = filter == 0;
 
         let top_artist = r.artists.first().filter(|a| crate::deezer::name_match(&a.name, &query) >= 2 && !crate::deezer::cover_act(&a.name));
+        // A song of yours with the title you typed beats an artist who shares the name.
+        let top_artist = top_artist.filter(|a| r.tracks.first().is_none_or(|t| !app.taste(&ctx).song_beats_artist(&query, t, a)));
         let top_fans = top_artist.map_or(0, |a| a.fans);
         let artists: Vec<ArtistInfo> = r.artists.iter().filter(|a| {
             if crate::deezer::cover_act(&a.name) { return false; }

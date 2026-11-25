@@ -25,6 +25,8 @@ pub struct Taste {
     pub liked_playlists: HashSet<String>,
     pub followed: HashSet<String>,
     pub recent_songs: HashSet<String>,
+    /// Songs in your own playlists.
+    pub playlist_songs: HashSet<String>,
     /// Artist id → how much you like them (0 to 2).
     artists: HashMap<String, f64>,
     /// Album id → played or liked (0 to 1).
@@ -53,6 +55,7 @@ impl Taste {
             liked_playlists: s.liked_playlists.iter().map(|p| p.id.clone()).collect(),
             followed: s.followed_artists.iter().map(|a| a.id.clone()).collect(),
             recent_songs: s.recent.iter().map(|x| x.id.clone()).collect(),
+            playlist_songs: s.playlists.iter().flat_map(|p| p.tracks.iter().map(|x| x.id.clone())).collect(),
             ..Default::default()
         };
 
@@ -79,6 +82,10 @@ impl Taste {
         }
         for x in &s.recent {
             add(&x.artist.id, 0.05);
+        }
+        // Artists in your playlists: a song you put there counts, a few of them more.
+        for x in s.playlists.iter().flat_map(|p| &p.tracks) {
+            add(&x.artist.id, 0.2);
         }
         for (id, w) in &s.taste_related {
             let e = t.artists.entry(id.clone()).or_default();
@@ -147,10 +154,23 @@ impl Taste {
         if self.recent_songs.contains(&t.id) {
             s += 1.0;
         }
+        if self.playlist_songs.contains(&t.id) {
+            s += 1.5;
+        }
         if let Some(a) = &t.album {
             s += 0.5 * self.album(&a.id) + 0.5 * self.genre(&a.id);
         }
         s
+    }
+
+    /// Whether the search page's top result should be the first song, not the artist whose
+    /// name was typed: the whole song title was typed, and the song is more yours than
+    /// that artist is (in your playlists, liked, played; an artist you follow stays), so "flying dutchman" finds your
+    /// song, not an artist who happens to share its name.
+    pub fn song_beats_artist(&self, q: &str, song: &Track, artist: &ArtistInfo) -> bool {
+        let typed = crate::youtube::words(q);
+        let typed: Vec<&str> = typed.split_whitespace().collect();
+        crate::deezer::song_tier(&typed, q, song) == 2 && self.song(song) >= 1.0 && self.song(song) > self.artist(&artist.id) && !self.followed.contains(&artist.id)
     }
 
     fn playlist(&self, p: &PlaylistInfo) -> f64 {
@@ -213,6 +233,7 @@ pub fn fingerprint(s: &Saved) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
     let first = |v: &[Visit]| v.first().map(|x| (x.count, x.last));
+    (s.playlists.len(), s.playlists.iter().map(|p| p.tracks.len()).sum::<usize>()).hash(&mut h);
     (s.liked.len(), s.liked.first().map(|t| &t.id), s.recent.first().map(|t| &t.id), s.recent.len()).hash(&mut h);
     (first(&s.played_artists), first(&s.played_albums), s.followed_artists.len(), s.followed_artists.first().map(|a| &a.id)).hash(&mut h);
     (s.liked_albums.len(), s.liked_playlists.len(), s.album_genres.len(), s.taste_related.len(), s.taste_related_at).hash(&mut h);
@@ -306,6 +327,28 @@ mod tests {
         // Without the follow, Deezer's order stays.
         let r = Taste::default().rerank("tyler", SearchResults { artists: vec![artist("big", "Tyler, The Creator", 9_000_000), artist("small", "Tyler", 900)], ..Default::default() });
         assert_eq!(r.artists[0].id, "big");
+    }
+
+    #[test]
+    fn your_playlist_song_beats_an_artist_with_the_same_name() {
+        let now = 2_000_000_000;
+        let mut s = Saved::default();
+        let mut pl = crate::app::LocalPlaylist::default();
+        pl.tracks = vec![song("s", "Flying Dutchman", "7", "Bleood", 100)];
+        s.playlists = vec![pl];
+        let taste = Taste::build(&s, now);
+        let mine = song("s", "Flying Dutchman", "7", "Bleood", 100);
+        let other = song("o", "Flying Dutchman", "8", "Someone", 900_000);
+        let namesake = artist("1", "The Flying Dutchman", 5_000);
+        assert!(taste.song_beats_artist("flying dutchman", &mine, &namesake));
+        assert!(!taste.song_beats_artist("flying dutchman", &other, &namesake), "a song you don't know doesn't beat the artist");
+        // Typing only part of the title doesn't count as asking for the song.
+        assert!(!taste.song_beats_artist("flying", &mine, &namesake));
+        // Following the artist that was named keeps the artist on top.
+        let mut s2 = Saved::default();
+        s2.playlists = vec![crate::app::LocalPlaylist { tracks: vec![mine.clone()], ..Default::default() }];
+        s2.followed_artists = vec![namesake.clone()];
+        assert!(!Taste::build(&s2, now).song_beats_artist("flying dutchman", &mine, &namesake));
     }
 
     #[test]
