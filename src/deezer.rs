@@ -849,7 +849,9 @@ fn without_tributes(q: &str, list: Vec<Track>, artists: &[ArtistInfo]) -> Vec<Tr
             let credited = own.clone() + &norm(&t.title);
             // Named after the artist but not by them: a tribute. And when the search names
             // an artist, only their songs (or songs crediting them).
-            !names.iter().any(|n| title.contains(n.as_str()) && !own.contains(n.as_str()))
+            // A song with exactly the artist's name as its title is a song, not a tribute
+            // ("Brag" by ericdoa, with an artist called Brag).
+            !names.iter().any(|n| title.contains(n.as_str()) && title != *n && !own.contains(n.as_str()))
                 && (names.is_empty() || names.iter().any(|n| credited.contains(n.as_str())))
         })
         .collect()
@@ -1946,6 +1948,11 @@ mod matching_tests {
         ];
         let ids: Vec<String> = without_tributes("firework katy perry", list, &artists).into_iter().map(|t| t.id).collect();
         assert_eq!(ids, vec!["dz:2", "dz:3"]);
+        // A song titled exactly like an artist stays: "Brag" by ericdoa, next to an artist Brag.
+        let artists = vec![ArtistInfo { id: "1".into(), name: "Brag".into(), ..Default::default() }];
+        let list = vec![t(1, "Brag", "ericdoa", "5", 120, 10), t(2, "Brag", "Brag", "1", 200, 5), t(3, "Brag (Brag Tribute)", "Cover Guy", "9", 200, 1)];
+        let ids: Vec<String> = without_tributes("brag", list, &artists).into_iter().map(|t| t.id).collect();
+        assert_eq!(ids, vec!["dz:1", "dz:2"]);
     }
 
     #[test]
