@@ -42,8 +42,9 @@ pub fn lyrics_page(app: &mut App, ui: &mut Ui) {
         artwork(ui, r, t.art_small(), r_sm());
         ui.vertical(|ui| {
             ui.add_space(6.0);
-            ui.label(RichText::new(&t.title).font(heavy(20.0)).color(pal().text));
-            ui.label(RichText::new(t.all_artists()).font(regular(13.0)).color(pal().text_muted));
+            // Room for the text options on the right.
+            let w = (ui.available_width() - 220.0).max(80.0);
+            song_links(app, ui, &t, heavy(20.0), regular(13.0), w);
         });
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             text_options(app, ui);
@@ -81,8 +82,8 @@ pub fn lyrics_panel(app: &mut App, ui: &mut Ui) {
         ui.vertical(|ui| {
             ui.set_width(ui.available_width());
             ui.add_space(2.0);
-            ui.add(egui::Label::new(RichText::new(&t.title).font(semi(13.5)).color(pal().text)).truncate());
-            ui.add(egui::Label::new(RichText::new(t.all_artists()).font(regular(12.0)).color(pal().text_muted)).truncate());
+            let w = ui.available_width();
+            song_links(app, ui, &t, semi(13.5), regular(12.0), w);
         });
     });
     ui.add_space(4.0);
@@ -108,6 +109,27 @@ pub fn lyrics_panel(app: &mut App, ui: &mut Ui) {
         lyrics_body(app, ui, &t, size, "panel", follow);
         ui.add_space(40.0);
     });
+}
+
+/// The song's title (opens its album, like a title anywhere else) and its artists (open
+/// their pages), as links.
+fn song_links(app: &mut App, ui: &mut Ui, t: &Track, title: egui::FontId, artists: egui::FontId, max_w: f32) {
+    let ctx = ui.ctx().clone();
+    let id = ui.id();
+    let size = one_line(ui, &t.title, title.clone(), pal().text, max_w).size();
+    let (r, _) = ui.allocate_exact_size(size, Sense::hover());
+    if link_text(ui, id.with("lyrics_title"), r.min, &t.title, title, pal().text, max_w).clicked() {
+        app.open_song(t, &ctx);
+    }
+    let size = one_line(ui, &t.all_artists(), artists.clone(), pal().text_muted, max_w).size();
+    let (r, _) = ui.allocate_exact_size(size, Sense::hover());
+    let (main, feat) = artist_links(ui, id.with("lyrics_artists"), r.min, t, artists, pal().text_muted, max_w);
+    if main.clicked() {
+        app.open_artist(t, &ctx);
+    }
+    if let Some(a) = feat {
+        app.open_artist_ref(&a, &ctx);
+    }
 }
 
 /// Text size (A−/A/A+) and alignment.
@@ -157,10 +179,7 @@ fn lyrics_body(app: &mut App, ui: &mut Ui, t: &Track, size: f32, place: &str, fo
             return;
         }
         Some(Err(e)) if e.is_empty() => {
-            if notice(ui, compact, icon::MICROPHONE_STAGE, "No lyrics for this song yet", "LRCLIB doesn't have them yet. Genius might.", Some("Open on Genius"))
-            {
-                open_genius(&ctx, t);
-            }
+            notice(ui, compact, icon::MICROPHONE_STAGE, "No lyrics for this song yet", "LRCLIB doesn't have them yet.", None);
             return;
         }
         Some(Err(e)) => {

@@ -7,7 +7,7 @@ description = "A fast, native music player written in Rust: any song, with info 
 [dependencies]
 # Window + UI
 ron = "0.12"
-eframe = { version = "0.36", default-features = false, features = ["accesskit", "default_fonts", "glow", "persistence", "wayland", "x11"] }
+eframe = { version = "0.36", default-features = false, features = ["accesskit", "default_fonts", "glow", "links", "persistence", "wayland", "x11"] }
 egui = "0.36"
 # Loads album art straight from URLs (ui.image("https://..."))
 egui_extras = { version = "0.36", features = ["image", "file"] }
@@ -40,6 +40,7 @@ ring = { version = "0.17", default-features = false }
 # proper graphics driver, so Pulse opens everywhere with nothing extra to install.
 [target.'cfg(windows)'.dependencies]
 eframe = { version = "0.36", default-features = false, features = ["wgpu"] }
+# "links" (above) opens links in the browser: without it every link in Pulse did nothing.
 rfd = "0.18.0"
 # The window handle, to paint Windows' title bar in the theme's colours (titlebar.rs).
 raw-window-handle = "0.6"

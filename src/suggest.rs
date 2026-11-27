@@ -101,14 +101,9 @@ pub fn popular(typed: &str) -> Vec<String> {
 /// albums, songs and playlists, best first.
 pub fn picks(typed: &str, r: &SearchResults, lib: &Library, max: usize) -> Vec<Pick> {
     let mut out = vec![];
-    // The top artist: ranked by name and fans already; artists you follow or play win ties.
+    // The top artist: in search's order already; artists you follow or play move up.
     let mut artists: Vec<&ArtistInfo> = r.artists.iter().filter(|a| name_match(&a.name, typed) >= 2).collect();
-    let artist_score = |a: &ArtistInfo| {
-        let mut s = ((a.fans + 1) as f64).log10();
-        s += crate::taste::ARTIST_WEIGHT * lib.artist(&a.id);
-        s + name_match(&a.name, typed) as f64
-    };
-    artists.sort_by(|a, b| artist_score(b).total_cmp(&artist_score(a)));
+    artists.sort_by_key(|a| std::cmp::Reverse(lib.artist_step(&a.id)));
     let top = artists.first().copied();
     if let Some(a) = top {
         out.push(Pick::Artist(a.clone()));

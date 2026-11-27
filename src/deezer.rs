@@ -1162,6 +1162,12 @@ pub fn name_match(name: &str, typed: &str) -> u8 {
 /// weighed against how many fans the artist has. Typing "tyler" puts Tyler, The Creator
 /// (millions of fans) above a small artist called just "Tyler".
 pub fn rank_artists(typed: &str, mut artists: Vec<ArtistInfo>) -> Vec<ArtistInfo> {
+    // Deezer's own first result, when it has exactly the name typed, is who people mean:
+    // Deezer's order knows who is popular now and fans don't ("che": che has 3k fans,
+    // The Chemical Brothers 1.4M; same for "ian", "opium"). Unless it's a tiny namesake:
+    // Deezer sometimes leads with one ("Tyler", 373 fans).
+    // shortcut: a fixed 1,000-fan floor; compare with the others' fans if it misfires.
+    let deezer_first = artists.first().filter(|a| a.fans >= 1_000 && name_match(&a.name, typed) == 3).map(|a| a.id.clone());
     let score = |a: &ArtistInfo| {
         let m = match name_match(&a.name, typed) {
             3 => 3.0,
@@ -1173,6 +1179,10 @@ pub fn rank_artists(typed: &str, mut artists: Vec<ArtistInfo>) -> Vec<ArtistInfo
     };
     // Stable, so artists that score the same keep Deezer's order.
     artists.sort_by(|a, b| score(b).total_cmp(&score(a)));
+    if let Some(i) = deezer_first.and_then(|id| artists.iter().position(|a| a.id == id)) {
+        let a = artists.remove(i);
+        artists.insert(0, a);
+    }
     artists
 }
 
@@ -1814,12 +1824,12 @@ mod artist_ranking_tests {
 
     #[test]
     fn the_artist_you_most_likely_mean_comes_first() {
-        // The order Deezer might send them in.
+        // Deezer's real order (27 Nov 2026): Taylor Swift first, not an exact name.
         let tyler =
-            vec![a("Tyler", 2_100), a("Tyler Childers", 400_000), a("Steven Tyler", 90_000), a("Tyler, The Creator", 6_800_000), a("Bonnie Tyler", 1_200_000)];
+            vec![a("Taylor Swift", 12_800_000), a("Tyler, The Creator", 1_400_000), a("Bonnie Tyler", 602_000), a("Tyler", 2_100), a("Tyler Childers", 400_000)];
         assert_eq!(rank_artists("tyler", tyler)[0].name, "Tyler, The Creator");
 
-        let taylor = vec![a("Taylor", 900), a("Taylor Swift", 31_000_000), a("James Taylor", 700_000), a("Taylor Swift Tribute Band", 1_200)];
+        let taylor = vec![a("Taylor Swift", 31_000_000), a("Tyler, The Creator", 1_400_000), a("James Taylor", 700_000), a("Taylor", 900), a("Taylor Swift Tribute Band", 1_200)];
         let r = rank_artists("taylor", taylor);
         assert_eq!(names(&r)[..2], ["Taylor Swift", "James Taylor"]);
 
@@ -1833,6 +1843,10 @@ mod artist_ranking_tests {
         // A small artist with exactly the name typed beats a famous one that doesn't match.
         let r = rank_artists("Ivy", vec![a("Ariana Grande", 30_000_000), a("Ivy", 5_000)]);
         assert_eq!(r[0].name, "Ivy");
+
+        // Deezer puts the exact name first: trust it over fans (real order, 27 Nov 2026).
+        let che = vec![a("che", 3_034), a("Cher", 565_567), a("Kenny Chesney", 330_462), a("The Chemical Brothers", 1_460_567)];
+        assert_eq!(rank_artists("che", che)[0].name, "che");
     }
 
     #[test]

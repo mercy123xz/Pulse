@@ -12,9 +12,6 @@ use std::collections::{HashMap, HashSet};
 
 /// Related artists are looked up for this many of your top artists.
 pub const RELATED_FROM: usize = 10;
-/// How much liking an artist counts against their name match and fans (see `rerank_artists`):
-/// following someone (1) is worth about 10,000 times the fans.
-pub const ARTIST_WEIGHT: f64 = 4.0;
 /// How often related artists are looked up again.
 pub const RELATED_EVERY: u64 = 86_400;
 
@@ -136,6 +133,11 @@ impl Taste {
         self.artists.get(id).copied().unwrap_or(0.0)
     }
 
+    /// How much you like an artist, in steps (0: not known), for ordering artists.
+    pub fn artist_step(&self, id: &str) -> u8 {
+        step(self.artist(id))
+    }
+
     pub fn album(&self, id: &str) -> f64 {
         self.albums.get(id).copied().unwrap_or(0.0) + if self.liked_albums.contains(id) { 1.0 } else { 0.0 }
     }
@@ -190,13 +192,12 @@ impl Taste {
         r
     }
 
-    /// Among the artists whose name starts with what was typed (Deezer's order: name and
-    /// fans), the ones you follow and play move up, as the search box's top artist does.
+    /// Among the artists whose name starts with what was typed (in search's order, see
+    /// `deezer::rank_artists`), the ones you follow and play move up, as in the search box.
     fn rerank_artists(&self, q: &str, artists: &mut [ArtistInfo]) {
         let good: Vec<usize> = (0..artists.len()).filter(|&i| name_match(&artists[i].name, q) >= 2).collect();
         let mut picked: Vec<ArtistInfo> = good.iter().map(|&i| artists[i].clone()).collect();
-        let score = |a: &ArtistInfo| name_match(&a.name, q) as f64 + ((a.fans + 1) as f64).log10() + ARTIST_WEIGHT * self.artist(&a.id);
-        picked.sort_by(|a, b| score(b).total_cmp(&score(a)));
+        picked.sort_by_key(|a| std::cmp::Reverse(self.artist_step(&a.id)));
         for (slot, a) in good.into_iter().zip(picked) {
             artists[slot] = a;
         }
