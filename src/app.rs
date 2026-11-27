@@ -85,8 +85,8 @@ impl Page {
             Page::Tracks(t) => t.iter_mut().for_each(&mut f),
             Page::Search(r) => {
                 r.tracks.iter_mut().for_each(&mut f);
-                if let Some((_, _, t)) = &mut r.around {
-                    t.iter_mut().for_each(&mut f);
+                if let Some(a) = &mut r.around {
+                    a.songs_like.iter_mut().chain(&mut a.top).for_each(&mut f);
                 }
             }
             Page::Playlist { tracks, .. } | Page::Album { tracks, .. } => tracks.iter_mut().for_each(&mut f),
@@ -1708,7 +1708,7 @@ impl App {
             }
             Route::Search(q) => {
                 let taste = self.taste(ctx);
-                Box::new(move || deezer::search(&q).map(|r| Page::Search(taste.rerank(&q, r))))
+                Box::new(move || deezer::search(&q).map(|r| Page::Search(taste.finish(&q, r))))
             }
             Route::Playlist(id) => Box::new(move || deezer::playlist(&id).map(|(info, tracks)| Page::Playlist { info, tracks })),
             Route::Album(id) => Box::new(move || deezer::album(&id).map(|(info, tracks)| Page::Album { info, tracks })),

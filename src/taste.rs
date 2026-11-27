@@ -26,6 +26,9 @@ pub struct Taste {
     pub playlist_songs: HashSet<String>,
     /// Artist id → how much you like them (0 to 2).
     artists: HashMap<String, f64>,
+    /// Artists you know yourself (followed, played, liked, in your recent songs or
+    /// playlists; not related ones): id → artist.
+    known: HashMap<String, ArtistInfo>,
     /// Album id → played or liked (0 to 1).
     albums: HashMap<String, f64>,
     /// Genre → share of your music (0 to 1), and the genres of albums known so far.
@@ -92,6 +95,24 @@ impl Taste {
             *n = n.min(2.0);
             !id.is_empty()
         });
+        for a in &s.followed_artists {
+            t.known.insert(a.id.clone(), a.clone());
+        }
+        let mut know = |id: &str, name: &str, picture: &Option<String>| {
+            if crate::deezer::is_deezer_id(id) && !name.is_empty() {
+                t.known.entry(id.to_string()).or_insert_with(|| ArtistInfo { id: id.into(), name: name.into(), picture: picture.clone(), ..Default::default() });
+            }
+        };
+        for v in &s.played_artists {
+            if let Place::Artist(id) = &v.place {
+                know(id, &v.title, &v.image);
+            }
+        }
+        for x in s.liked.iter().chain(&s.recent).chain(s.playlists.iter().flat_map(|p| &p.tracks)) {
+            for a in std::iter::once(&x.artist).chain(&x.featured) {
+                know(&a.id, &a.name, &a.picture);
+            }
+        }
 
         // Albums: liked, or played (more plays, more).
         let album_plays: Vec<(&str, f64)> = s.played_albums.iter().filter_map(|v| match &v.place {
@@ -133,9 +154,18 @@ impl Taste {
         self.artists.get(id).copied().unwrap_or(0.0)
     }
 
-    /// How much you like an artist, in steps (0: not known), for ordering artists.
-    pub fn artist_step(&self, id: &str) -> u8 {
-        step(self.artist(id))
+    /// For ordering artists: how much you like them, then whether you know them at all
+    /// (one song in a playlist is enough to beat a namesake you've never played).
+    pub fn artist_key(&self, id: &str) -> (u8, bool) {
+        (step(self.artist(id)), self.known.contains_key(id))
+    }
+
+    /// Adds the artists you know whose name starts with what was typed and that aren't in
+    /// `artists` yet: Deezer's search can miss them ("eric" doesn't list ericdoa).
+    pub fn add_known(&self, q: &str, artists: &mut Vec<ArtistInfo>) {
+        let mut add: Vec<&ArtistInfo> = self.known.values().filter(|a| name_match(&a.name, q) >= 2 && !artists.iter().any(|b| b.id == a.id)).collect();
+        add.sort_by(|a, b| self.artist(&b.id).total_cmp(&self.artist(&a.id)).then(a.id.cmp(&b.id)));
+        artists.extend(add.into_iter().cloned());
     }
 
     pub fn album(&self, id: &str) -> f64 {
@@ -188,8 +218,45 @@ impl Taste {
         sort_runs(&mut r.tracks, |t| crate::deezer::song_tier(&typed, q, t), |t| self.song(t));
         sort_runs(&mut r.albums, |a| album_tier(q, a), |a| self.album(&a.id) + 0.5 * self.artist(&a.artist.id));
         sort_runs(&mut r.playlists, |p| name_match(&p.title, q), |p| self.playlist(p));
+        self.add_known(q, &mut r.artists);
         self.rerank_artists(q, &mut r.artists);
         r
+    }
+
+    /// The search page, like Spotify's: results in your order (`rerank`), then the top
+    /// artist (an artist you play beats a namesake, a song of yours with the title typed
+    /// beats both) with their songs first, yours first among them, and artists like them
+    /// right after them. Looks the artist up when it isn't the one Deezer put first.
+    pub fn finish(&self, q: &str, r: SearchResults) -> SearchResults {
+        let mut r = self.rerank(q, r);
+        let top = r.artists.first().filter(|a| name_match(&a.name, q) >= 2 && !crate::deezer::cover_act(&a.name));
+        let top = top.filter(|a| r.tracks.first().is_none_or(|t| !self.song_beats_artist(q, t, a))).cloned();
+        let Some(top) = top else {
+            r.around = None;
+            return r;
+        };
+        if r.around.as_ref().is_none_or(|a| a.artist.id != top.id) {
+            r.around = Some(crate::deezer::around_artist(&top));
+        }
+        let around = r.around.as_ref().expect("set above");
+        self.wrap_around(q, &mut r.tracks, &mut r.artists, around);
+        r
+    }
+
+    /// The ordering part of `finish` (no network, for tests).
+    fn wrap_around(&self, q: &str, tracks: &mut Vec<Track>, artists: &mut Vec<ArtistInfo>, around: &crate::deezer::Around) {
+        let mut songs = around.top.clone();
+        songs.sort_by_key(|t| std::cmp::Reverse(step(self.song(t))));
+        tracks.retain(|t| !songs.iter().any(|s| s.id == t.id));
+        songs.append(tracks);
+        *tracks = songs;
+        // Deezer's loose matches ("yeat" → H.E.A.T) only when their name matches.
+        let mut row = vec![around.artist.clone()];
+        row.extend(around.related.iter().cloned());
+        row.extend(artists.iter().filter(|a| name_match(&a.name, q) >= 1).cloned());
+        let mut seen = HashSet::new();
+        row.retain(|a| seen.insert(a.id.clone()));
+        *artists = row;
     }
 
     /// Among the artists whose name starts with what was typed (in search's order, see
@@ -197,7 +264,7 @@ impl Taste {
     fn rerank_artists(&self, q: &str, artists: &mut [ArtistInfo]) {
         let good: Vec<usize> = (0..artists.len()).filter(|&i| name_match(&artists[i].name, q) >= 2).collect();
         let mut picked: Vec<ArtistInfo> = good.iter().map(|&i| artists[i].clone()).collect();
-        picked.sort_by_key(|a| std::cmp::Reverse(self.artist_step(&a.id)));
+        picked.sort_by_key(|a| std::cmp::Reverse(self.artist_key(&a.id)));
         for (slot, a) in good.into_iter().zip(picked) {
             artists[slot] = a;
         }
@@ -350,6 +417,41 @@ mod tests {
         s2.playlists = vec![crate::app::LocalPlaylist { tracks: vec![mine.clone()], ..Default::default() }];
         s2.followed_artists = vec![namesake.clone()];
         assert!(!Taste::build(&s2, now).song_beats_artist("flying dutchman", &mine, &namesake));
+    }
+
+    #[test]
+    fn an_artist_you_know_is_found_and_beats_a_bigger_namesake() {
+        let now = 2_000_000_000;
+        let mut s = Saved::default();
+        let mut p = crate::app::LocalPlaylist::default();
+        p.tracks = vec![song("9", "Brag", "67859242", "ericdoa", 1)];
+        s.playlists = vec![p];
+        let taste = Taste::build(&s, now);
+        // Deezer's "eric" results don't have ericdoa.
+        let r = SearchResults { artists: vec![artist("192", "Eric Clapton", 2_820_479), artist("30", "Eric Prydz", 210_027)], ..Default::default() };
+        let r = taste.rerank("eric", r);
+        assert_eq!(r.artists[0].name, "ericdoa");
+        assert_eq!(r.artists[1].name, "Eric Clapton");
+    }
+
+    #[test]
+    fn the_top_artists_songs_and_similar_artists_come_first() {
+        let mut s = Saved::default();
+        s.liked = vec![song("liked", "Liked One", "1", "OsamaSon", 1)];
+        let taste = Taste::build(&s, 2_000_000_000);
+        let around = crate::deezer::Around {
+            artist: artist("1", "OsamaSon", 21_389),
+            related: vec![artist("2", "Nettspend", 13_568)],
+            top: vec![song("pop", "Popular", "1", "OsamaSon", 9), song("liked", "Liked One", "1", "OsamaSon", 1)],
+            ..Default::default()
+        };
+        let mut tracks = vec![song("x", "Osama", "5", "Zakes Bantwini", 1)];
+        let mut artists = vec![artist("1", "OsamaSon", 21_389), artist("6", "Osama", 1_355), artist("7", "Heatwave", 14_678)];
+        taste.wrap_around("osama", &mut tracks, &mut artists, &around);
+        let ids: Vec<&str> = tracks.iter().map(|t| t.id.as_str()).collect();
+        assert_eq!(ids, ["liked", "pop", "x"], "their songs, yours first, then the rest");
+        let names: Vec<&str> = artists.iter().map(|a| a.name.as_str()).collect();
+        assert_eq!(names, ["OsamaSon", "Nettspend", "Osama"], "a loose match (Heatwave) is gone");
     }
 
     #[test]

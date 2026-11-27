@@ -172,13 +172,33 @@ pub struct SearchResults {
     pub artists: Vec<ArtistInfo>,
     pub albums: Vec<AlbumInfo>,
     pub playlists: Vec<PlaylistInfo>,
-    /// When the top result is an artist: who their listeners also play, and songs like theirs.
-    pub around: Option<(String, Vec<ArtistInfo>, Vec<Track>)>,
+    /// The top result, when it's an artist, and what goes around it.
+    pub around: Option<Around>,
     /// When the search names a song and its artist ("osamason baghdad"): the song's title
     /// and songs by other artists like it.
     pub like_song: Option<(String, Vec<Track>)>,
     /// Pulse users whose names start with what was typed.
     pub users: Vec<crate::account::User>,
+}
+
+/// The artist a search is about: who their listeners also play, songs like theirs, and
+/// their own most popular songs.
+#[derive(Debug, Clone, Default)]
+pub struct Around {
+    pub artist: ArtistInfo,
+    pub related: Vec<ArtistInfo>,
+    pub songs_like: Vec<Track>,
+    pub top: Vec<Track>,
+}
+
+/// What goes around `a` in a search (three requests side by side).
+pub fn around_artist(a: &ArtistInfo) -> Around {
+    std::thread::scope(|s| {
+        let related = s.spawn(|| related_artists(&a.id, 12));
+        let top = s.spawn(|| artist_top(&a.id, 10).unwrap_or_default());
+        let songs_like = songs_like_artist(&a.id, &a.name);
+        Around { artist: a.clone(), related: related.join().unwrap_or_default(), songs_like, top: top.join().unwrap_or_default() }
+    })
 }
 
 #[derive(Debug, Clone, Default)]
@@ -673,7 +693,9 @@ pub fn split_artists(artists: &str) -> (String, Vec<String>) {
     // it can cut the original ("İ" and a few others change length when lowercased).
     let lower = artists.to_ascii_lowercase();
     let mut cuts = vec![];
-    for m in [",", " feat. ", " feat ", " ft. ", " featuring ", " with "] {
+    // Not " with ": it's in band names ("Colliding With Mars"); "(with X)" in a title is
+    // read by `featured_in_title`.
+    for m in [",", " feat. ", " feat ", " ft. ", " featuring "] {
         let mut from = 0;
         while let Some(i) = lower[from..].find(m) {
             cuts.push((from + i, m.len()));
@@ -1114,14 +1136,7 @@ fn search_once(q: &str) -> Result<SearchResults, String> {
     let mut ranked = rank_artists(q, artists.data.into_iter().map(ArtistInfo::from).collect());
     ranked.truncate(12);
     // Searched for an artist: also who their listeners play, and songs like theirs.
-    let around = ranked.first().filter(|a| name_match(&a.name, q) >= 2).map(|a| {
-        let (related, songs) = std::thread::scope(|s| {
-            let related = s.spawn(|| related_artists(&a.id, 12));
-            let songs = songs_like_artist(&a.id, &a.name);
-            (related.join().unwrap_or_default(), songs)
-        });
-        (a.name.clone(), related, songs)
-    });
+    let around = ranked.first().filter(|a| name_match(&a.name, q) >= 2 && !cover_act(&a.name)).map(around_artist);
     Ok(SearchResults {
         tracks: without_tributes(q, rank_songs(q, tracks(t?)), &ranked),
         artists: ranked,
@@ -1199,7 +1214,8 @@ pub fn find_artist(name: &str) -> Result<Option<String>, String> {
     }
     let found: List<DzArtist> = get("/search/artist", &[("q", &clean), ("limit", "10")])?;
     let ranked = rank_artists(&clean, found.data.into_iter().map(ArtistInfo::from).collect());
-    Ok(ranked.into_iter().find(|a| name_match(&a.name, &clean) >= 2).map(|a| a.id))
+    // The exact name: one that only starts with it is someone else ("Mars" → Marshmello).
+    Ok(ranked.into_iter().find(|a| name_match(&a.name, &clean) == 3).map(|a| a.id))
 }
 
 impl SearchResults {
@@ -1881,6 +1897,7 @@ mod matching_tests {
         assert_eq!(split_artists("Nelly, City Spud"), ("Nelly".into(), vec!["City Spud".into()]));
         assert_eq!(split_artists("Nelly feat. City Spud"), ("Nelly".into(), vec!["City Spud".into()]));
         assert_eq!(split_artists("Simon & Garfunkel"), ("Simon & Garfunkel".into(), vec![]));
+        assert_eq!(split_artists("Colliding With Mars, brakence"), ("Colliding With Mars".into(), vec!["brakence".into()]));
         assert_eq!(featured_in_title("Ride Wit Me (feat. City Spud)"), vec!["City Spud".to_string()]);
         assert!(featured_in_title("Firework").is_empty());
     }

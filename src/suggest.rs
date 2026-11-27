@@ -102,9 +102,10 @@ pub fn popular(typed: &str) -> Vec<String> {
 pub fn picks(typed: &str, r: &SearchResults, lib: &Library, max: usize) -> Vec<Pick> {
     let mut out = vec![];
     // The top artist: in search's order already; artists you follow or play move up.
-    let mut artists: Vec<&ArtistInfo> = r.artists.iter().filter(|a| name_match(&a.name, typed) >= 2).collect();
-    artists.sort_by_key(|a| std::cmp::Reverse(lib.artist_step(&a.id)));
-    let top = artists.first().copied();
+    let mut artists: Vec<ArtistInfo> = r.artists.iter().filter(|a| name_match(&a.name, typed) >= 2).cloned().collect();
+    lib.add_known(typed, &mut artists);
+    artists.sort_by_key(|a| std::cmp::Reverse(lib.artist_key(&a.id)));
+    let top = artists.first();
     if let Some(a) = top {
         out.push(Pick::Artist(a.clone()));
     }

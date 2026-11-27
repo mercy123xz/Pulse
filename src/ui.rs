@@ -1537,9 +1537,8 @@ fn search(app: &mut App, ui: &mut Ui, q: &str) {
         ui.data_mut(|d| d.insert_temp(id, filter));
         let all = filter == 0;
 
-        let top_artist = r.artists.first().filter(|a| crate::deezer::name_match(&a.name, &query) >= 2 && !crate::deezer::cover_act(&a.name));
-        // A song of yours with the title you typed beats an artist who shares the name.
-        let top_artist = top_artist.filter(|a| r.tracks.first().is_none_or(|t| !app.taste(&ctx).song_beats_artist(&query, t, a)));
+        // Chosen with your taste when the search ran (`Taste::finish`).
+        let top_artist = r.around.as_ref().map(|a| &a.artist);
         let top_fans = top_artist.map_or(0, |a| a.fans);
         let artists: Vec<ArtistInfo> = r.artists.iter().filter(|a| {
             if crate::deezer::cover_act(&a.name) { return false; }
@@ -1596,19 +1595,13 @@ fn search(app: &mut App, ui: &mut Ui, q: &str) {
             // Numbered on from the four at the top.
             tracks_block_ex(app, ui, "search_more_tracks", &r.tracks[4..r.tracks.len().min(10)], false, 4);
         }
-        // Searched for an artist: who their listeners also play.
-        if let Some((name, related, _)) = &r.around
-            && (all || filter == 2)
-            && !related.is_empty()
-        {
-            suggestion_row(app, ui, "search_also", &crate::deezer::Suggestion::AlsoListen(name.clone(), related.clone()));
-        }
-        // ...and songs by others that sound like theirs.
-        if let Some((name, _, songs)) = &r.around
+        // Searched for an artist (who their listeners play is in the artists row): songs by
+        // others that sound like theirs.
+        if let Some(a) = &r.around
             && (all || filter == 1)
-            && songs.len() >= 3
+            && a.songs_like.len() >= 3
         {
-            suggestion_row(app, ui, "search_like", &crate::deezer::Suggestion::SongsLike(name.clone(), songs.clone()));
+            suggestion_row(app, ui, "search_like", &crate::deezer::Suggestion::SongsLike(a.artist.name.clone(), a.songs_like.clone()));
         }
         for (n, title, list) in [(3, "Albums", &albums), (4, "EPs", &eps), (5, "Singles", &singles)] {
             if (all || filter == n) && !list.is_empty() {
